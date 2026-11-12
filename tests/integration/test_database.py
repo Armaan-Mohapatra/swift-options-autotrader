@@ -19,7 +19,7 @@ def test_migrations_are_idempotent_and_enable_wal(tmp_path):
         assert {
             "raw_events", "option_signals", "order_intents", "order_fills", "schema_migrations"
         } <= tables
-        assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 2
 
 
 def test_event_dedupe_and_order_idempotency_constraints(tmp_path):
