@@ -8,8 +8,8 @@
 - **P0-04 [CI_PASSED / LOCK_DEBT_#2] CI and supply chain:** Windows/Linux GitHub Actions Python matrix, lint, tests and heuristic scanner PASSED; full transitive lock and immutable SHA pins remain OPEN as issue #2. Acceptance: real green job conclusions with URLs.
 - **P1-01 Telegram MTProto read-only allowlisted ingestion:** edited/reply IDs, checkpoints, bounded queues, reconnect; sanitized fixtures; no trade interface.
 - **P1-02 Durable raw event store and deduplication:** event updates, replay guards, restart and backpressure tests.
-- **P2-01 Deterministic options-only/LOTTO parser:** verified exact contract, right, strike, expiration year, limit premium; ignore non-options.
-- **P2-02 Signal updates/exit matching:** no-add, Swift average metadata only, 100% exit on any sell, ambiguous ticker-only follow-up requires review.
+- **P2-01 [CI_PASSED / SYNTHETIC ONLY] Deterministic options-only/LOTTO parser:** exact contract grammar, right, strike, expiration hint and limit premium; real expiration year requires an independently verified instrument catalog (not yet connected); ignore non-options.
+- **P2-02 [CI_PASSED / SYNTHETIC ONLY] Signal updates/exit matching:** no-add, Swift average metadata only, 100% close request on any sell, ambiguous ticker-only follow-up requires review. Phase 3 must implement actual fills/execution.
 - **P3-01 Order state machine:** intent-before-write, idempotency, exact original limit, acceptance + 3600, no chase, all risk gates.
 - **P3-02 Paper broker and race tests:** accepted/partial/rejected/canceled states, cancel-fill race, stop/restart, repeat signals, seller reconciliation and safe exits.
 - **P4-01 Official MCP interface and read-only review:** actual documented auth protocol and tool schemas only; mock tests.

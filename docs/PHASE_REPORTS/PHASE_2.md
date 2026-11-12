@@ -1,42 +1,57 @@
-# Phase 2 — Swift parser and signal matching checkpoint
+# Phase 2 — Swift Trades interpreter and signal matching (2026-11-12)
 
-**Status:** IMPLEMENTED / LOCAL_TESTED / REMOTE_CI_PENDING / SYNTHETIC_ONLY / REQUIRES_LOCAL_AUTH.
+**Outcome: IMPLEMENTED / TESTED / CI_PASSED / SYNTHETIC_ONLY / REQUIRES_LOCAL_AUTH.** These labels mean the deterministic parser and durable matcher passed synthetic tests, **not** that live Swift messages were validated or real/paper trading was performed.
 
-## GitHub provenance (to be finalized after remote verification)
+## Verified provenance
 
 - Private repository: https://github.com/Armaan-Mohapatra/swift-options-autotrader
-- Branch: `codex/phase2-swift-parser`, based on Phase 1 `1705885eddebd14538b80027a6dd029a5d85da45`.
-- Stacked PR: pending new PR; Phase 1 PR #10 remains draft/unmerged.
-- Full Git commit: pending commit API response.
-- GitHub Actions Ubuntu/Windows results: pending.
+- Branch: `codex/phase2-swift-parser` based on Phase 1 checkpoint `1705885eddebd14538b80027a6dd029a5d85da45`.
+- Draft stacked PR #11: https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/11 ; base is `codex/phase1-telegram-ingest` (draft PR #10). Phase 0 PR #1 is also unmerged. Original `main` is untouched.
+- Last **independently CI-verified** code + normalized-snapshot commit: `32df698c14205263d3a821e69d2b733036a8821d`; subsequent documentation-only checkpoints may advance branch HEAD.
+- CI run: https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43291903449 — **SUCCESS, 4/4 jobs** on Windows and Ubuntu with Python 3.11 and 3.13.
+- Earlier CI runs: [43290631636](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43290631636) failed 14 inherited fixture assertions expecting only 2 migrations; [43291140483](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43291140483) failed a Ruff E501 line. Both defects were fixed. [43291404857](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43291404857) passed 207 tests/job, followed by the final snapshot-test run above.
 
-## Work delivered
+## Verified checks
 
-- Deterministic option-only `parse_message` grammar with exact `Decimal` premium, expiration hint, full contract right/strike and standard/LOTTO trade category. Unsupported/conflicting content goes to REVIEW_REQUIRED.
-- Strict `resolve_entry` checks yearless expiry against supplied verified catalog candidates; absent or multiple instruments cannot become eligible. Static catalog is synthetic-test-only, not a genuine broker contract check.
-- `SignalMatcher` links to the Phase 1 SQLite message/revision database and creates durable decisions, option signals, immutable source identities, message ancestry, average histories, idempotent full-close request markers and review queue. No order calls.
-- `0003_signal_linkage.sql` additive migration, `parse-replay` and `parse-health` CLI, 81 labeled synthetic cases and extensive unit/integration tests.
-- Changed entry edits/corrections require review; stale/recovered, duplicate and superseded messages never create late actions; follow-up averages cannot overwrite actual average fills.
+| OS | Python | pytest | Ruff / syntax / pinned dependency audit / secrets heuristic |
+| --- | --- | --- | --- |
+| Windows | 3.11 | **208 passed** | PASS |
+| Windows | 3.13 | **208 passed** | PASS |
+| Ubuntu Linux | 3.11 | **208 passed** | PASS |
+| Ubuntu Linux | 3.13 | **208 passed** | PASS |
 
-## Initial local verification
+**208 distinct tests; 832 executions; 0 failures or skips** in final GitHub run. Locked `uv` install, compilation, Python lint, license/lock inventory script and heuristic secret scan passed. No CI credentials. Heuristic scan is **not** a guarantee against all credential exposure.
 
-Locally reconstructed Phase 0 + Phase 2 test workspace: 158 tests passed, 0 failed, 0 skipped before final incremental test additions. This workspace does not contain the complete Phase 1 test suite; only remote CI can validate all three phases together. Local Ruff unavailable; GitHub CI will provide lint evidence. Updated total to be verified at final checkpoint.
+## Actual files and features
 
-Synthetic fixture classification benchmark: 81/81 (100% agreement with manually assigned in-sample labels; see `docs/SWIFT_PARSER_PHASE2.md`). This figure must **not** be reported as real Swift parser accuracy or trade accuracy.
+- `parser/patterns.py`, `parser/rules.py`: deterministic normalized option-entry schema; Decimal premium, explicit call/put, strike, expiration hint, original message ID and trade label. LOTTO treated normally. Non-options ignored. Competing contracts, contradictory instructions, unsupported dates/prices and invalid or missing information are review-required. Parser has no AI-based guesses.
+- `signals/lineage.py`: contract/catalog verification, stable signal identity, reply lineage, strict ambiguity handling, duplicate/restart/edit/recovered-message protection and monotonic metadata updates. Without verified instrument candidates, even syntactically valid entries are `INSTRUMENT_CATALOG_REQUIRED` reviews, never trade-eligible.
+- `database/migrations/0003_signal_linkage.sql`: additive SQLite tables for decisions, signal metadata, message links, Swift average audit trail, deduplicated 100%-close **requests** and review queue. Existing migrations remain immutable; `confirmed_avg_fill_price` is not overwritten.
+- `app.py`: count-only `parse-replay --limit N` and `parse-health` diagnostics; no broker imports, Telegram network activity or orders.
+- `tests/unit/test_swift_parser.py`, `tests/integration/test_signal_matching.py`, updated Phase 1 migration fixture and CLI/database tests, deterministic 81-example fixture generator and reproducible normalized-output snapshot test.
+- Documentation: `docs/SWIFT_PARSER_PHASE2.md`, `docs/PHASE_REPORTS/PHASE_2_PARSED_EXAMPLES.json`, `scripts/export_synthetic_parser_results.py`.
 
-## Operational safety
+## Synthetic classification evidence
 
-- No actual Telegram session, private Swift data, user computer, broker session or external API used.
-- `PAPER_ONLY=true`, `LIVE_ENABLED=false`, `ALLOW_BROKER_WRITES=false`, no simulated or live orders.
-- Signal exit status records only a **request**, not a verified sale; future Phase 3 must handle actual quantities, fills and cancel races.
-- Previously saved Phase 0/1 branches/PRs and original `main` untouched; Phase 2 is stacked and unmerged.
+**81/81 (100%) intent agreement on the intentionally designed and labeled synthetic fixture, NOT a real-world accuracy result.** By class: 20 ENTRY, 16 METADATA_ONLY, 16 CLOSE_100_PERCENT, 14 IGNORE_NON_OPTION and 15 REVIEW_REQUIRED. Full per-case normalized fields are at [PHASE_2_PARSED_EXAMPLES.json](PHASE_2_PARSED_EXAMPLES.json). Regenerate with `python scripts/export_synthetic_parser_results.py`; the snapshot test guards consistency.
 
-## Unverified and outstanding work
+Illustrative (all synthetic, not authenticated Swift messages):
 
-1. Supported grammar vs actual Swift paid messages: no authorized sample dataset; require separately reviewed real-message tests before trusting execution.
-2. Live option instrument listing/year validation: not available until verified Phase 4 read-only brokerage adapter; default parser-replay keeps entries in review.
-3. Human review workflow and actual trading state machine are future phases. Retried out-of-order unknown replies are not auto-resolved; they stay review-required.
-4. Remote CI links, passed/failed counts and final SHA must be independently verified and filled before claiming CI_PASSED.
-5. Independent signed provenance/SBOM/hermetic lock gaps remain issue #2; Phase 1 used pinned dependencies and Windows/Linux matrix.
+| Message | Parsed outcome | Safety effect |
+| --- | --- | --- |
+| `SPY 680C 11/13 @ 1.20` | ENTRY / SPY / CALL / strike 680 / hint 11-13 / 1.20 / STANDARD | Await verified listing/year before eligibility |
+| `SPY LOTTO 680C 11/13 @ .95` | ENTRY / LOTTO / exact Decimal .95 | Same rule as ordinary entries |
+| `SPY adding more, new avg .95` | METADATA_ONLY / Swift average .95 | No new buy; preserves fill-weighted cost |
+| `SPY SOLD HALF` or `SPY RUNNERS OUT` | CLOSE_100_PERCENT | Deduplicated full-close **request**, never a claimed fill |
+| `BUY 20 SHARES SPY` | IGNORE_NON_OPTION | No position or order |
+| Ticker-only update with two SPY signals | REVIEW_REQUIRED | Never pick a contract by ticker alone |
 
-**Stop after Phase 2.** Do not merge, deploy, authorize accounts or trade. Next separately authorized phase is Phase 3, durable PAPER-only order state machine.
+## Hard execution boundary and remaining blockers
+
+- **No actual Swift grammar validation**: the synthetic benchmark cannot estimate precision/recall, false-positive rate or profitability on real paid-channel messages. Actual timestamp/edited/reply behavior remains untested in the intended authorized environment.
+- **No real option-chain verification**: entries are not eligible in `parse-replay` without a verified instrument catalog from a future official read-only broker adapter (Phase 4). Ambiguous expired/yearless/unknown listings need human review.
+- **No execution**: Phase 2 only classifies and records; the paper broker, cancel/fill race handling, true close verification, risk gates and notification/dashboard are future phases. An SQL `CLOSE_REQUESTED` state is never proof of sale. Out-of-order unmatched replies remain review rather than retroactive execution.
+- **No access/deployment**: no private Swift content, paid Telegram messages, user session, Windows device or brokerage account accessed; no paper/live orders; all real broker writes disabled.
+- **Residual supply-chain gap**: independent signed attestations/SBOM, offline hermetic rebuild and advisory audit remain issue #2.
+
+**Gate:** Phase 2 is CI_PASSED on mocks/synthetic cases, still requires local authorization and forward validation. Draft PR #11 is unmerged. Stop here; Phase 3 requires a new explicit instruction.
