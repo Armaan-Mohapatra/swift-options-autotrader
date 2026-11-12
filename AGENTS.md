@@ -4,7 +4,7 @@
 
 - Read `docs/SOURCE_SPRINT_PLAN.md` **in full**, `docs/PROJECT_SPEC.md`, and the previous report in `docs/PHASE_REPORTS/` before changing code.
 - The sprint source is authoritative. `docs/PROJECT_SPEC.md` is the permanent project contract. If the source and implementation conflict, **stop and report**, do not quietly reinterpret.
-- Only implement the phase explicitly authorized by the user. Phase 0 is **only foundation**, not live Telegram, option parsing, order execution, paper fills, Robinhood auth or Windows installation.
+- Only implement the phase explicitly authorized by the user. Phase 0 is foundation; Phase 1 implements read-only local authorized Telegram ingestion only. Option parsing, order execution, paper fills, Robinhood auth and Windows installation remain later-phase gates.
 - Never access a personal computer or modify unrelated trading software, repositories, data, processes, credentials or cloud resources.
 
 ## Mandatory trading semantics

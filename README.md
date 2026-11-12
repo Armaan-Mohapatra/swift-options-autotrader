@@ -1,8 +1,8 @@
 # Swift Options AutoTrader
 
-**Status: PHASE 0 FOUNDATION ONLY — NOT A RUNNING TRADING BOT.**
+**Status: PHASE 1 READ-ONLY TELEGRAM INGESTION — NOT A RUNNING TRADING BOT.**
 
-This private Python 3.11+ project is a **paper-only**, future Telegram-to-options-trading application. Phase 0 provides a secure, independently testable foundation. It does **not** connect to Telegram or Robinhood, parse live signals, simulate order fills, submit broker orders, or install on a Windows computer.
+This private Python 3.11+ project is a **paper-only**, future Telegram-to-options-trading application. Phase 0 provides a secure, independently testable foundation. Phase 1 now includes **optional read-only, authorized local Telegram ingestion** but no user session was enrolled or tested. It does **not** connect to Robinhood, parse live options alerts, simulate fills, submit brokerage orders or install on a Windows computer.
 
 The full authoritative sprint specification is preserved verbatim at [`docs/SOURCE_SPRINT_PLAN.md`](docs/SOURCE_SPRINT_PLAN.md). Its permanent behavioral contract is [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md). Never silently change the behavior described there.
 
@@ -78,3 +78,7 @@ All commands fail closed on unsafe environment flags. `.env.example` contains on
 [`AGENTS.md`](AGENTS.md) · [`PROJECT_SPEC`](docs/PROJECT_SPEC.md) · [`CONFIGURATION`](docs/CONFIGURATION.md) · [`SECURITY`](docs/SECURITY.md) · [`IMPLEMENTATION_STATUS`](docs/IMPLEMENTATION_STATUS.md) · [`PHASE_TRACKER`](docs/PHASE_TRACKER.md) · [`OPEN_BLOCKERS`](docs/OPEN_BLOCKERS.md) · [`ISSUES`](docs/ISSUES.md) · [`WINDOWS_RUNBOOK`](docs/WINDOWS_RUNBOOK.md) · [`LIVE_ACTIVATION_CHECKLIST`](docs/LIVE_ACTIVATION_CHECKLIST.md)
 
 **Important:** No strategy's profitability has been validated. No fills or account activity are implied by the CLI, database tables or mocks.
+
+## Phase 1 read-only listener
+
+See [Telegram operator guide](docs/TELEGRAM_INGESTION.md) and [Phase 1 checkpoint](docs/PHASE_REPORTS/PHASE_1.md). The optional `Telethon==1.45.0` client requires an already-authorized local user session, never CI credentials. `telegram-health` reads local metadata; `telegram-listen` requires manual opt-in plus migration. Only the Telegram and event-store rows of the initial module table have become functional; Phase 2+ is still out of scope.

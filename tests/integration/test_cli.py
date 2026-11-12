@@ -29,7 +29,9 @@ def test_migrate_is_explicit(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("DB_PATH", str(db))
     assert main(["migrate"]) == 0
     assert db.is_file()
-    assert json.loads(capsys.readouterr().out)["applied_versions"] == ["0001_initial.sql"]
+    assert json.loads(capsys.readouterr().out)["applied_versions"] == [
+        "0001_initial.sql", "0002_telegram_ingest.sql",
+    ]
     assert main(["migrate"]) == 0
     assert json.loads(capsys.readouterr().out)["applied_versions"] == []
 
@@ -37,4 +39,26 @@ def test_migrate_is_explicit(monkeypatch, capsys, tmp_path):
 def test_cli_rejects_broker_write_flag(monkeypatch, capsys):
     monkeypatch.setenv("ALLOW_BROKER_WRITES", "true")
     assert main(["dry-run"]) == 2
+    assert json.loads(capsys.readouterr().err)["status"] == "ERROR"
+
+
+def test_health_needs_local_id(monkeypatch, capsys):
+    monkeypatch.delenv("SWIFT_TELEGRAM_CHANNEL_ID", raising=False)
+    assert main(["telegram-health"]) == 2
+    assert json.loads(capsys.readouterr().err)["status"] == "ERROR"
+
+
+def test_health_does_not_create_db(monkeypatch, capsys, tmp_path):
+    path = tmp_path / "absent.sqlite3"
+    monkeypatch.setenv("DB_PATH", str(path))
+    monkeypatch.setenv("SWIFT_TELEGRAM_CHANNEL_ID", "-1001234567890")
+    assert main(["telegram-health"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "NOT_INITIALIZED"
+    assert not path.exists()
+
+
+def test_telegram_listen_cannot_run_without_auth(monkeypatch, capsys):
+    monkeypatch.setenv("TELEGRAM_ENABLED", "true")
+    monkeypatch.delenv("TELEGRAM_API_HASH", raising=False)
+    assert main(["telegram-listen"]) == 2
     assert json.loads(capsys.readouterr().err)["status"] == "ERROR"

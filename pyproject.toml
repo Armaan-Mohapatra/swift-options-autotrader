@@ -1,17 +1,18 @@
 [build-system]
-requires = ["setuptools>=75,<85"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "swift-options-autotrader"
-version = "0.0.1"
-description = "Phase 0 foundation for a paper-only Swift Telegram options trading research application"
+version = "0.1.0"
+description = "Read-only authorized Telegram ingestion for a future paper-only options system"
 requires-python = ">=3.11"
 license = {text = "Proprietary - private project"}
 authors = [{name = "Swift Options AutoTrader maintainers"}]
 dependencies = []
 
 [project.optional-dependencies]
+telegram = ["Telethon==1.45.0"]
 dev = ["pytest==9.2.0", "ruff==0.16.8"]
 
 [project.scripts]
