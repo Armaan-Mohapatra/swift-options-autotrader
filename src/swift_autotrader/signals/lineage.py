@@ -341,7 +341,9 @@ class SignalMatcher:
                 "SELECT category FROM signal_metadata WHERE signal_id=?", (sid,),
             ).fetchone()
             if category is None or category[0] != (alert.category or "STANDARD"):
-                return self._result(row, alert, "REVIEW_REQUIRED", "ENTRY_EDIT_CATEGORY_CHANGED", sid)
+                return self._result(
+                    row, alert, "REVIEW_REQUIRED", "ENTRY_EDIT_CATEGORY_CHANGED", sid
+                )
             return self._result(row, alert, "IGNORED", "UNCHANGED_ENTRY_EDIT", sid)
         if alert.intent not in {SignalIntent.METADATA_ONLY, SignalIntent.CLOSE_100_PERCENT}:
             return self._result(row, alert, "REVIEW_REQUIRED", "UNSAFE_EDIT", sid)
