@@ -52,6 +52,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = {"status": "LISTENER_STOPPED", "mode": "PAPER_ONLY"}
         print(json.dumps(payload, sort_keys=True))
         return 0
+    except KeyboardInterrupt:
+        print(json.dumps({"status": "STOPPED", "reason": "INTERRUPTED"}), file=sys.stderr)
+        return 130
     except (ConfigurationError, OSError, ValueError, RuntimeError, sqlite3.DatabaseError) as exc:
         print(json.dumps({"status": "ERROR", "reason": type(exc).__name__}), file=sys.stderr)
         return 2

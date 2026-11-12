@@ -105,9 +105,12 @@ class TelegramListener:
                 with suppress(asyncio.CancelledError, Exception):
                     await worker
                 self.store.mark_health(
-                    "DEGRADED" if self.failure is not None else "STOPPED",
+                    "DEGRADED" if self.failure or source_error else "STOPPED",
                     at=datetime.now(UTC),
-                    error_code="INGEST_FAILURE" if self.failure is not None else None,
+                    error_code=(
+                        "INGEST_FAILURE" if self.failure is not None
+                        else "SOURCE_FAILURE" if source_error is not None else None
+                    ),
                 )
         if self.failure is not None:
             raise RuntimeError("Telegram persistence failed") from self.failure

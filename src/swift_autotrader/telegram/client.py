@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
 from swift_autotrader.config import Settings
 from swift_autotrader.database.repository import TelegramStore
-from swift_autotrader.telegram.events import EventKind, TelegramMessage
+from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMessage, utc
 from swift_autotrader.telegram.listener import TelegramListener
 from swift_autotrader.telegram.reconnect import with_reconnect
 
@@ -77,14 +78,24 @@ class TelethonSource:
                 channel = await asyncio.wait_for(
                     client.get_entity(cfg.telegram_channel_id), timeout=15
                 )
-            except Exception as exc:
-                raise LocalAuthorizationRequired("Configured channel unavailable") from exc
+            except (ValueError, LookupError):
+                # Cache may not contain a newly joined private channel yet.
+                # Read dialog metadata only to resolve the designated peer;
+                # never fetch histories or persist other chats.
+                channel = None
+                async for dialog in client.iter_dialogs():
+                    if int(dialog.id) == cfg.telegram_channel_id:
+                        channel = dialog.entity
+                        break
+                if channel is None:
+                    raise LocalAuthorizationRequired("Configured channel unavailable") from None
 
             from telethon import utils
 
             if int(utils.get_peer_id(channel)) != cfg.telegram_channel_id:
                 raise LocalAuthorizationRequired("Configured channel identity mismatch")
 
+            ready_at = datetime.now(UTC)
             failure: BaseException | None = None
 
             async def dispatch(event: Any, kind: EventKind) -> None:
@@ -92,10 +103,13 @@ class TelethonSource:
                 if int(event.chat_id or 0) != cfg.telegram_channel_id:
                     return
                 try:
-                    await on_event(normalize_telethon_event(event, kind))
+                    incoming = normalize_telethon_event(event, kind)
+                    if utc(incoming.sent_at_utc) < ready_at:
+                        incoming = replace(incoming, origin=EventOrigin.RECOVERED)
+                    await on_event(incoming)
                 except Exception as exc:
                     failure = exc
-                    await client.disconnect()
+                    asyncio.create_task(client.disconnect())
 
             @client.on(events.NewMessage(chats=[channel]))
             async def on_new(event: Any) -> None:
@@ -118,7 +132,8 @@ def start_listener(settings: Settings) -> None:
     if not settings.telegram_enabled or settings.telegram_channel_id is None:
         raise LocalAuthorizationRequired("Telegram listener has not been locally enabled")
     store = TelegramStore(settings.db_path, settings.telegram_channel_id)
-    store.health()  # Raises on missing migration, before any network connection.
+    if store.health()["status"] == "NOT_INITIALIZED":
+        raise RuntimeError("Run migrate before enabling Telegram listener")
 
     async def run_once() -> None:
         listener = TelegramListener(
