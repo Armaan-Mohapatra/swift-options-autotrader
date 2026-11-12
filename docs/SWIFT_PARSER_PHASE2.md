@@ -75,3 +75,5 @@ This **in-sample synthetic classification result is not a measured real-world pr
 ## Review and future execution gates
 
 Every `REVIEW_REQUIRED` revision stays in SQLite until explicitly resolved. Do not automatically replay it into a later trade. Downstream Phase 3 must independently check option instrument, risk and permissions, real fills, idempotency, accepted order timeout, and matching position quantity. Neither this parser nor its test catalog is authorization for brokerage writes. No broker imports/calls exist in the matcher.
+
+**Full inspectable normalized outputs:** [`PHASE_2_PARSED_EXAMPLES.json`](PHASE_REPORTS/PHASE_2_PARSED_EXAMPLES.json) records all 81 synthetic messages, their expected intent, observed structured fields, reason codes, and match flags. Regenerate with `python scripts/export_synthetic_parser_results.py`; `test_swift_parser_report.py` prevents snapshot drift.
