@@ -4,7 +4,7 @@ Each phase requires its own explicit user instruction and an independently revie
 
 | Phase | Objective | Acceptance gate | Status |
 | --- | --- | --- | --- |
-| **0** | Private repo, Python package, spec/security/config, SQLite, CLI, CI | Green Linux+Windows PR checks; no secrets, branch and SHA verified | **LOCAL_TESTED, CI_PENDING** |
+| **0** | Private repo, Python package, spec/security/config, SQLite, CLI, CI | Green Linux+Windows PR checks; no secrets, branch and SHA verified | **CI_PASSED — PR #1 DRAFT** |
 | 1 | Authorized Telegram read-only listener/event store | Synthetic duplicate/edit/reconnect/restart tests; no orders | NOT_STARTED |
 | 2 | Strict Swift parser, signal identity, lineage | Full synthetic fixture matrix; options only, LOTTO yes, adds no, averages metadata, exits 100%, ambiguity blocked | NOT_STARTED |
 | 3 | Durable paper order engine & reconciliation | Limit exact, accepted + 3600s, fill/cancel races, crash idempotency, kill switch, no real writes | NOT_STARTED |

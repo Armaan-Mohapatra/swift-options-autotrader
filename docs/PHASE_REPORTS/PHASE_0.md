@@ -1,29 +1,52 @@
-# Phase 0 development report — 2026-11-12
+# Phase 0 completion report — 2026-11-12
 
-## Scope and status
+**Phase outcome: IMPLEMENTED / TESTED / CI_PASSED (foundation only).** Scope stopped at Phase 0; no later-phase runtime is represented as complete.
 
-**Status: IMPLEMENTED LOCALLY / TESTED LOCALLY / GITHUB PUBLICATION IN PROGRESS.** The authorized GitHub account is `Armaan-Mohapatra`; the private repo now exists and contains a minimal default-branch README. Branch, PR and GitHub Actions evidence will be appended after verification. Do **not** mark this phase `CI_PASSED` without actual CI results.
+## Remote provenance
 
-Verified private repository URL: `https://github.com/Armaan-Mohapatra/swift-options-autotrader`.
+- **Repository:** https://github.com/Armaan-Mohapatra/swift-options-autotrader (verified PRIVATE).
+- **Branch:** `codex/phase0-foundation` (isolated from unmodified `main`).
+- **PR:** https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/1 (DRAFT, unmerged).
+- **Verified code commit:** `9d9991923671d589b3e1fda3017a1814f1905580`. Subsequent report-only edits can advance PR HEAD; verify the current head in GitHub.
+- **CI run:** https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43278754406 — SUCCESS, 4/4 jobs.
+- **Earlier failing CI:** https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43278248568 — four lint failures, corrected in the verified code commit.
 
-**Source of truth:** `docs/SOURCE_SPRINT_PLAN.md` verbatim. Reviewed, immutable behavior contract in `docs/PROJECT_SPEC.md`.
+## What was built
 
-## Delivered locally
+70 files in the initial foundation commit (plus any later documentation checkpoint changes), including the untouched user-authored sprint document at `docs/SOURCE_SPRINT_PLAN.md`, permanent contract in `docs/PROJECT_SPEC.md`, README, AGENTS, security/configuration/issue and development documentation, Python 3.11+ src package, typed Telegram/parser/signal/order/broker interfaces, immutable acceptance+3,600-second deadline math, deny-only Robinhood adapter, strict paper-only configuration, SQLite WAL schema and fingerprinted forward migrations, explicit `migrate` and no-side-effect `smoke`/`config-check`/`dry-run` commands, synthetic tests and Windows/Linux GitHub Actions.
 
-- `src/swift_autotrader/`: Python 3.11+ package with `smoke`, `config-check`, `dry-run` and explicit `migrate` CLI.
-- Fail-closed configuration defaults and validation; positive/finite decimal risk placeholder and exact 3,600-second deadline math.
-- SQLite WAL migration `0001_initial.sql` with raw events, source identity and edit uniqueness, contract signal metadata separation, unique logical order intents, fills, state history and checkpoint tables.
-- Typed broker, order, contract and Telegram event abstractions. Real broker write methods **always deny**; paper order engine not implemented.
-- `.github/workflows/ci.yml` declaring Linux/Windows Python 3.11/3.13 matrix; `pytest`, Ruff, syntax compilation and static heuristic secrets checks.
-- README, AGENTS, project spec, source plan, security, configuration, tracker, issue definitions, Windows handoff, live activation checklist, PR policy, licensing review.
-- Synthetic unit/integration tests; no real credentials, paid Telegram messages, contact with personal computer or broker interactions.
+**Important boundaries:** Telegram ingestion, full parser, live or paper order execution, order reconciliation, simulated fills/P&L, Robinhood MCP connectivity, Windows installation and background supervision **are NOT IMPLEMENTED**. The rule markers in code are contracts, not proof of working signal handling. No brokerage orders, real credentials, private Swift content, or user-computer access occurred.
 
-## Verified vs unverified
+## CI and verification
 
-- **Verified locally:** config rejects live flags; local dry-run reports no orders or network; schema initializes idempotently; 3,600-second accepted-order deadline arithmetic; deny-only broker methods. Re-run final counts before publishing.
-- **Unverified:** all real alert interpretation and order lifecycle behavior (Phases 1–4), Windows CI, exact official broker APIs, forward paper replay, production RAM/disk, actual Windows installation.
-- **GitHub publication:** pending feature-branch import and checks; never substitute local SHA for GitHub SHA.
+| Platform | Python | Tests | Ruff | Compile | Secret scan | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| Windows | 3.11 | 28 passed | Passed | Passed | Passed | SUCCESS |
+| Windows | 3.13 | 28 passed | Passed | Passed | Passed | SUCCESS |
+| Ubuntu Linux | 3.11 | 28 passed | Passed | Passed | Passed | SUCCESS |
+| Ubuntu Linux | 3.13 | 28 passed | Passed | Passed | Passed | SUCCESS |
 
-## Next action / user gate
+**112 test executions total; 28 distinct tests**, 0 failures and 0 skips in this run. Verified from GitHub Actions job logs. Local Python 3.13.5 with pytest 9.0.2 also passed 28 tests. `dry-run` recorded zero orders and zero network attempts; startup rejects live flags and Telegram mode. The static secret scanner is a **heuristic**, not a credential-proof audit.
 
-Use the newly created private repository; import this foundation using an isolated phase branch and open a draft PR. Review all diffs, run real cross-platform CI, fix issues, and update this report with exact GitHub links/SHA. Do not start Phase 1 or live trading.
+## Evidence-backed acceptance
+
+- [x] Verified private repo, isolated feature branch, GitHub commit and draft PR.
+- [x] Permanent requirements retained and auditable; future phases track separately.
+- [x] Readable Python 3.11+ package structure, limited license-checked test tools.
+- [x] Strict fail-closed paper-mode configuration, denied broker writes.
+- [x] Working CLI smoke, config-check, dry-run and opt-in SQLite migrations.
+- [x] WAL/fingerprinted migration and synthetic identity/idempotency constraints tested.
+- [x] Linux/Windows CI with pytest, Ruff, syntax and heuristic secrets scan all green.
+- [x] Eight actionable GitHub issues created (#2–#9), one for supply-chain follow-up and one per later phase.
+- [x] PR and phase/report evidence policy documented; no merge or deployment performed.
+
+## Known limitations and blockers
+
+- `#2`: transitive dependency hash lock, immutable action SHA pins and deeper supply-chain/license review are outstanding. Direct test tools are pinned (`pytest==9.2.0`, `ruff==0.16.8`); runtime uses Python standard library only. Do not claim hermetic cross-platform lock or signed release.
+- Production credentials, Telegram channel enrollment, Robinhood official MCP schemas, account permissions, a supervised Windows machine, and historical option bid/ask datasets were not used or verified. Those are later gates.
+- CI uses synthetic fixtures and no credentials; no forward trading, market execution realism, or profitability evidence exists.
+- `main` has NOT been changed; the draft PR requires user review and explicit approval before any merge.
+
+## Handoff and stop gate
+
+Review draft PR #1 and its green run. After approval, Phase 1 would implement only a read-only, channel-allowlisted Telegram listener on a separate PR. No phase is started automatically, and no live trading is authorized.

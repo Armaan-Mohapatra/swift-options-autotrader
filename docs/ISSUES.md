@@ -1,11 +1,11 @@
 # Issue list / planned GitHub issues
 
-**These are local issue definitions, not actual GitHub Issues.** Publish them in the new PRIVATE repo after creation. Do not create outside the intended project.
+**GitHub issues now created:** [#2](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/2) is dependency/reproducibility debt. Future work is tracked separately: [Phase 1 #3](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/3), [Phase 2 #4](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/4), [Phase 3 #5](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/5), [Phase 4 #6](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/6), [Phase 5 #7](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/7), [Phase 6 #8](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/8), [Phase 7 #9](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/9). The detailed subtasks below remain a planning checklist, not one remote issue per line.
 
-- **P0-01 [BLOCKED] Private repository + PR:** Create `Armaan-Mohapatra/swift-options-autotrader`, preserve any preexisting work, feature branch, verified full commit, PR. Acceptance: remote URL and SHA independently fetched.
-- **P0-02 [LOCAL_DONE] Python foundation + docs:** package, README, AGENTS, source/permanent spec, configuration, security, status, tracker and source preservation. Acceptance: all committed and reviewed.
-- **P0-03 [LOCAL_DONE] SQLite + CLI:** migration, safe defaults, strict config errors, smoke/dry-run, no network. Acceptance: idempotent WAL migration tests and zero broker calls.
-- **P0-04 [REMOTE_BLOCKED] CI and supply chain:** Windows/Linux GitHub Actions Python matrix, lint, tests, scanner, full lock, tool license review and SHA pins. Acceptance: real green job conclusions with URLs.
+- **P0-01 [DONE] Private repository + PR:** Create `Armaan-Mohapatra/swift-options-autotrader`, preserve any preexisting work, feature branch, verified full commit, PR. Acceptance: remote URL and SHA independently fetched.
+- **P0-02 [CI_PASSED] Python foundation + docs:** package, README, AGENTS, source/permanent spec, configuration, security, status, tracker and source preservation. Acceptance: all committed and reviewed.
+- **P0-03 [CI_PASSED] SQLite + CLI:** migration, safe defaults, strict config errors, smoke/dry-run, no network. Acceptance: idempotent WAL migration tests and zero broker calls.
+- **P0-04 [CI_PASSED / LOCK_DEBT_#2] CI and supply chain:** Windows/Linux GitHub Actions Python matrix, lint, tests and heuristic scanner PASSED; full transitive lock and immutable SHA pins remain OPEN as issue #2. Acceptance: real green job conclusions with URLs.
 - **P1-01 Telegram MTProto read-only allowlisted ingestion:** edited/reply IDs, checkpoints, bounded queues, reconnect; sanitized fixtures; no trade interface.
 - **P1-02 Durable raw event store and deduplication:** event updates, replay guards, restart and backpressure tests.
 - **P2-01 Deterministic options-only/LOTTO parser:** verified exact contract, right, strike, expiration year, limit premium; ignore non-options.

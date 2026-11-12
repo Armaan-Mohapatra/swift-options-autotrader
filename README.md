@@ -41,7 +41,7 @@ python -m swift_autotrader migrate
 
 The migration creates tables for raw events, signals, order intents, fill records, state history and checkpoints. WAL mode is requested and migration hashes prevent silently editing previously applied migrations. No real data is imported. Never point `DB_PATH` at an existing unrelated database.
 
-Development dependencies are exact direct pins; the current foundation uses **Python standard library only at runtime**. A fully resolved transitive dependency lock and environment-level reproducibility validation remain open; see [`docs/OPEN_BLOCKERS.md`](docs/OPEN_BLOCKERS.md). CI will install the pinned development tools on Linux and Windows once the repository is published.
+Development dependencies are exact direct pins; the current foundation uses **Python standard library only at runtime**. A fully resolved transitive dependency lock and environment-level reproducibility validation remain open; see [`docs/OPEN_BLOCKERS.md`](docs/OPEN_BLOCKERS.md). GitHub Actions successfully installed and tested the pinned development tools on Linux and Windows (Python 3.11/3.13); see [Phase 0 CI evidence](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43278754406).
 
 ## CLI
 
