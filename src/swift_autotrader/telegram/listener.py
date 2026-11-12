@@ -6,8 +6,8 @@ losing a message or falsely acknowledging it. Recovery must be reviewed locally.
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -98,7 +98,7 @@ class TelegramListener:
                 if worker.done() and not worker.cancelled():
                     with suppress(Exception):
                         await worker
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 self.failure = exc
             finally:
                 worker.cancel()
