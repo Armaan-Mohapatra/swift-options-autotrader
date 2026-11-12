@@ -8,27 +8,27 @@
 - Phase 1 branch: `codex/phase1-telegram-ingest`.
 - Draft stacked PR #10: https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/10
 - Base: `codex/phase0-foundation` at `d80b16401d443b5363bba50a00ecad0cce48c50c`; original `main` remains untouched; PR #1 remains draft/unmerged.
-- **Latest tested feature and supply-chain code commit:** `83f38acda53a45ea6363a6fd1cf1a2429252de96`. Report-only commits may advance PR HEAD; refetch it before merge.
-- **Locked-install CI run (push):** https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43285018249 — all four jobs SUCCESS.
+- **Latest tested feature and supply-chain code commit:** `8f89290481b33db4a190a086154a46554c50e7eb`. Report-only commits may advance PR HEAD; refetch it before merge.
+- **Locked-install CI run (push):** https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43286409414 — Windows/Linux 3.11/3.13 jobs SUCCESS after final code change.
 - **Earlier green PR CI:** https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43284236342 — SUCCESS for pre-license-audit lock commit; final report commit must revalidate.
 
 ## Test evidence (source: GitHub Actions Windows/Linux jobs)
 
 | Runner | Interpreter | Results |
 | --- | --- | --- |
-| Ubuntu | Python 3.11 | 68 passed, 0 failed |
-| Ubuntu | Python 3.13 | 68 passed, 0 failed |
-| Windows | Python 3.11 | 68 passed, 0 failed |
-| Windows | Python 3.13 | 68 passed, 0 failed |
+| Ubuntu | Python 3.11 | 73 passed, 0 failed |
+| Ubuntu | Python 3.13 | 73 passed, 0 failed |
+| Windows | Python 3.11 | 73 passed, 0 failed |
+| Windows | Python 3.13 | 73 passed, 0 failed |
 
-**68 distinct tests, 272 executions; no skips/failures in this CI run.** On each platform: dependency install from `uv.lock` using `uv sync --locked --extra dev --extra telegram`, Ruff, syntax compile, pinned Telethon version, static heuristic secrets scanner, and lockfile version/URL/SHA-256 audit passed. Prior CI failures were Ruff formatting and a Phase 0 test assuming only one migration; all corrected before this verified run.
+**73 distinct tests, 292 executions; no skips/failures in this CI run.** On each platform: dependency install from `uv.lock` using `uv sync --locked --extra dev --extra telegram`, Ruff, syntax compile, pinned Telethon version, static heuristic secrets scanner, and lockfile version/URL/SHA-256 audit passed. Prior CI failures were Ruff formatting and a Phase 0 test assuming only one migration; all corrected before this verified run.
 
 ## Files and behavior delivered
 
 - `src/swift_autotrader/telegram/{events,checkpoint,reconnect,listener,client}.py`: normalized channel/message/reply/author/time identities; read-only Telethon user-session client; exact signed-channel filter; bounded async durable worker; fresh connection epochs and conservative stale/history replay guards; capped reconnect.
 - `src/swift_autotrader/database/migrations/0002_telegram_ingest.sql` and `database/repository.py`: additive WAL SQLite schema, append-only revisions, content fingerprint dedupe, persisted high watermark, out-of-order edit ordering, local raw text and aggregate health.
 - `src/swift_autotrader/config.py`, `app.py`, `logging_config.py`, `.env.example`: explicit local-only authorization validation, `telegram-health`, `telegram-listen`, no authorization in CI, metadata-only JSON logging.
-- `tests/unit/test_telegram_*.py`, updated `tests/integration/{test_cli,test_database}.py`: synthetic-only duplicates, edits, reply lineage, stale/delayed/out-of-order updates, wrong chat, restarts, bounded overflow, reconnect and fail-closed settings. Other Phase 0 tests retained.
+- `tests/unit/test_telegram_*.py`, updated `tests/integration/{test_cli,test_database}.py`: synthetic-only duplicates, edits, reply lineage, stale/delayed/out-of-order updates, wrong chat, restarts, bounded overflow, reconnect and fail-closed settings. Other Phase 0 tests retained. Includes mocked Telethon client contract tests for authorized private-channel new/edit delivery and unauthorized-user denial, plus JSON logs/worker failure tests.
 - `docs/TELEGRAM_INGESTION.md`, configuration/safety/dependency/status docs, `docs/SUPPLY_CHAIN.md`, `scripts/audit_lock.py`, `uv.lock`, `.github/workflows/ci.yml`: operator guide, runtime/phase boundaries, pinned build tools and immutable Github Actions hashes, reproducible artifact hash inventory.
 
 ## Phase 0 remediation performed alongside Phase 1
