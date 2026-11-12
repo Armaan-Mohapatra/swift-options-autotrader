@@ -189,6 +189,12 @@ class SignalMatcher:
         rid = int(row["revision_id"])
         mid = int(row["message_id"])
         is_edit = row["event_kind"] == "edit"
+        # Phase 1 has already identified out-of-order or recovered revisions.
+        # Never reinterpret them into actionable follow-up metadata on replay.
+        if row["ignored_reason"] == "OUT_OF_ORDER_REVISION":
+            return self._result(row, alert, "SKIPPED", "OUT_OF_ORDER_REVISION")
+        if is_edit and row["origin"] != "live":
+            return self._result(row, alert, "SKIPPED", "RECOVERED_EDIT")
         # Avoid creating actionable intent from outdated or superseded source.
         if not is_edit and rid != int(row["latest_revision_id"]):
             return self._result(row, alert, "SKIPPED", "SUPERSEDED_REVISION")
@@ -331,6 +337,11 @@ class SignalMatcher:
             )
             if not same:
                 return self._result(row, alert, "REVIEW_REQUIRED", "ENTRY_EDIT_REVIEW", sid)
+            category = con.execute(
+                "SELECT category FROM signal_metadata WHERE signal_id=?", (sid,),
+            ).fetchone()
+            if category is None or category[0] != (alert.category or "STANDARD"):
+                return self._result(row, alert, "REVIEW_REQUIRED", "ENTRY_EDIT_CATEGORY_CHANGED", sid)
             return self._result(row, alert, "IGNORED", "UNCHANGED_ENTRY_EDIT", sid)
         if alert.intent not in {SignalIntent.METADATA_ONLY, SignalIntent.CLOSE_100_PERCENT}:
             return self._result(row, alert, "REVIEW_REQUIRED", "UNSAFE_EDIT", sid)

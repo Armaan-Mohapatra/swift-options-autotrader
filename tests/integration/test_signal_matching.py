@@ -356,3 +356,43 @@ def test_new_option_alert_does_not_invent_second_contract_year(db):
     result = SignalMatcher(db, CHANNEL, catalog=catalog).process_pending()[0]
     assert result.reason == "AMBIGUOUS_EXPIRY_YEAR"
     assert row(db, "SELECT COUNT(*) FROM option_signals")[0] == 0
+
+
+def test_out_of_order_edit_skipped_even_if_it_contains_new_average(db, catalog):
+    seed(db, 1, "SPY 680C 11/13 @ 1.20")
+    seed(db, 2, "SPY NEW AVG .90", reply=1)
+    matcher = SignalMatcher(db, CHANNEL, catalog=catalog)
+    matcher.process_pending()
+    seed(db, 2, "SPY NEW AVG .80", reply=1, kind="edit", eligible=False,
+         edit_at="2026-11-12T15:50:00.000000Z")
+    matcher.process_pending()
+    old_rid = seed(db, 2, "SPY NEW AVG .99", reply=1, kind="edit", eligible=False,
+                   edit_at="2026-11-12T15:45:00.000000Z")
+    with sqlite3.connect(db) as con:
+        con.execute(
+            "UPDATE telegram_message_revisions SET ignored_reason='OUT_OF_ORDER_REVISION' "
+            "WHERE revision_id=?", (old_rid,),
+        )
+    assert matcher.process_pending()[0].reason == "OUT_OF_ORDER_REVISION"
+    assert row(db, "SELECT swift_reported_avg FROM option_signals")[0] == "0.80"
+
+
+def test_recovered_edit_cannot_mutate_metadata(db, catalog):
+    seed(db, 1, "SPY 680C 11/13 @ 1.20")
+    seed(db, 2, "SPY NEW AVG .90", reply=1)
+    matcher = SignalMatcher(db, CHANNEL, catalog=catalog)
+    matcher.process_pending()
+    seed(db, 2, "SPY NEW AVG .70", reply=1, kind="edit", eligible=False,
+         source="recovered", edit_at="2026-11-12T15:50:00.000000Z")
+    assert matcher.process_pending()[0].reason == "RECOVERED_EDIT"
+    assert row(db, "SELECT swift_reported_avg FROM option_signals")[0] == "0.90"
+
+
+def test_entry_label_changed_by_edit_needs_review(db, catalog):
+    seed(db, 1, "SPY 680C 11/13 @ 1.20")
+    matcher = SignalMatcher(db, CHANNEL, catalog=catalog)
+    matcher.process_pending()
+    seed(db, 1, "SPY LOTTO 680C 11/13 @ 1.20", kind="edit", eligible=False,
+         edit_at="2026-11-12T15:40:00.000000Z")
+    assert matcher.process_pending()[0].reason == "ENTRY_EDIT_CATEGORY_CHANGED"
+    assert row(db, "SELECT category FROM signal_metadata")[0] == "STANDARD"
