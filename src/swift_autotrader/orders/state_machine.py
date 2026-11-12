@@ -1,0 +1,20 @@
+"""Order state machine deliberately not active until Phase 3."""
+
+from enum import StrEnum
+
+
+class OrderState(StrEnum):
+    SEEN = "SEEN"
+    VALIDATED = "VALIDATED"
+    ENTRY_READY = "ENTRY_READY"
+    ENTRY_SUBMITTED = "ENTRY_SUBMITTED"
+    OPEN = "OPEN"
+    PARTIAL = "PARTIAL"
+    REJECTED = "REJECTED"
+    CANCEL_PENDING = "CANCEL_PENDING"
+    CANCELED = "CANCELED"
+    CLOSE_REQUESTED = "CLOSE_REQUESTED"
+    CLOSE_SUBMITTED = "CLOSE_SUBMITTED"
+    CLOSED = "CLOSED"
+    PARTIAL_CLOSE = "PARTIAL_CLOSE"
+    ALERT_REQUIRED = "ALERT_REQUIRED"
