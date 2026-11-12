@@ -151,11 +151,11 @@ def test_listener_does_not_claim_connected_without_real_source_verification(tmp_
 
 def test_fatal_database_failure_stops_idle_source_without_waiting_for_more_messages(tmp_path):
     listener = make_listener(tmp_path)
-    active = asyncio.Event()
+    real_store = listener.store
 
     class FailingStore:
         def mark_health(self, *args, **kwargs):
-            return listener.store.mark_health(*args, **kwargs)
+            return real_store.mark_health(*args, **kwargs)
 
         def ingest(self, *args, **kwargs):
             raise RuntimeError("synthetic database unavailable")
@@ -163,7 +163,6 @@ def test_fatal_database_failure_stops_idle_source_without_waiting_for_more_messa
     class IdleSource:
         async def listen(self, on_event):
             await on_event(message(101))
-            active.set()
             await asyncio.Event().wait()
 
     listener.store = FailingStore()
