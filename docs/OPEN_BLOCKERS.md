@@ -13,3 +13,11 @@
 | OPS-005 | Windows runtime, protected secrets, scheduler, secure online backups and metrics not implemented. | Phases 5–6. | Future deployment gate |
 
 None of these blockers authorizes skipping tests, accessing user devices, or enabling live trading.
+
+
+### Phase 1 local gates
+
+- AUTH-001: Authorized paid Swift Telegram membership, developer API credentials and a manually enrolled protected local Telethon user session not yet supplied/tested.
+- CHANNEL-001: Actual signed channel peer ID and private membership/cache verification need local Windows authorization.
+- FORWARD-001: Real new/edit/reconnect delivery, missed-update gap checks, local SQLite file ACL and rate-limit behavior are unverified. No automatic history backfill.
+- SUPPLY-001: Issue #2 retains cross-platform transitive lock/SBOM debt; immutable GitHub action pins are now implemented.

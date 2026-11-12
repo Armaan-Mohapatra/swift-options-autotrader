@@ -3,7 +3,7 @@
 | Phase | Status | Evidence / limitation |
 | --- | --- | --- |
 | 0: repository foundation | **CI_PASSED (foundation only)** | Python package, local CLI, SQLite schema migration, tests and workflow authored. Private repository verified. Draft PR #1, code commit `9d9991923671d589b3e1fda3017a1814f1905580`, Linux/Windows test matrix 4/4 success. |
-| 1: Telegram ingest | NOT_STARTED | Interfaces and schema only. No MTProto auth, listener, checkpoint algorithm or message storage runtime. |
+| 1: Telegram ingest | **MOCK_ONLY / CI_PENDING** | Read-only Telethon adapter, versioned SQLite ingestion, reconnect and replay guards, tests on stacked PR #10. Requires local authorization and forward verification. |
 | 2: Swift parser | NOT_STARTED | Policy constants and contract identity types; **no executable parser or signal linking**. |
 | 3: paper order engine | NOT_STARTED | Deadline math, types, deny-only paper broker; **no fills, order submission, cancellation, race handling or watchdog**. |
 | 4: Robinhood MCP | NOT_STARTED | No auth, networking, SDK, read-only connection or real brokerage writes. All write methods raise. |

@@ -11,3 +11,10 @@ Phase 0 **runtime:** Python 3.11+ **standard library only** (`sqlite3`, `argpars
 | Official `mcp` SDK | **NOT INSTALLED** | Official source https://github.com/modelcontextprotocol/python-sdk | Candidate Phase 4; verify current version, license, API and official Robinhood connectivity |
 
 **Known gap:** direct development dependencies are pinned, but transitives and build-backend dependencies are not fully hash-pinned; no validated Windows/Linux lock exists yet. Do not represent this as hermetic reproducibility. The actual private repository ran four successful cross-platform GitHub CI jobs on 2026-11-12 (https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43278754406). A full transitive lock, immutable Actions SHAs and complete license/SBOM audit remain open as issue #2. Updating a dependency requires a separate reviewed change and redone tests.
+
+
+## Phase 1 selection
+
+`Telethon==1.45.0` (MIT; PyPI release 2026-09-10, https://pypi.org/project/Telethon/) is an optional `telegram` extra. Documented `TelegramClient` and `events.NewMessage`/`MessageEdited` APIs were reviewed against Telethon 1.45 docs (https://docs.telethon.dev/en/stable/). It replaces the previously planned Hydrogram 0.2.0 (LGPLv3; last PyPI 2024-06-30). CI installs the pinned direct version on Windows and Linux but official real user session behavior remains unverified. A fully resolved transitive dependency lock and SBOM/license audit remain issue #2.
+
+GitHub Actions checkout v4 and setup-python v5 are pinned to immutable GitHub public commit SHAs, verified from their tag refs.

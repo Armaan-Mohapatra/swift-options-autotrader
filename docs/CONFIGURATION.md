@@ -18,3 +18,10 @@
 Future-only local configuration names (not used by Phase 0): `SWIFT_TELEGRAM_CHANNEL_ID`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `ROBINHOOD_MCP_URL`. Put real values exclusively in protected Windows storage in a later separately authorized installation. Do not store usernames, passwords, tokens, account numbers, channel IDs, refresh tokens, or session files in GitHub Actions variables, source files, issue bodies, logs, or screenshots.
 
 **Validation examples:** `LIVE_ENABLED=true` or `ALLOW_BROKER_WRITES=true` produces nonzero exit; `PAPER_ONLY=false` similarly fails. `dry-run` does not persist anything. `migrate` is deliberately a separate command that can write to the configured dedicated SQLite path.
+
+
+## Phase 1 locally authorized Telegram settings
+
+The Phase 0-only prohibition on `TELEGRAM_ENABLED=true` is superseded by Phase 1: it remains **false by default**, and can be enabled only with a positive local `TELEGRAM_API_ID`, 32-hex `TELEGRAM_API_HASH`, signed `SWIFT_TELEGRAM_CHANNEL_ID`, and an absolute **existing** pre-authorized `.session` path outside the checkout. No local session means no connection. Never put real values in source or CI.
+
+`TELEGRAM_QUEUE_CAPACITY=512` (1–4096), `TELEGRAM_MAX_LIVE_AGE_SECONDS=120` (0–600), and `TELEGRAM_RECONNECT_ATTEMPTS=5` (1–20). `telegram-health` is read-only and does not require login. `telegram-listen` requires local opt-in, migration and session. Broker safety flags are unchanged. See [Telegram ingestion](TELEGRAM_INGESTION.md).
