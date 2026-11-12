@@ -4,7 +4,7 @@
 
 - Read `docs/SOURCE_SPRINT_PLAN.md` **in full**, `docs/PROJECT_SPEC.md`, and the previous report in `docs/PHASE_REPORTS/` before changing code.
 - The sprint source is authoritative. `docs/PROJECT_SPEC.md` is the permanent project contract. If the source and implementation conflict, **stop and report**, do not quietly reinterpret.
-- Only implement the phase explicitly authorized by the user. Phase 0 is foundation; Phase 1 implements read-only local authorized Telegram ingestion only. Option parsing, order execution, paper fills, Robinhood auth and Windows installation remain later-phase gates.
+- Only implement the phase explicitly authorized by the user. Phase 0 provides the foundation, Phase 1 implements read-only authorized local Telegram ingestion and Phase 2 implements deterministic Swift-style parsing/SQLite signal matching with synthetic tests. Order execution, paper fills, Robinhood auth, notifications and Windows installation remain future gates. Phase 2 interpretation does **not** authorize any trade.
 - Never access a personal computer or modify unrelated trading software, repositories, data, processes, credentials or cloud resources.
 
 ## Mandatory trading semantics
@@ -35,3 +35,10 @@
 - Report exact repository URL, branch, full SHA, PR URL, Linux/Windows Actions URLs and actual conclusions; if unavailable mark **BLOCKED**, not green.
 - Report changed files, public dependencies, verified vs stub features, local commands, test counts, security/licensing limitations, blocked requirements, and next prompt.
 - Stop after the named phase and await review.
+
+## Phase 2 verified boundaries
+
+- See `docs/PHASE_REPORTS/PHASE_2.md` and `docs/PHASE_REPORTS/PHASE_2_PARSED_EXAMPLES.json` for 81 synthetic classified alerts and GitHub CI. Synthetic test agreement is not real Swift accuracy.
+- An unverified or absent option instrument catalog must produce `REVIEW_REQUIRED`, never a fabricated expiration year or trade-eligible signal. Same-ticker ambiguity is never resolved by intuition.
+- A stored `CLOSE_REQUESTED` is just an intent; Phase 3 must independently verify actual filled quantity and lifecycle, with all external writes disabled.
+- Maintain stacked draft PR review order: Phase 0 #1, Phase 1 #10, Phase 2 #11. Do not merge without separate explicit authorization.

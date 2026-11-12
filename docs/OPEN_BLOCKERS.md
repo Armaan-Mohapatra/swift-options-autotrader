@@ -8,7 +8,7 @@
 | DEP-002 | **Phase 1 client choice resolved:** Telethon 1.45.0, MIT, published September 2026, installed from pinned lock. Live private-channel authorization/API behavior not yet verified. Official MCP SDK remains unverified. | Telethon local authorization/forward validation later; MCP SDK in Phase 4. | Future integration gate |
 | OPS-001 | Telegram channel authorization/identifiers and paid content unavailable by design; no authentic ingestion tests. | Phase 1 local secure user approval and synthetic CI mocks. | Future local auth |
 | OPS-002 | Robinhood official Agentic Trading MCP authentication, schema and permission set not validated; no real order permissions. | Phase 4 official docs/mock contract tests and later separate local auth. | Future integration gate |
-| OPS-003 | Real market-data option chain validation, option tick/session constraints, buying-power and exact order review not implemented. | Phases 2–4. | Future execution gate |
+| OPS-003 | Real market-data option chain validation, option tick/session constraints, buying-power and exact order review not implemented. Phase 2 test catalog is synthetic only. | Phase 4 official connector and Phase 3 risk/order integration; no automated entry eligibility before real catalog validation. | Future execution gate |
 | OPS-004 | Paper engine, fill reconciliation, cancel/fill races, durable submissions and kill switch not implemented. | Phase 3. | Future execution gate |
 | OPS-005 | Windows runtime, protected secrets, scheduler, secure online backups and metrics not implemented. | Phases 5–6. | Future deployment gate |
 
@@ -21,3 +21,11 @@ None of these blockers authorizes skipping tests, accessing user devices, or ena
 - CHANNEL-001: Actual signed channel peer ID and private membership/cache verification need local Windows authorization.
 - FORWARD-001: Real new/edit/reconnect delivery, missed-update gap checks, local SQLite file ACL and rate-limit behavior are unverified. No automatic history backfill.
 - SUPPLY-001: **Resolved:** transitive universal `uv.lock` with 37 hashed artifacts and Windows/Linux CI tests, immutable GitHub Actions pins, pinned setuptools, license inventory. **Still open:** independent advisory/CVE scans, signed SBOM, artifact attestations and hermetic offline build (issue #2).
+
+### Phase 2 synthetic parser gates
+
+- PARSER-001: Real authorized Swift paid-channel alert formats (including actual spacing, edits, replies and duplicates) were **not** accessed. 81/81 in-sample synthetic agreement is not measured real-world accuracy; no forward validation exists.
+- CATALOG-001: The deterministic parser requires a real verified option listing, including expiration year. Until the official read-only broker integration is available in a later phase, `parse-replay` holds otherwise syntactically valid entries at `REVIEW_REQUIRED / INSTRUMENT_CATALOG_REQUIRED`.
+- REVIEW-001: Ambiguous updates and missing reply ancestry persist as review records; no reviewed operator UI or authority to resolve into executable trades exists yet.
+- EXEC-001: CLOSE_100_PERCENT is an interpreted close **request only**, with no verification of positions or fills and no order submission. Implementation is Phase 3+.
+- GITHUB-001: Draft PR #11 stacks on #10 and #1; review/merge order is explicit and no branch was automatically merged.

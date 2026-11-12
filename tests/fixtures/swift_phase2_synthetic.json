@@ -1,0 +1,458 @@
+[
+  {
+    "id": "entry-01",
+    "text": "SPY 680C 11/13 @ 1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "entry-02",
+    "text": "BUY SPY 680C 11/13 @ 1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "entry-03",
+    "text": "BTO SPY 680C 11/13 @ 1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "entry-04",
+    "text": "OPEN SPY 680C 11/13 @ 1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "entry-05",
+    "text": "SPY 680C 11/13/2026 @ 1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "entry-06",
+    "text": "SPY 680CALL 11/13/26 @ 1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "entry-07",
+    "text": "SPY 680 C 2026-11-13 @ 1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "entry-08",
+    "text": "spy 680c 11/13 @ 1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "entry-09",
+    "text": "SPY 680C 11/13 @ $1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "entry-10",
+    "text": "SPY   680C   11/13   @   1.20",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "lotto-01",
+    "text": "SPY LOTTO 680C 11/13 @ .95",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "0.95",
+    "category": "LOTTO"
+  },
+  {
+    "id": "lotto-02",
+    "text": "LOTTO SPY 680C 11/13 @ .95",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "0.95",
+    "category": "LOTTO"
+  },
+  {
+    "id": "lotto-03",
+    "text": "BUY SPY LOTTO 680C 11/13 @ .95",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "0.95",
+    "category": "LOTTO"
+  },
+  {
+    "id": "lotto-04",
+    "text": "SPY LOTTO 680C 11/13 @ 0.95",
+    "intent": "ENTRY",
+    "underlying": "SPY",
+    "premium": "0.95",
+    "category": "LOTTO"
+  },
+  {
+    "id": "put-01",
+    "text": "SPY 680P 11/13 @ 1.20",
+    "intent": "ENTRY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "put-02",
+    "text": "SPY 680PUT 11/13/2026 @ 1.20",
+    "intent": "ENTRY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "put-03",
+    "text": "QQQ 500P 2026-11-13 @ 1.20",
+    "intent": "ENTRY",
+    "premium": "1.20",
+    "category": "STANDARD"
+  },
+  {
+    "id": "othercategory-01",
+    "text": "SPY SWING 680C 11/13 @ 1.20",
+    "intent": "ENTRY",
+    "premium": "1.20"
+  },
+  {
+    "id": "othercategory-02",
+    "text": "SPY SCALP 680C 11/13 @ 1.20",
+    "intent": "ENTRY",
+    "premium": "1.20"
+  },
+  {
+    "id": "othercategory-03",
+    "text": "SPY DAYTRADE 680C 11/13 @ 1.20",
+    "intent": "ENTRY",
+    "premium": "1.20"
+  },
+  {
+    "id": "add-01",
+    "text": "SPY ADD",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "add-02",
+    "text": "SPY adding more",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "add-03",
+    "text": "SPY averaging down",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "add-04",
+    "text": "SPY scale in",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "add-05",
+    "text": "SPY ADDED",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "add-06",
+    "text": "SPY 680C 11/13 ADD",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "add-07",
+    "text": "SPY adding more, new avg .95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "add-08",
+    "text": "SPY add NEW AVERAGE .95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "average-01",
+    "text": "SPY NEW AVG .95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "average-02",
+    "text": "SPY new average 0.95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "average-03",
+    "text": "SPY revised avg 0.95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "average-04",
+    "text": "SPY revised average 0.95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "average-05",
+    "text": "SPY avg now .95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "average-06",
+    "text": "SPY 680C 11/13 NEW AVERAGE .95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "average-07",
+    "text": "NEW AVG .95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "average-08",
+    "text": "SPY NEW AVG: 0.95",
+    "intent": "METADATA_ONLY"
+  },
+  {
+    "id": "close-01",
+    "text": "SPY SOLD HALF",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-02",
+    "text": "SPY SOLD 1/3",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-03",
+    "text": "SPY TRIM",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-04",
+    "text": "SPY TRIMMED",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-05",
+    "text": "SPY SCALED OUT",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-06",
+    "text": "SPY RUNNERS OUT",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-07",
+    "text": "SPY ALL OUT",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-08",
+    "text": "SPY SOLD ALL",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-09",
+    "text": "SPY SOLD 25%",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-10",
+    "text": "SPY FULL EXIT",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-11",
+    "text": "SPY CLOSED ALL",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-12",
+    "text": "SPY 680C 11/13 SOLD HALF",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-13",
+    "text": "ALL OUT",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-14",
+    "text": "RUNNERS OUT",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-15",
+    "text": "SPY OUT OF IT",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "close-16",
+    "text": "SPY SOLD 1/2",
+    "intent": "CLOSE_100_PERCENT"
+  },
+  {
+    "id": "ignore-01",
+    "text": "BUY 20 SHARES SPY",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-02",
+    "text": "BUY SPY STOCK ONLY",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-03",
+    "text": "long SPY shares",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-04",
+    "text": "BTC crypto setup",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-05",
+    "text": "QQQ looks strong",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-06",
+    "text": "good morning everyone",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-07",
+    "text": "",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-08",
+    "text": "  ",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-09",
+    "text": "FUTURES ES levels",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-10",
+    "text": "SPOT BUY ETHEREUM",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-11",
+    "text": "SPY looking bullish into tomorrow",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-12",
+    "text": "SPY puts seem pricey",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-13",
+    "text": "No signal yet, watch earnings",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "ignore-14",
+    "text": "SPY HOLD",
+    "intent": "IGNORE_NON_OPTION"
+  },
+  {
+    "id": "review-01",
+    "text": "SPY 680C 11/13 @",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-02",
+    "text": "SPY 680C 11/13 @ -1.20",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-03",
+    "text": "SPY 680C 11/32 @ 1.20",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-04",
+    "text": "SPY 680C 11/13 @ 0",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-05",
+    "text": "SPY 680C 11/13 @ 1.20 and QQQ 500C 11/13 @ 1.10",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-06",
+    "text": "SPY correction: 680C to 681C",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-07",
+    "text": "SPY SOLD HALF and ADD",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-08",
+    "text": "SPY NEW AVG",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-09",
+    "text": "SPY 680C @ 1.20",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-10",
+    "text": "SPY 680C 11/13 @ 1.20 maybe?",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-11",
+    "text": "SPY new average -0.95",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-12",
+    "text": "SPY ALL OUT NEW AVG .95",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-13",
+    "text": "SPY LOTTO 680C 11/13 no price",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-14",
+    "text": "BUY SPY CALLS ASAP",
+    "intent": "REVIEW_REQUIRED"
+  },
+  {
+    "id": "review-15",
+    "text": "SPY 680C 11/13 @ 1.20 QQQ 500P 11/13",
+    "intent": "REVIEW_REQUIRED"
+  }
+]
