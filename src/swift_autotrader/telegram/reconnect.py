@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
@@ -25,5 +26,6 @@ async def with_reconnect(
         try:
             return await operation()
         except (ConnectionError, TimeoutError, OSError):
+            logging.getLogger("swift_autotrader.telegram").warning("reconnect")
             await sleep(delay)
     return await operation()

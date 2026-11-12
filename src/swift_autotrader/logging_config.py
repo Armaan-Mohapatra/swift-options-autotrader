@@ -17,6 +17,7 @@ class SafeJsonFormatter(logging.Formatter):
                 "event": record.msg if record.msg in {
                     "listener_started", "listener_stopped", "reconnect",
                     "store_unavailable", "queue_overflow", "health_check",
+                    "source_verified",
                 } else "redacted_event",
             },
             sort_keys=True,

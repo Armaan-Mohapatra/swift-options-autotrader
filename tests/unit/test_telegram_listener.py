@@ -142,3 +142,51 @@ def test_safe_logging_never_prints_message_or_credentials():
     rendered = formatter.format(record)
     assert "synthetic secret" not in rendered
     assert json.loads(rendered)["event"] == "redacted_event"
+
+def test_listener_does_not_claim_connected_without_real_source_verification(tmp_path):
+    listener = make_listener(tmp_path)
+    asyncio.run(listener.run(FakeSource([message(100)])))
+    assert listener.store.health()["last_connected_at_utc"] is None
+
+
+def test_fatal_database_failure_stops_idle_source_without_waiting_for_more_messages(tmp_path):
+    listener = make_listener(tmp_path)
+    active = asyncio.Event()
+
+    class FailingStore:
+        def mark_health(self, *args, **kwargs):
+            return listener.store.mark_health(*args, **kwargs)
+
+        def ingest(self, *args, **kwargs):
+            raise RuntimeError("synthetic database unavailable")
+
+    class IdleSource:
+        async def listen(self, on_event):
+            await on_event(message(101))
+            active.set()
+            await asyncio.Event().wait()
+
+    listener.store = FailingStore()
+
+    async def scenario():
+        with pytest.raises(RuntimeError, match="Telegram persistence failed"):
+            await asyncio.wait_for(listener.run(IdleSource()), timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_json_log_handler_is_wired_and_redacted(monkeypatch):
+    from io import StringIO
+
+    from swift_autotrader.logging_config import configure_logging
+
+    configure_logging("INFO")
+    handler = logging.getLogger("swift_autotrader").handlers[0]
+    stream = StringIO()
+    monkeypatch.setattr(handler, "stream", stream)
+    logging.getLogger("swift_autotrader.telegram").info("listener_started")
+    logging.getLogger("swift_autotrader.telegram").error("synthetic private paid text")
+    logged = [json.loads(line) for line in stream.getvalue().splitlines()]
+    assert logged[0]["event"] == "listener_started"
+    assert logged[1]["event"] == "redacted_event"
+    assert "synthetic private paid text" not in stream.getvalue()

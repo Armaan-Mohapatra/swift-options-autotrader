@@ -6,6 +6,7 @@ losing a message or falsely acknowledging it. Recovery must be reviewed locally.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -46,6 +47,7 @@ class TelegramListener:
         self.stored = 0
         self.duplicates = 0
         self.failure: BaseException | None = None
+        self.log = logging.getLogger("swift_autotrader.telegram")
 
     async def _worker(self) -> None:
         while True:
@@ -62,6 +64,7 @@ class TelegramListener:
                     self.duplicates += 1
             except Exception as exc:
                 self.failure = exc
+                self.log.error("store_unavailable")
                 raise
             finally:
                 self.queue.task_done()
@@ -76,6 +79,7 @@ class TelegramListener:
             self.queue.put_nowait(event)
         except asyncio.QueueFull as exc:
             self.failure = QueueOverflow("Telegram queue capacity exceeded")
+            self.log.error("queue_overflow")
             self.store.mark_health(
                 "DEGRADED", at=datetime.now(UTC),
                 error_code="QUEUE_OVERFLOW", overflow=True,
@@ -83,35 +87,54 @@ class TelegramListener:
             raise self.failure from exc
 
     async def run(self, source: TelegramSource) -> None:
-        self.store.mark_health("CONNECTED", at=datetime.now(UTC))
+        # Starting an event loop does NOT imply Telegram authorization succeeded.
+        self.store.mark_health("DISCONNECTED", at=datetime.now(UTC))
+        self.log.info("listener_started")
         worker = asyncio.create_task(self._worker())
+        source_task = asyncio.create_task(source.listen(self.accept))
         source_error: BaseException | None = None
         try:
-            await source.listen(self.accept)
-        except BaseException as exc:
-            source_error = exc
-        finally:
-            try:
+            done, _ = await asyncio.wait(
+                {worker, source_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if worker in done:
+                # If persistence dies while Telegram is quiet, disconnect immediately.
+                if not worker.cancelled():
+                    with suppress(Exception):
+                        await worker
+                source_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await source_task
+            else:
+                try:
+                    await source_task
+                except BaseException as exc:
+                    source_error = exc
                 if not worker.done():
-                    # A dead worker must never make shutdown wait indefinitely.
-                    await asyncio.wait_for(self.queue.join(), timeout=20)
+                    try:
+                        await asyncio.wait_for(self.queue.join(), timeout=20)
+                    except TimeoutError as exc:
+                        self.failure = exc
                 if worker.done() and not worker.cancelled():
                     with suppress(Exception):
                         await worker
-            except TimeoutError as exc:
-                self.failure = exc
-            finally:
-                worker.cancel()
-                with suppress(asyncio.CancelledError, Exception):
-                    await worker
-                self.store.mark_health(
-                    "DEGRADED" if self.failure or source_error else "STOPPED",
-                    at=datetime.now(UTC),
-                    error_code=(
-                        "INGEST_FAILURE" if self.failure is not None
-                        else "SOURCE_FAILURE" if source_error is not None else None
-                    ),
-                )
+        finally:
+            source_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await source_task
+            worker.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await worker
+            self.store.mark_health(
+                "DEGRADED" if self.failure or source_error else "STOPPED",
+                at=datetime.now(UTC),
+                error_code=(
+                    "QUEUE_OVERFLOW" if isinstance(self.failure, QueueOverflow)
+                    else "INGEST_FAILURE" if self.failure is not None
+                    else "SOURCE_FAILURE" if source_error is not None else None
+                ),
+            )
+            self.log.info("listener_stopped")
         if self.failure is not None:
             raise RuntimeError("Telegram persistence failed") from self.failure
         if source_error is not None:

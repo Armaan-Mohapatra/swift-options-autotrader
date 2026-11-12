@@ -1,13 +1,16 @@
 """Optional Telethon 1.45 MTProto adapter, receive-only and channel-filtered.
 
-Requires a user-authorized local *.session file. Never calls start(), login,
-send_message(), download_media(), iter_dialogs() or iter_messages(). No history
-backfill is enabled. Telethon's own connectivity may be restored automatically;
-any disconnected epoch restarts with a new session freshness fence.
+Requires a pre-authorized local *.session file. Never calls start(), login,
+send_message(), download_media() or iter_messages(). It may inspect read-only
+dialog metadata only to resolve the configured private-channel peer when the
+session cache lacks it; no other chat text is downloaded or stored.
+No history backfill is enabled; auto-reconnect is disabled and the outer
+supervisor starts a fresh connection-epoch freshness fence.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -42,10 +45,11 @@ def normalize_telethon_event(event: Any, kind: EventKind) -> TelegramMessage:
 
 
 class TelethonSource:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, store: TelegramStore | None = None) -> None:
         if not settings.telegram_enabled:
             raise ValueError("Enable authorized Telegram ingestion in local settings first")
         self.settings = settings
+        self.store = store
 
     async def listen(
         self, on_event: Callable[[TelegramMessage], Awaitable[None]]
@@ -119,6 +123,9 @@ class TelethonSource:
             async def on_edited(event: Any) -> None:
                 await dispatch(event, EventKind.EDIT)
 
+            if self.store is not None:
+                self.store.mark_health("CONNECTED", at=ready_at)
+            logging.getLogger("swift_autotrader.telegram").info("source_verified")
             await client.run_until_disconnected()
             if failure is not None:
                 raise RuntimeError("Telegram ingestion failed and source disconnected") from failure
@@ -143,7 +150,7 @@ def start_listener(settings: Settings) -> None:
             max_live_age_seconds=settings.telegram_max_live_age_seconds,
             started_at_utc=datetime.now(UTC),
         )
-        await listener.run(TelethonSource(settings))
+        await listener.run(TelethonSource(settings, store=store))
 
     async def supervised() -> None:
         await with_reconnect(

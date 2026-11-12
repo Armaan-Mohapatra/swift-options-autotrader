@@ -11,6 +11,7 @@ from swift_autotrader import __version__
 from swift_autotrader.config import ConfigurationError, Settings
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.database.repository import TelegramStore
+from swift_autotrader.logging_config import configure_logging
 from swift_autotrader.telegram.client import start_listener
 
 
@@ -48,6 +49,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ConfigurationError("Configure a Telegram channel ID for local health")
             payload = TelegramStore(config.db_path, config.telegram_channel_id).health()
         else:
+            configure_logging(config.log_level)
             start_listener(config)
             payload = {"status": "LISTENER_STOPPED", "mode": "PAPER_ONLY"}
         print(json.dumps(payload, sort_keys=True))
