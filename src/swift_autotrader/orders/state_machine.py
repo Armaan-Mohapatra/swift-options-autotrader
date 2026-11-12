@@ -1,9 +1,9 @@
 """Order state machine deliberately not active until Phase 3."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class OrderState(str, Enum):
+class OrderState(StrEnum):
     SEEN = "SEEN"
     VALIDATED = "VALIDATED"
     ENTRY_READY = "ENTRY_READY"

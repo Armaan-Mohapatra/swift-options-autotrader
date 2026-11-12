@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 
-class OptionRight(str, Enum):
+class OptionRight(StrEnum):
     CALL = "CALL"
     PUT = "PUT"
 

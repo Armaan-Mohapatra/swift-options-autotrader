@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class SignalIntent(str, Enum):
+class SignalIntent(StrEnum):
     ENTRY = "ENTRY"
     METADATA_ONLY = "METADATA_ONLY"
     CLOSE_100_PERCENT = "CLOSE_100_PERCENT"

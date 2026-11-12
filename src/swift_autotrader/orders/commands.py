@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 from swift_autotrader.signals.identity import OptionContract
 
 
-class OrderSide(str, Enum):
+class OrderSide(StrEnum):
     BUY_TO_OPEN = "BUY_TO_OPEN"
     SELL_TO_CLOSE = "SELL_TO_CLOSE"
 

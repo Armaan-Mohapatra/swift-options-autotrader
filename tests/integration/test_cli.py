@@ -6,7 +6,9 @@ from swift_autotrader.app import main
 def test_dry_run_is_side_effect_free(monkeypatch, capsys, tmp_path):
     db = tmp_path / "should_not_exist.sqlite3"
     monkeypatch.setenv("DB_PATH", str(db))
-    for name in ("PAPER_ONLY", "LIVE_ENABLED", "ALLOW_BROKER_WRITES", "TELEGRAM_ENABLED", "BROKER_BACKEND"):
+    for name in (
+        "PAPER_ONLY", "LIVE_ENABLED", "ALLOW_BROKER_WRITES", "TELEGRAM_ENABLED", "BROKER_BACKEND"
+    ):
         monkeypatch.delenv(name, raising=False)
     assert main(["dry-run"]) == 0
     result = json.loads(capsys.readouterr().out)

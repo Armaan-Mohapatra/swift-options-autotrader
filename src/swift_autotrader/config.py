@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Mapping
 
 
 class ConfigurationError(ValueError):
@@ -35,7 +35,9 @@ class Settings:
     def validate(self) -> Settings:
         # Even setting ALL three flags by hand cannot activate a live broker in Phase 0.
         if not self.paper_only or self.live_enabled or self.allow_broker_writes:
-            raise ConfigurationError("Phase 0 enforces PAPER_ONLY=true and disables all live writes")
+            raise ConfigurationError(
+                "Phase 0 enforces PAPER_ONLY=true and disables all live writes"
+            )
         if self.broker_backend != "paper":
             raise ConfigurationError("Only BROKER_BACKEND=paper is supported in Phase 0")
         if self.telegram_enabled:

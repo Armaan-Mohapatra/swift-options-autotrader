@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol
 
 from swift_autotrader.orders.commands import OrderIntent
 
 
-class BrokerOrderState(str, Enum):
+class BrokerOrderState(StrEnum):
     UNKNOWN = "UNKNOWN"
     ACCEPTED = "ACCEPTED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
