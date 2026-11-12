@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 class SafeJsonFormatter(logging.Formatter):
@@ -11,7 +11,7 @@ class SafeJsonFormatter(logging.Formatter):
         # Never interpolate untrusted record arguments or print exception text.
         return json.dumps(
             {
-                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "timestamp_utc": datetime.now(UTC).isoformat(),
                 "level": record.levelname,
                 "component": record.name.split(".")[0],
                 "event": record.msg if record.msg in {

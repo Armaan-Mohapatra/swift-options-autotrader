@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -10,7 +10,7 @@ from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.database.repository import TelegramStore
 from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMessage
 
-UTC = timezone.utc
+UTC = UTC
 T = datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
 SOURCE = -1001234567890
 

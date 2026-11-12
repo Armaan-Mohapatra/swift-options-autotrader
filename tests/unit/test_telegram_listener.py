@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -17,7 +17,7 @@ from swift_autotrader.telegram.events import EventKind, TelegramMessage
 from swift_autotrader.telegram.listener import QueueOverflow, TelegramListener
 from swift_autotrader.telegram.reconnect import retry_delays, with_reconnect
 
-T = datetime(2026, 11, 12, 20, tzinfo=timezone.utc)
+T = datetime(2026, 11, 12, 20, tzinfo=UTC)
 CHANNEL = -1001234567890
 
 
@@ -47,7 +47,9 @@ class FakeSource:
 
 def test_mock_ingestion_filters_and_persists(tmp_path):
     listener = make_listener(tmp_path)
-    asyncio.run(listener.run(FakeSource([message(100), message(100), message(101), message(1, -5)])))
+    asyncio.run(
+        listener.run(FakeSource([message(100), message(100), message(101), message(1, -5)]))
+    )
     assert listener.stored == 2
     assert listener.duplicates == 1
     assert listener.filtered == 1

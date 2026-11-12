@@ -2,22 +2,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 
 
 def utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("Telegram timestamps must be timezone-aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
-class EventKind(str, Enum):
+class EventKind(StrEnum):
     NEW = "new"
     EDIT = "edit"
 
 
-class EventOrigin(str, Enum):
+class EventOrigin(StrEnum):
     LIVE = "live"
     RECOVERED = "recovered"
 

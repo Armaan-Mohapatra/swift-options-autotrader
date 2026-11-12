@@ -101,7 +101,9 @@ class Settings:
         return cls(
             paper_only=_bool("PAPER_ONLY", data.get("PAPER_ONLY", "true")),
             live_enabled=_bool("LIVE_ENABLED", data.get("LIVE_ENABLED", "false")),
-            allow_broker_writes=_bool("ALLOW_BROKER_WRITES", data.get("ALLOW_BROKER_WRITES", "false")),
+            allow_broker_writes=_bool(
+                "ALLOW_BROKER_WRITES", data.get("ALLOW_BROKER_WRITES", "false")
+            ),
             broker_backend=data.get("BROKER_BACKEND", "paper").lower(),
             telegram_enabled=_bool("TELEGRAM_ENABLED", data.get("TELEGRAM_ENABLED", "false")),
             db_path=Path(data.get("DB_PATH", "data/swift_autotrader.sqlite3")),

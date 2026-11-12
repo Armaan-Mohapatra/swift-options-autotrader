@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from swift_autotrader.config import Settings
@@ -17,6 +17,7 @@ from swift_autotrader.database.repository import TelegramStore
 from swift_autotrader.telegram.events import EventKind, TelegramMessage
 from swift_autotrader.telegram.listener import TelegramListener
 from swift_autotrader.telegram.reconnect import with_reconnect
+
 
 class LocalAuthorizationRequired(RuntimeError):
     """No enrolled local Telegram session or unavailable Swift channel."""
@@ -30,7 +31,7 @@ def normalize_telethon_event(event: Any, kind: EventKind) -> TelegramMessage:
         channel_id=int(event.chat_id),
         message_id=int(msg.id),
         sent_at_utc=msg.date,
-        received_at_utc=datetime.now(timezone.utc),
+        received_at_utc=datetime.now(UTC),
         body=msg.raw_text or "",
         kind=kind,
         edited_at_utc=msg.edit_date if kind is EventKind.EDIT else None,
@@ -125,7 +126,7 @@ def start_listener(settings: Settings) -> None:
             channel_id=settings.telegram_channel_id,
             capacity=settings.telegram_queue_capacity,
             max_live_age_seconds=settings.telegram_max_live_age_seconds,
-            started_at_utc=datetime.now(timezone.utc),
+            started_at_utc=datetime.now(UTC),
         )
         await listener.run(TelethonSource(settings))
 

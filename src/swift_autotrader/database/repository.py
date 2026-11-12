@@ -213,7 +213,8 @@ class TelegramStore:
                 "overflow_count,state,updated_at_utc) VALUES(?,0,?,?,?, ?,?) "
                 "ON CONFLICT(channel_id) DO UPDATE SET "
                 "last_connected_at_utc=CASE WHEN excluded.state='CONNECTED' "
-                "THEN excluded.last_connected_at_utc ELSE telegram_runtime_state.last_connected_at_utc END,"
+                "THEN excluded.last_connected_at_utc ELSE "
+                "telegram_runtime_state.last_connected_at_utc END,"
                 "last_error_code=excluded.last_error_code,"
                 "overflow_count=telegram_runtime_state.overflow_count+excluded.overflow_count,"
                 "state=excluded.state,updated_at_utc=excluded.updated_at_utc",

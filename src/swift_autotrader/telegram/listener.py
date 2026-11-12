@@ -6,8 +6,9 @@ losing a message or falsely acknowledging it. Recovery must be reviewed locally.
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 from swift_autotrader.database.repository import TelegramStore
@@ -40,7 +41,7 @@ class TelegramListener:
         self.channel_id = channel_id
         self.queue: asyncio.Queue[TelegramMessage] = asyncio.Queue(maxsize=capacity)
         self.max_live_age_seconds = max_live_age_seconds
-        self.started_at_utc = started_at_utc or datetime.now(timezone.utc)
+        self.started_at_utc = started_at_utc or datetime.now(UTC)
         self.filtered = 0
         self.stored = 0
         self.duplicates = 0
@@ -76,13 +77,13 @@ class TelegramListener:
         except asyncio.QueueFull as exc:
             self.failure = QueueOverflow("Telegram queue capacity exceeded")
             self.store.mark_health(
-                "DEGRADED", at=datetime.now(timezone.utc),
+                "DEGRADED", at=datetime.now(UTC),
                 error_code="QUEUE_OVERFLOW", overflow=True,
             )
             raise self.failure from exc
 
     async def run(self, source: TelegramSource) -> None:
-        self.store.mark_health("CONNECTED", at=datetime.now(timezone.utc))
+        self.store.mark_health("CONNECTED", at=datetime.now(UTC))
         worker = asyncio.create_task(self._worker())
         source_error: BaseException | None = None
         try:
@@ -91,16 +92,21 @@ class TelegramListener:
             source_error = exc
         finally:
             try:
-                await self.queue.join()
+                if not worker.done():
+                    # A dead worker must never make shutdown wait indefinitely.
+                    await asyncio.wait_for(self.queue.join(), timeout=20)
+                if worker.done() and not worker.cancelled():
+                    with suppress(Exception):
+                        await worker
+            except asyncio.TimeoutError as exc:
+                self.failure = exc
             finally:
                 worker.cancel()
-                try:
+                with suppress(asyncio.CancelledError, Exception):
                     await worker
-                except asyncio.CancelledError:
-                    pass
                 self.store.mark_health(
                     "DEGRADED" if self.failure is not None else "STOPPED",
-                    at=datetime.now(timezone.utc),
+                    at=datetime.now(UTC),
                     error_code="INGEST_FAILURE" if self.failure is not None else None,
                 )
         if self.failure is not None:
