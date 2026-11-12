@@ -10,17 +10,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from swift_autotrader.config import Settings
 from swift_autotrader.database.repository import TelegramStore
 from swift_autotrader.telegram.events import EventKind, TelegramMessage
 from swift_autotrader.telegram.listener import TelegramListener
 from swift_autotrader.telegram.reconnect import with_reconnect
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 class LocalAuthorizationRequired(RuntimeError):
     """No enrolled local Telegram session or unavailable Swift channel."""
