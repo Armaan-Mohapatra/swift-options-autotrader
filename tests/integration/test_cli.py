@@ -14,7 +14,7 @@ def test_dry_run_is_side_effect_free(monkeypatch, capsys, tmp_path):
     result = json.loads(capsys.readouterr().out)
     assert result["orders_submitted"] == 0
     assert result["broker_writes_attempted"] == 0
-    assert not result["parser_implemented"]
+    assert result["parser_implemented"]
     assert not db.exists()
 
 
@@ -30,7 +30,7 @@ def test_migrate_is_explicit(monkeypatch, capsys, tmp_path):
     assert main(["migrate"]) == 0
     assert db.is_file()
     assert json.loads(capsys.readouterr().out)["applied_versions"] == [
-        "0001_initial.sql", "0002_telegram_ingest.sql",
+        "0001_initial.sql", "0002_telegram_ingest.sql", "0003_signal_linkage.sql",
     ]
     assert main(["migrate"]) == 0
     assert json.loads(capsys.readouterr().out)["applied_versions"] == []
@@ -61,4 +61,36 @@ def test_telegram_listen_cannot_run_without_auth(monkeypatch, capsys):
     monkeypatch.setenv("TELEGRAM_ENABLED", "true")
     monkeypatch.delenv("TELEGRAM_API_HASH", raising=False)
     assert main(["telegram-listen"]) == 2
+    assert json.loads(capsys.readouterr().err)["status"] == "ERROR"
+
+
+def test_parser_health_does_not_connect(monkeypatch, capsys, tmp_path):
+    db = tmp_path / "phase2.db"
+    monkeypatch.setenv("DB_PATH", str(db))
+    monkeypatch.setenv("SWIFT_TELEGRAM_CHANNEL_ID", "-1001234567890")
+    assert main(["migrate"]) == 0
+    capsys.readouterr()
+    assert main(["parse-health"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["decisions"]["PENDING"] == 0
+    assert result["status"] == "PARSER_HEALTH"
+
+
+def test_parser_replay_never_connects_or_trades(monkeypatch, capsys, tmp_path):
+    db = tmp_path / "phase2.db"
+    monkeypatch.setenv("DB_PATH", str(db))
+    monkeypatch.setenv("SWIFT_TELEGRAM_CHANNEL_ID", "-1001234567890")
+    assert main(["migrate"]) == 0
+    capsys.readouterr()
+    assert main(["parse-replay", "--limit", "15"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "PARSER_REPLAY_COMPLETE"
+    assert result["orders_submitted"] == 0
+    assert result["broker_writes_attempted"] == 0
+    assert result["catalog_validation"] == "UNAVAILABLE_REQUIRES_PHASE4"
+
+
+def test_parser_replay_requires_channel(monkeypatch, capsys):
+    monkeypatch.delenv("SWIFT_TELEGRAM_CHANNEL_ID", raising=False)
+    assert main(["parse-replay"]) == 2
     assert json.loads(capsys.readouterr().err)["status"] == "ERROR"

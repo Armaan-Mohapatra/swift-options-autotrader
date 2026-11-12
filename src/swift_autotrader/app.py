@@ -1,4 +1,4 @@
-"""Safe Phase 1 CLI: diagnostics, local storage and explicit read-only listener."""
+"""Paper-only CLI: diagnostics, explicit listener, parser replay, SQLite migration."""
 from __future__ import annotations
 
 import argparse
@@ -12,6 +12,7 @@ from swift_autotrader.config import ConfigurationError, Settings
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.database.repository import TelegramStore
 from swift_autotrader.logging_config import configure_logging
+from swift_autotrader.signals.lineage import SignalMatcher
 from swift_autotrader.telegram.client import start_listener
 
 
@@ -24,6 +25,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser("migrate", help="Explicitly initialize/migrate local SQLite DB")
     commands.add_parser("telegram-health", help="Read local metadata without connecting")
     commands.add_parser("telegram-listen", help="Read-only authorized Telegram listener")
+    replay = commands.add_parser("parse-replay", help="Classify stored events; no broker writes")
+    replay.add_argument("--limit", type=int, default=500)
+    commands.add_parser("parse-health", help="Read parser decision counts without connecting")
     args = parser.parse_args(argv)
     try:
         config = Settings.from_env()
@@ -38,7 +42,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "broker_writes_attempted": 0,
                 "telegram_connections_attempted": 0,
                 "orders_submitted": 0,
-                "parser_implemented": False,
+                "parser_implemented": True,
                 "paper_execution_implemented": False,
                 "configuration": config.public_summary(),
             }
@@ -48,6 +52,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             if config.telegram_channel_id is None:
                 raise ConfigurationError("Configure a Telegram channel ID for local health")
             payload = TelegramStore(config.db_path, config.telegram_channel_id).health()
+        elif args.command in {"parse-replay", "parse-health"}:
+            if config.telegram_channel_id is None:
+                raise ConfigurationError("Configure a single source channel ID to classify")
+            matcher = SignalMatcher(config.db_path, config.telegram_channel_id)
+            if args.command == "parse-replay":
+                # No live instrument adapter exists in Phase 2. Entry-like events
+                # are REVIEW_REQUIRED until contract existence is verified; do not
+                # pretend a synthetic test catalog validates real options.
+                outcomes = matcher.process_pending(limit=args.limit)
+                payload = {
+                    "status": "PARSER_REPLAY_COMPLETE",
+                    "processed": len(outcomes),
+                    "requires_review": sum(o.status == "REVIEW_REQUIRED" for o in outcomes),
+                    "orders_submitted": 0,
+                    "broker_writes_attempted": 0,
+                    "catalog_validation": "UNAVAILABLE_REQUIRES_PHASE4",
+                }
+            else:
+                payload = {"status": "PARSER_HEALTH", "decisions": matcher.statistics()}
         else:
             configure_logging(config.log_level)
             start_listener(config)
@@ -58,6 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"status": "STOPPED", "reason": "INTERRUPTED"}), file=sys.stderr)
         return 130
     except (ConfigurationError, OSError, ValueError, RuntimeError, sqlite3.DatabaseError) as exc:
+        # Never print private Telegram content, tokens, channel IDs, or DB paths.
         print(json.dumps({"status": "ERROR", "reason": type(exc).__name__}), file=sys.stderr)
         return 2
 
