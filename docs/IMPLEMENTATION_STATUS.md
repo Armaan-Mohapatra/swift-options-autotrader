@@ -20,3 +20,12 @@
 **Phase 2 final synthetic CI:** https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43291903449 — 208 unique tests × 4 runners, 832 test executions, no failures. Parser result snapshot: [normalized examples](PHASE_REPORTS/PHASE_2_PARSED_EXAMPLES.json). Phase 2 is stacked on Phase 1, itself stacked on Phase 0; `main` remains unchanged. No broker writes or deployment.
 
 **Phase 3 details:** [execution guide](PAPER_EXECUTION_PHASE3.md) and [checkpoint](PHASE_REPORTS/PHASE_3.md). The CLI has no authorized option-chain validation and deliberately rejects `paper-cycle` without a reviewed provider; no account or live authorization exists.
+
+## Phase 4 branch checkpoint
+
+Official MCP v2 client OAuth scaffolding and read-only account, option-chain,
+quote, review, positions and order-history adapters are implemented using
+synthetic mocks. Future order/cancel request payloads are inert; real brokerage
+writes remain blocked by code. OAuth, actual MCP server tool schemas and
+account-specific permissions are **not locally authenticated or validated**.
+See `docs/PHASE_REPORTS/PHASE_4.md` for CI evidence and caveats.

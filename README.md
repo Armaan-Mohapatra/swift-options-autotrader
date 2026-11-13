@@ -99,3 +99,12 @@ SOLD HALF, TRIM, RUNNERS OUT, ALL OUT and equivalent alerts request selling **al
 The synthetic test harness can provide a finite verified-**for-the-test** instrument set, tick size, session permission, buying power and fresh market observations. Production-quality market verification is **not available**. The standalone `paper-cycle` CLI therefore refuses to run even with `--confirm-simulation` until a reviewed verification provider is supplied; it does not poison durable signal eligibility using an empty catalog. `paper-health`, `paper-pause`, `paper-resume` and `paper-emergency-stop` operate on the dedicated migrated SQLite file. No deployment or unsupervised scheduled execution is configured.
 
 See [Phase 3 engineering guide](docs/PAPER_EXECUTION_PHASE3.md), [Phase 3 checkpoint](docs/PHASE_REPORTS/PHASE_3.md) and [draft PR #12](https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/12). The 253 synthetic and regression tests per job passed on Windows/Linux Python 3.11/3.13 at [code CI](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43354121094); the report-only checkpoint must be verified separately. No live broker writes or real trades are possible.
+
+## Phase 4: official Robinhood Trading MCP (read-only, mock-tested)
+
+`mcp-diagnostics` is offline by default. An opt-in `--connect` command requires
+separately authorized interactive Windows OAuth and is blocked in CI. The MCP
+endpoint is pinned to the official Robinhood HTTPS address. See
+`docs/ROBINHOOD_MCP_PHASE4.md` for supported tool contracts, security gates,
+local-auth requirements and open validation gaps. Phase 3 continues to accept
+only the simulated `PaperBroker`; all real broker writes remain disabled.

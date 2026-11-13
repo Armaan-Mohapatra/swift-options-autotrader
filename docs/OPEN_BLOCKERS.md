@@ -37,3 +37,15 @@ None of these blockers authorizes skipping tests, accessing user devices, or ena
 - PAPER-003: Exit orders rely on an explicit fresh matching test BID quote; if missing or unfilled, the position remains exposed and a durable alert requires operator action. Do not infer a successful close from intent submission.
 - PAPER-004: No continuous Windows supervisor, production CPU/RAM profiling, data backups or field-auth validation. Phase 6 is a separate local deployment authorization; Phase 7 still requires full replay/security audit.
 - GITHUB-002: Phase 3 PR #12 is stacked on PR #11, both draft/unmerged. No branch was merged or deployed.
+
+## Phase 4 unresolved local validation gates
+
+- Official Robinhood MCP OAuth/PKCE dynamic registration, redirect and token
+  refresh are untested with real accounts. Local Windows enrollment is required.
+- Exact live `tools/list` schemas, account agentic eligibility, options level,
+  buying power, tick sizes, supported hours, approvals, quote timestamps,
+  option-order response shapes and idempotency visibility need read-only testing.
+- `mcp==2.3.0` remains an optional *local* SDK dependency, not part of the
+  existing universal `uv.lock`. A platform-resolved lock and SBOM are needed.
+- Live brokerage write/cancel are intentionally disabled, not a future phase
+  being activated automatically.

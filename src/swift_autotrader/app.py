@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import importlib.util
 import json
 import sqlite3
 import sys
@@ -32,6 +34,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser("paper-pause", help="Prevent new paper entries")
     commands.add_parser("paper-resume", help="Resume paper entries unless emergency-stopped")
     commands.add_parser("paper-emergency-stop", help="Stop paper entries and cancel resting buys")
+    diagnostics = commands.add_parser(
+        "mcp-diagnostics", help="Robinhood MCP diagnostics; offline unless --connect"
+    )
+    diagnostics.add_argument("--connect", action="store_true", help="Local manual OAuth only")
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")
     args = parser.parse_args(argv)
@@ -53,6 +59,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "paper_execution_mode": "SYNTHETIC_ONLY_WITH_EXPLICIT_PREFLIGHT",
                 "configuration": config.public_summary(),
             }
+        elif args.command == "mcp-diagnostics":
+            if args.connect:
+                from swift_autotrader.broker.mcp_local_auth import local_readonly_diagnostics
+                payload = asyncio.run(local_readonly_diagnostics())
+            else:
+                from swift_autotrader.broker.mcp_transport import ROBINHOOD_MCP_ENDPOINT
+                payload = {
+                    "status": "REQUIRES_LOCAL_AUTH",
+                    "endpoint": ROBINHOOD_MCP_ENDPOINT,
+                    "sdk_available": importlib.util.find_spec("mcp") is not None,
+                    "connection_attempted": False,
+                    "real_broker_writes_enabled": False,
+                }
         elif args.command == "migrate":
             payload = {"status": "MIGRATED", "applied_versions": apply_migrations(config.db_path)}
         elif args.command == "telegram-health":

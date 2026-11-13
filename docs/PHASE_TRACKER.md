@@ -14,3 +14,10 @@ Each phase requires its own explicit user instruction and an independently revie
 | 7 | End-to-end integration audit, paper release handoff | Complete synthetic scenarios, security/license audit, passing CI; release still paper-only | NOT_STARTED |
 
 Statuses: `NOT_STARTED`, `CODE_COMPLETE`, `CI_PASSED`, `REQUIRES_LOCAL_AUTH`, `FORWARD_TESTING`, `LIVE_APPROVED` only with corresponding evidence. `LOCAL_TESTED` and `REMOTE_BLOCKED` are informational labels and **not** equivalent to `CI_PASSED`.
+
+### Phase 4 review checkpoint
+
+Read-only Robinhood MCP OAuth SDK scaffolding, mock-tested tool data adapters,
+request construction and no-network diagnostics are on draft Phase 4 branch.
+Real OAuth, account/tool schema validation, market hours/ticks and any writes
+remain blocked; do not treat mock CI as forward validation.

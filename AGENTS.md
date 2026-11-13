@@ -52,3 +52,11 @@
 - On any explicit partial/full exit, cancel resting entries and verify terminal status before sending an at-most-once exit intent covering **100%** of the actually filled balance. An unfilled exit stays exposed and alerts.
 - Strong stop/pause guards, local OS single-cycle lock, bounded fresh quote policy and fail-closed risk ceilings are required. No fake fills, no claim of live market accuracy.
 - Keep Phase 3 PR #12 draft and stacked on unmerged Phase 2 PR #11; no merges, account auth, user-PC installs, or deployment. Phase 4+ needs separate explicit authorization.
+
+## Phase 4 read-only MCP safety
+
+`RobinhoodMCPBroker` may inspect supported official tool data and build inert
+future-write request payloads; it must **never call** `place_option_order` or
+`cancel_option_order` during GitHub phases. OAuth must remain local, opt-in and
+outside CI. Do not weaken the Phase 3 concrete-PaperBroker guard or existing
+entry/exit rules. Consult `docs/ROBINHOOD_MCP_PHASE4.md` for known blockers.
