@@ -166,6 +166,8 @@ class MCPInstrument:
     contract: OptionContract
     tradable: bool
     chain_id: str | None
+    minimum_tick: Decimal | None = None
+    multiplier: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +176,8 @@ class MCPQuote:
     bid: Decimal
     ask: Decimal
     observed_at_utc: datetime
+    bid_size: int | None = None
+    ask_size: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,7 +363,21 @@ class RobinhoodMCPBroker:
                     item.get("tradability") == "tradable"
                     and item.get("state") == "active"
                 )
-                matches.append(MCPInstrument(_identifier(option_id), contract, tradable, chain_id))
+                # Unsupported fields are missing, not guessed from typical options.
+                tick_raw = item.get("minimum_tick")
+                tick = _money(tick_raw, "minimum_tick") if tick_raw is not None else None
+                if tick is not None and tick <= 0:
+                    raise MCPContractError("Nonpositive option tick")
+                multiplier_raw = item.get("multiplier")
+                multiplier = None
+                if multiplier_raw is not None:
+                    if type(multiplier_raw) is not int or multiplier_raw < 1:
+                        raise MCPContractError("Unknown option multiplier")
+                    multiplier = multiplier_raw
+                matches.append(
+                    MCPInstrument(_identifier(option_id), contract, tradable, chain_id,
+                                  tick, multiplier)
+                )
         if len(matches) != 1 or not matches[0].tradable:
             raise MCPContractError("Exact, unique, tradable option instrument not verified")
         return matches[0]
@@ -380,7 +398,18 @@ class RobinhoodMCPBroker:
         age = (current.astimezone(UTC) - observed).total_seconds()
         if age < 0 or age > max_age_seconds or ask < bid:
             raise MCPContractError("Option quote is stale or crossed")
-        return MCPQuote(instrument.option_id, bid, ask, observed)
+        def optional_depth(name: str) -> int | None:
+            value = matches[0].get(name)
+            if value is None:
+                return None
+            if type(value) is not int or value < 0:
+                raise MCPContractError("Invalid displayed option depth")
+            return value
+
+        return MCPQuote(
+            instrument.option_id, bid, ask, observed,
+            optional_depth("bid_size"), optional_depth("ask_size"),
+        )
 
     @staticmethod
     def order_arguments(account: MCPAccount, instrument: MCPInstrument,

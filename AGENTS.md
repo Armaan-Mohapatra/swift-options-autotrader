@@ -86,3 +86,8 @@ entry/exit rules. Consult `docs/ROBINHOOD_MCP_PHASE4.md` for known blockers.
 - Preserve exact Swift original limit, broker acceptance + 3,600 seconds, no adds, Swift average separation, close 100%, and no market-price invention. The paper engine must accept only a concrete PaperBroker; MCP trade/cancel functions remain hard-denied.
 - No source-content, credential, host-machine, task-scheduler, release-tag, deployment or live-trading side effects during the GitHub audit. Local operator steps remain separately approved.
 - The Windows supervisor does not automate source-to-paper execution; do not claim unattended 24/7 paper trading until independently verified instrument/quote/preflight wiring and forward validation are reviewed.
+
+
+## Phase 8 review-only source boundary
+
+The optional `paper_dispatch.py` is a separately supervised PAPER-only worker, disabled by default. It must never connect a Robinhood live order/cancel method to the engine. The only execution broker permitted is concrete `PaperBroker`. Unavailable contract/quote/tick/depth/calendar/approval evidence must preserve unparsed alerts and run only the pending-order watchdog. Never call the parser with an empty catalog during provider outages. No strategy rule changes, hidden quote size defaults or guaranteed fill claims. Code is a candidate until native Windows/Linux CI, optional MCP transitive lock, official real read-only tool schemas and owner approval exist. See `docs/PAPER_DISPATCH_PHASE8.md`.

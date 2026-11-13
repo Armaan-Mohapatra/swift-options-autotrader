@@ -37,3 +37,13 @@ Changes are described in developer/source terms, not as validated market trading
 ## Phase 0 — Foundation (unreleased)
 
 - Project specification, paper-only skeleton, initial SQLite WAL and CI scaffolding.
+
+
+## Unreleased — Phase 8 PAPER dispatcher source candidate
+
+- Added opt-in, independently supervised Telegram → strict verified-data → PAPER execution worker, reusing existing parser, paper broker and SQLite.
+- Added hard data-unavailable guard preserving source events and continuing 3,600-second cancellations; no price guessing or real broker writes.
+- Added explicit optional MCP option tick, multiplier and bid/ask depth fields that remain **unknown** when absent; unapproved external brokerage data does not validate live execution.
+- Added opt-in Windows supervisor settings and separated user-secret handling; no host installation or real OAuth occurred.
+- Added simulated end-to-end dispatcher tests and technical release-blocker documentation.
+- **Unreleased, no certification:** mandatory GitHub Actions runner allocation and optional SDK lock are blocked.

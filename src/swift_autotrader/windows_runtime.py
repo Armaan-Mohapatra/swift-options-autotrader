@@ -243,6 +243,14 @@ class PaperSupervisor:
         ))]
         if settings.telegram_enabled:
             self.children.append(Child("telegram", ("telegram-listen",)))
+        if self.env.get("PAPER_DISPATCH_ENABLED") == "true":
+            if not settings.telegram_enabled or (
+                self.env.get("PAPER_MARKET_DATA_SOURCE") != "robinhood_mcp_readonly"
+            ):
+                raise RuntimeError("PAPER dispatch requires authorized read-only sources")
+            self.children.append(Child("paper-dispatch", (
+                "paper-dispatch-service", "--root", str(self.root),
+            )))
         self._fail_times: list[float] = []
         self._threads: list[threading.Thread] = []
         self._last_backup_at: float | None = None
@@ -260,9 +268,13 @@ class PaperSupervisor:
         child_env = {key: value for key, value in self.env.items()
                      if key not in {"TELEGRAM_STATUS_BOT_TOKEN", "TELEGRAM_STATUS_CHAT_ID"}}
         if child.name != "telegram":
-            for key in ("TELEGRAM_API_HASH", "TELEGRAM_API_ID",
-                        "TELEGRAM_SESSION_PATH", "SWIFT_TELEGRAM_CHANNEL_ID"):
+            for key in ("TELEGRAM_API_HASH", "TELEGRAM_API_ID", "TELEGRAM_SESSION_PATH"):
                 child_env.pop(key, None)
+            child_env["TELEGRAM_ENABLED"] = "false"
+            if child.name != "paper-dispatch":
+                child_env.pop("SWIFT_TELEGRAM_CHANNEL_ID", None)
+                child_env.pop("PAPER_DISPATCH_ENABLED", None)
+                child_env.pop("PAPER_MARKET_DATA_SOURCE", None)
         child.process = self.spawn(
             [sys.executable, "-m", "swift_autotrader", *child.args],
             env=child_env, cwd=str(self.root), stdout=subprocess.PIPE,
@@ -294,7 +306,9 @@ class PaperSupervisor:
             "status": state, "as_of_utc": _now(), "pid": os.getpid(),
             "mode": "PAPER_ONLY", "live_enabled": False,
             "broker_writes_enabled": False,
-            "automated_paper_orders": False,
+            "automated_paper_orders": (
+                self.env.get("PAPER_DISPATCH_ENABLED") == "true"
+            ),
             "workers": {c.name: c.process is not None and c.process.poll() is None
                         for c in self.children},
         })

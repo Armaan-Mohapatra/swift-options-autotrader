@@ -49,6 +49,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "mcp-diagnostics", help="Robinhood MCP diagnostics; offline unless --connect"
     )
     diagnostics.add_argument("--connect", action="store_true", help="Local manual OAuth only")
+    service = commands.add_parser(
+        "paper-dispatch-service", help="Explicit Windows-only opt-in PAPER worker"
+    )
+    service.add_argument("--root", required=True)
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")
     args = parser.parse_args(argv)
@@ -70,6 +74,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "paper_execution_mode": "SYNTHETIC_ONLY_WITH_EXPLICIT_PREFLIGHT",
                 "configuration": config.public_summary(),
             }
+        elif args.command == "paper-dispatch-service":
+            from pathlib import Path
+
+            from swift_autotrader.paper_service import run_paper_service
+
+            asyncio.run(run_paper_service(config, Path(args.root)))
+            payload = {"status": "PAPER_DISPATCH_STOPPED", "real_broker_writes": 0}
         elif args.command == "mcp-diagnostics":
             if args.connect:
                 from swift_autotrader.broker.mcp_local_auth import local_readonly_diagnostics
