@@ -9,7 +9,7 @@
 | OPS-001 | Telegram channel authorization/identifiers and paid content unavailable by design; no authentic ingestion tests. | Phase 1 local secure user approval and synthetic CI mocks. | Future local auth |
 | OPS-002 | Robinhood official Agentic Trading MCP authentication, schema and permission set not validated; no real order permissions. | Phase 4 official docs/mock contract tests and later separate local auth. | Future integration gate |
 | OPS-003 | Real market-data option chain validation, option tick/session constraints, buying-power and exact order review not implemented. Phase 2 test catalog is synthetic only. | Phase 4 official connector and Phase 3 risk/order integration; no automated entry eligibility before real catalog validation. | Future execution gate |
-| OPS-004 | Paper engine, fill reconciliation, cancel/fill races, durable submissions and kill switch not implemented. | Phase 3. | Future execution gate |
+| OPS-004 | **RESOLVED FOR SYNTHETIC PAPER ONLY:** Phase 3 implements durable paper fills, cancel/fill races, risk gates, idempotent intents, reconciliation and stop. No official broker/market forward-validation. | [Phase 3 report](PHASE_REPORTS/PHASE_3.md); Phase 4/6 require new independent approvals. | Synthetic scope complete; live validation open |
 | OPS-005 | Windows runtime, protected secrets, scheduler, secure online backups and metrics not implemented. | Phases 5–6. | Future deployment gate |
 
 None of these blockers authorizes skipping tests, accessing user devices, or enabling live trading.
@@ -27,5 +27,13 @@ None of these blockers authorizes skipping tests, accessing user devices, or ena
 - PARSER-001: Real authorized Swift paid-channel alert formats (including actual spacing, edits, replies and duplicates) were **not** accessed. 81/81 in-sample synthetic agreement is not measured real-world accuracy; no forward validation exists.
 - CATALOG-001: The deterministic parser requires a real verified option listing, including expiration year. Until the official read-only broker integration is available in a later phase, `parse-replay` holds otherwise syntactically valid entries at `REVIEW_REQUIRED / INSTRUMENT_CATALOG_REQUIRED`.
 - REVIEW-001: Ambiguous updates and missing reply ancestry persist as review records; no reviewed operator UI or authority to resolve into executable trades exists yet.
-- EXEC-001: CLOSE_100_PERCENT is an interpreted close **request only**, with no verification of positions or fills and no order submission. Implementation is Phase 3+.
+- EXEC-001: **Synthetic-only resolved in Phase 3:** CLOSE_100_PERCENT triggers cancellation confirmation and then a paper sell-to-close limit covering the confirmed matching fills. Real broker confirmation/forward execution still requires Phase 4 and later approval.
 - GITHUB-001: Draft PR #11 stacks on #10 and #1; review/merge order is explicit and no branch was automatically merged.
+
+### Phase 3 paper lifecycle gates
+
+- PAPER-001: The paper broker, paper fills, quote crossing and buying-power model are deterministic synthetic test fixtures; they do not represent a validated Robinhood account, real option chain, option bid/ask, fees, slippage or fills.
+- PAPER-002: The standalone `paper-cycle` command is intentionally not a trading-ready live Telegram consumer: without independent catalog/session/permissions checks it fails closed and does not mutate signal eligibility. Phase 4 must supply a reviewed verified instrument and account source, still paper-only.
+- PAPER-003: Exit orders rely on an explicit fresh matching test BID quote; if missing or unfilled, the position remains exposed and a durable alert requires operator action. Do not infer a successful close from intent submission.
+- PAPER-004: No continuous Windows supervisor, production CPU/RAM profiling, data backups or field-auth validation. Phase 6 is a separate local deployment authorization; Phase 7 still requires full replay/security audit.
+- GITHUB-002: Phase 3 PR #12 is stacked on PR #11, both draft/unmerged. No branch was merged or deployed.
