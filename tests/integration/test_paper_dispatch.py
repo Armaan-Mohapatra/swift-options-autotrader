@@ -300,3 +300,49 @@ def test_exit_without_quote_persists_unresolved_exposure_alert(rig):
         assert con.execute("SELECT COUNT(*) FROM paper_engine_alerts WHERE code='EXIT_QUOTE_MISSING' AND resolved=0").fetchone()[0] > 0 or con.execute("SELECT COUNT(*) FROM paper_engine_alerts WHERE code='EXIT_PRICE_UNKNOWN' AND resolved=0").fetchone()[0] > 0
         assert con.execute("SELECT COUNT(*) FROM order_intents WHERE side='SELL_TO_CLOSE'").fetchone()[0] == 0
 
+
+def test_large_burst_is_bounded_and_drains_over_multiple_cycles(rig):
+    """More than one provider batch is handled without overloading a poll."""
+    path, _clock, feed, _, _worker = rig
+    seen_batch_sizes = []
+    original_snapshot = feed.snapshot
+
+    async def bounded_snapshot(entries, active, now):
+        seen_batch_sizes.append(len(entries))
+        assert len(entries) <= 12
+        return await original_snapshot(entries, active, now)
+
+    feed.snapshot = bounded_snapshot
+    for index in range(61):
+        ingest(rig, "SPY 680C 11/13 @ 1.20", 1500 + index)
+    first = cycle(rig)
+    assert first.parsed_events == 48
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM signal_parser_decisions").fetchone()[0] == 48
+    second = cycle(rig)
+    assert second.parsed_events == 13
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM signal_parser_decisions").fetchone()[0] == 61
+    assert seen_batch_sizes and max(seen_batch_sizes) <= 12
+
+
+def test_due_cancellation_occurs_before_network_provider_request(rig):
+    """The 60-minute watchdog must run even if the next quote request stalls."""
+    path, clock, feed, _, _worker = rig
+    ingest(rig, "SPY 680C 11/13 @ 1.20", 1101)
+    feed.ask = Decimal("1.60")
+    feed.bid = Decimal("1.55")
+    assert cycle(rig).entry_orders == 1
+    clock.now += timedelta(seconds=3600)
+
+    async def check_cancel_before_data(*args):
+        with sqlite3.connect(path) as db:
+            status = db.execute(
+                "SELECT state FROM order_intents WHERE side='BUY_TO_OPEN'"
+            ).fetchone()[0]
+        assert status in {"CANCELED", "CANCEL_PENDING"}
+        raise MarketEvidenceUnavailable("Intentionally offline after deadline")
+
+    feed.snapshot = check_cancel_before_data
+    result = cycle(rig)
+    assert result.status == "PAUSED_DATA_UNAVAILABLE"

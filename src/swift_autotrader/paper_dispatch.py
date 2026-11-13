@@ -218,6 +218,9 @@ class PaperDispatcher:
         precise contract and matching quote pass verification.
         """
         now = as_utc(self.clock())
+        # Run the local order watchdog BEFORE optional external read-only data.
+        # A long quote lookup must never postpone a due entry cancellation.
+        self.engine.run_cycle(allow_entries=False)
         _all_entries, active = self._pending_and_active()
         rows = self._pending_rows
         matcher = SignalMatcher(self.db_path, self.channel_id)
@@ -265,6 +268,9 @@ class PaperDispatcher:
             and 0 <= (now - as_utc(sent)).total_seconds()
             <= self.limits.entry_max_age_seconds
         ]
+        # Bound per-cycle network work. Unprocessed events remain in the
+        # durable store and will be revisited next cycle, not falsely skipped.
+        eligible_rows = eligible_rows[:48]
         verified_ids: list[int] = []
         # Batch and bisect to isolate one bad contract, without hammering a
         # provider for every ordinary BUY. A group never exceeds the cap of 12.
@@ -304,10 +310,13 @@ class PaperDispatcher:
                     quotes[contract] = quote
         if verified_ids:
             catalog = StaticInstrumentCatalog(instruments)
-            decisions.extend(SignalMatcher(self.db_path, self.channel_id,
-                                           catalog=catalog).process_pending(
-                                               revision_ids=verified_ids,
-                                           ))
+            # The parser admits at most 500 explicit revision IDs per call.
+            # Keep this bound even if the per-cycle network cap is raised.
+            for offset in range(0, len(verified_ids), 500):
+                decisions.extend(SignalMatcher(self.db_path, self.channel_id,
+                                               catalog=catalog).process_pending(
+                                                   revision_ids=verified_ids[offset:offset + 500],
+                                               ))
         # A pending reply to an entry can now be resolved in the same cycle.
         if verified_ids:
             remaining = [rid for rid, alert, _eligible, _sent, _reply in rows

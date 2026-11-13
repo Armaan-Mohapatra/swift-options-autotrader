@@ -68,6 +68,15 @@ def _commit(source: Path) -> str:
         raise RuntimeError("Source is not a verified Git checkout") from None
     if not re.fullmatch(r"[0-9a-f]{40}", result):
         raise RuntimeError("Cannot verify full Git source commit")
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(source), "status", "--porcelain", "--untracked-files=all"],
+            capture_output=True, text=True, check=True, timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("Cannot inspect source checkout cleanliness") from exc
+    if status.strip():
+        raise RuntimeError("Source checkout is dirty or has uncommitted files")
     return result
 
 
@@ -83,6 +92,20 @@ def create_package(source: Path, output: Path, *, expected_commit: str | None = 
         if not expected_commit or commit != expected_commit:
             raise RuntimeError("Checkout differs from expected, reviewed full SHA")
     sources = collect_sources(source)
+    if not allow_local_test:
+        # An ignored .py/.sql/.ps1 may be picked up by collect_sources even
+        # when Git considers the worktree clean. Only HEAD-tracked payloads
+        # may claim the approved source SHA.
+        try:
+            indexed = subprocess.run(
+                ["git", "-C", str(source), "ls-files", "--cached", "-z"],
+                capture_output=True, check=True, timeout=10,
+            ).stdout
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError("Cannot verify tracked release source files") from exc
+        tracked = {p.decode("utf-8") for p in indexed.split(b"\0") if p}
+        if set(sources) - tracked:
+            raise RuntimeError("Release source includes untracked or ignored files")
     version = tomllib.loads(sources["pyproject.toml"].decode("utf-8"))["project"]["version"]
     if not isinstance(version, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", version):
         raise RuntimeError("Unsupported release package version")
