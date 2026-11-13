@@ -39,7 +39,8 @@ def event(
 def database(tmp_path):
     db = tmp_path / "messages.sqlite3"
     assert apply_migrations(db) == [
-        "0001_initial.sql", "0002_telegram_ingest.sql", "0003_signal_linkage.sql",
+        "0001_initial.sql", "0002_telegram_ingest.sql",
+        "0003_signal_linkage.sql", "0004_paper_orders.sql",
     ]
     return db
 
