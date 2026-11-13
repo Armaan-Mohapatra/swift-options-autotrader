@@ -21,10 +21,10 @@ def prepared(tmp_path):
         db.execute("INSERT INTO option_signals(signal_id,underlying,option_right,strike,"
                    "expiration_date,original_limit,swift_reported_avg,"
                    "confirmed_avg_fill_price,state,created_at_utc)"
-                   "VALUES('sig','SPY','CALL','680','2026-11-13','1.20','0.95','1.25',"
+                   "VALUES('sig','SPY','CALL','680','2026-11-13','1.60','0.95','1.25',"
                    "'PARTIAL_CLOSE',?)", (iso(NOW - timedelta(minutes=5)),))
         for suffix, side, quantity, price in (
-            ("entry", "BUY_TO_OPEN", 2, "1.20"),
+            ("entry", "BUY_TO_OPEN", 2, "1.60"),
             ("close", "SELL_TO_CLOSE", 1, "1.80"),
         ):
             db.execute("INSERT INTO order_intents(logical_order_id,signal_id,idempotency_key,"
@@ -122,3 +122,11 @@ def test_net_metrics_do_not_invent_fees(tmp_path):
     assert r["realized_net_usd"] is None
     assert r["realized_gross_usd"] == "100.00"
     assert r["win_rate"] is None
+
+
+def test_corrupt_fill_beyond_limit_cannot_report_profit(tmp_path):
+    path = prepared(tmp_path)
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE order_fills SET filled_price='1.70' WHERE fill_id='b2'")
+    with pytest.raises(ValueError, match="original limit"):
+        PaperAnalytics(path).snapshot(as_of=NOW)

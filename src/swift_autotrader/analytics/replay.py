@@ -284,6 +284,32 @@ class HistoricalReplay:
             engine.run_cycle(quotes={})
             report = PaperAnalytics(db_path, costs=costs).snapshot(as_of=self.end)
             with sqlite3.connect(db_path) as db:
+                db.row_factory = sqlite3.Row
+                entry_orders = db.execute(
+                    "SELECT o.requested_quantity,o.filled_quantity,o.state,"
+                    "o.accepted_at_utc,o.expires_at_utc,s.underlying,s.option_right,"
+                    "s.strike,s.expiration_date FROM order_intents o "
+                    "JOIN option_signals s ON s.signal_id=o.signal_id "
+                    "WHERE o.side='BUY_TO_OPEN'"
+                ).fetchall()
+                unfilled_contracts = sum(int(r[0]) - int(r[1]) for r in entry_orders)
+                missing_quote_coverage = 0
+                for order in entry_orders:
+                    accepted = dt(order["accepted_at_utc"])
+                    if accepted is None:
+                        missing_quote_coverage += 1
+                        continue
+                    end = min(self.end, dt(order["expires_at_utc"]) or self.end)
+                    observed = db.execute(
+                        "SELECT 1 FROM paper_market_observations "
+                        "WHERE underlying=? AND option_right=? AND strike=? "
+                        "AND expiration_date=? AND observed_at_utc>=? "
+                        "AND observed_at_utc<=? LIMIT 1",
+                        (order["underlying"], order["option_right"], order["strike"],
+                         order["expiration_date"], iso(accepted), iso(end)),
+                    ).fetchone()
+                    if observed is None:
+                        missing_quote_coverage += 1
                 db.execute(
                     "INSERT INTO replay_runs(run_id,input_sha256,source_type,assumption,"
                     "started_at_utc,end_at_utc,evidence_quality) VALUES(?,?,?,?,?,?,?)",
@@ -300,6 +326,11 @@ class HistoricalReplay:
                 "quote_observations": observed_quotes,
                 "quote_based_fill_contracts": fills_from_quotes,
                 "unfilled_resting_orders": len(report["pending_orders"]),
+                "unfilled_entry_contracts": unfilled_contracts,
+                "entry_orders_without_quote_coverage": missing_quote_coverage,
+                "missed_fill_interpretation": (
+                    "UNFILLED_IS_NOT_PROOF_MARKET_FILL_WAS_POSSIBLE"
+                ),
                 "not_evaluable_without_quotes": observed_quotes == 0,
                 "report": report,
             }

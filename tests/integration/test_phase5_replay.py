@@ -187,3 +187,72 @@ def test_no_extra_buy_after_adding_more():
     assert len(pos) == 1
     assert pos[0]["filled_buy_contracts"] == 2
     assert r["report"]["orders_by_state"] == {"FILLED": 2}
+
+
+def test_touch_vs_through_assumptions_diverge_at_exact_limit():
+    data = sample()
+    data["events"][1]["bid"] = "1.18"
+    data["events"][1]["ask"] = "1.20"
+    x = HistoricalReplay(data).compare()["assumptions"]
+    assert x[0]["quote_based_fill_contracts"] == 4
+    assert x[1]["quote_based_fill_contracts"] == 0
+    assert x[2]["quote_based_fill_contracts"] == 0
+
+
+def test_ambiguous_ticker_only_exit_cannot_close_two_contracts():
+    data = sample()
+    additional = {
+        "symbol": "SPY", "right": "CALL", "strike": "681",
+        "expiration": "2026-11-13", "tick": "0.01",
+        "options_permission": True, "market_session_open": True,
+        "buying_power_usd": "10000",
+    }
+    data["catalog"].append(additional)
+    data["events"] = [
+        data["events"][0],
+        {"kind": "message", "at_utc": "2026-11-12T15:00:01Z",
+         "message_id": 2, "text": "SPY 681C 11/13 @ .90"},
+        data["events"][1],
+        {"kind": "quote", "at_utc": "2026-11-12T15:00:35Z", "quote_id": "q-other",
+         "contract": {"symbol": "SPY", "right": "CALL",
+                      "strike": "681", "expiration": "2026-11-13"},
+         "bid": "0.80", "ask": "0.85", "bid_size": 10, "ask_size": 3},
+        {"kind": "message", "at_utc": "2026-11-12T15:01:00Z",
+         "message_id": 3, "text": "SPY SOLD HALF"},
+    ]
+    data["end_at_utc"] = "2026-11-12T15:01:01Z"
+    report = HistoricalReplay(data).run()["report"]
+    assert len(report["positions"]) == 2
+    assert sum(p["open_contracts"] for p in report["positions"]) == 4
+    assert report["parser_by_status"]["REVIEW_REQUIRED"] == 1
+    assert "FILLED" in report["orders_by_state"]
+    assert all(p["filled_sell_contracts"] == 0 for p in report["positions"])
+
+
+def test_explicit_utc_offset_replays_equivalent_instants():
+    data = sample()
+    for event in data["events"]:
+        event["at_utc"] = event["at_utc"].replace("15:", "07:").replace("Z", "-08:00")
+    data["end_at_utc"] = data["end_at_utc"].replace("15:", "07:").replace(
+        "Z", "-08:00"
+    )
+    r = HistoricalReplay(data).run()["report"]
+    assert r["realized_gross_usd"] == "42.00"
+
+
+def test_unfilled_orders_report_coverage_without_inventing_missed_market_fills():
+    data = sample()
+    data["events"] = [data["events"][0]]
+    data["end_at_utc"] = "2026-11-12T16:00:00Z"
+    result = HistoricalReplay(data).run()
+    assert result["unfilled_entry_contracts"] == 2
+    assert result["entry_orders_without_quote_coverage"] == 1
+    assert "NOT_PROOF" in result["missed_fill_interpretation"]
+    data = sample()
+    for e in data["events"]:
+        if e["kind"] == "quote":
+            e["bid"] = "1.25"
+            e["ask"] = "1.30"
+    result = HistoricalReplay(data).run()
+    assert result["unfilled_entry_contracts"] == 2
+    assert result["entry_orders_without_quote_coverage"] == 0

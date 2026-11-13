@@ -62,7 +62,8 @@ class PaperAnalytics:
     @staticmethod
     def _filled(db: sqlite3.Connection, signal_id: str, side: str) -> list[sqlite3.Row]:
         return db.execute(
-            "SELECT f.filled_quantity AS qty,f.filled_price AS price,f.filled_at_utc AS at "
+            "SELECT f.filled_quantity AS qty,f.filled_price AS price,f.filled_at_utc AS at, "
+            "o.limit_price AS limit_price "
             "FROM order_fills f JOIN order_intents o ON o.logical_order_id=f.logical_order_id "
             "WHERE o.signal_id=? AND o.side=? ORDER BY f.filled_at_utc,f.fill_id",
             (signal_id, side),
@@ -103,6 +104,11 @@ class PaperAnalytics:
                 sid = str(signal["signal_id"])
                 buys = self._filled(db, sid, "BUY_TO_OPEN")
                 sells = self._filled(db, sid, "SELL_TO_CLOSE")
+                # Never report fictitious profitability from a corrupted fill ledger.
+                if any(Decimal(f["price"]) > Decimal(f["limit_price"]) for f in buys):
+                    raise ValueError("buy fill violates original limit")
+                if any(Decimal(f["price"]) < Decimal(f["limit_price"]) for f in sells):
+                    raise ValueError("sell fill violates exit limit")
                 buy_units = sum(int(f["qty"]) for f in buys)
                 sell_units = sum(int(f["qty"]) for f in sells)
                 if sell_units > buy_units:

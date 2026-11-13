@@ -73,7 +73,10 @@ p.source_limit,p.realized_gross_usd,p.unrealized_gross_usd,p.mark_status]));
 table('messages',['Message','Intent','Status','Reason','Received'],
 x.recent_messages.map(m=>[m.message_id,m.intent,m.status,m.reason,m.received_at_utc]));
 table('alerts',['Category','Code','Severity','UTC'],
-x.notifications.map(n=>[n.category,n.code,n.severity,n.created_at_utc]));
+[...x.notifications.map(n=>[n.category,n.code,n.severity,n.created_at_utc]),
+...x.alerts.map(a=>['PAPER_ORDER',a.code,'ERROR',a.recorded_at_utc]),
+...(x.telegram.status==='DEGRADED'||x.telegram.status==='DISCONNECTED' ?
+[['TELEGRAM_SERVICE','TELEGRAM_'+x.telegram.status,'ERROR',x.as_of_utc]] : [])]);
 byId('status').textContent='Updated '+x.as_of_utc+' · Fees: '+safe(x.costs_assumed.fee_per_contract_side_usd)+
 ' · All figures simulated; missing quotes are unavailable.';
 } catch (_) {byId('status').textContent='Local status unavailable. No data has been inferred.';}}
