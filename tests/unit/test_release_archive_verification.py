@@ -19,7 +19,7 @@ COMMIT = 'a' * 40
 
 def prepared(tmp_path, *, extra=None):
     files = {
-        'pyproject.toml': b'[project]\\nname="swift-options-autotrader"\\nversion="0.1.0"\\n',
+        'pyproject.toml': b'[project]\nname="swift-options-autotrader"\nversion="0.1.0"\n',
         'uv.lock': b'synthetic only',
         'deployment/windows/setup.ps1': b'# synthetic only',
         'deployment/windows/common.ps1': b'# synthetic',
