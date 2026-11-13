@@ -11,9 +11,9 @@ Two GitHub source blobs were copied byte-for-byte into a disposable local Python
 - `deployment/windows/extract_approved_package.py` — blob `4cbaabf0522fe8e3c015e456ec6bf95bc0a20230`.
 - `scripts/build_windows_package.py` — original blob `54c9399bb1fc404e946f1e18821c0e4c9c2c3fce`, then modified and rerun; fixed blob `3e230946a162fd59cd092170bd8c36a2ba100320`.
 
-The independent pytest run reported **29 passing focused tests** after repairs:
+The independent pytest run reported **30 passing focused tests** after repairs:
 - 25 ZIP extraction validation cases: correct input, metadata, version, checksum, unsafe path, overwrite, and tamper handling.
-- 4 disposable local Git repository cases: clean checkout accepted; edited tracked code, new untracked code, and Git-ignored source rejected.
+- 5 disposable local Git/package integration cases: clean checkout accepted; edited tracked code, new untracked code, and Git-ignored source rejected; clean approved ZIP round-trips through the independent extractor.
 
 Before the fix, the three unclean Git source cases **failed**: the original builder claimed the clean HEAD commit while including uncommitted code. The remediation rejects dirty worktrees and confirms every packaged path is Git-tracked. This is necessary but not sufficient for signed release provenance.
 
