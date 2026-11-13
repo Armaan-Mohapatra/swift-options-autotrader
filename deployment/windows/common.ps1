@@ -150,30 +150,7 @@ function Set-SwiftEnvironment {
             throw 'Manually enrolled read-only MCP OAuth tokens required'
         }
         foreach ($field in @('paper_max_premium_usd','paper_max_exposure_usd')) {
-            if ([string]$cfg.$field -notmatch '^[0-9]+(\.[0-9]{1,2})?
-        $tokenFile = Join-Path $InstallRoot 'secrets\status_bot_token.dpapi'
-        if (-not (Test-Path -LiteralPath $tokenFile -PathType Leaf) -or
-            $null -eq $cfg.status_chat_id) {
-            throw 'Status bot token/chat target not configured.'
-        }
-        if ($cfg.status_chat_id -eq $cfg.telegram_channel_id) {
-            throw 'Status notifications cannot be sent to the Swift source channel.'
-        }
-        $secret = Get-Content -LiteralPath $tokenFile -Raw -Encoding UTF8 | ConvertTo-SecureString
-        $bstr = [IntPtr]::Zero
-        try {
-            $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)
-            $env:TELEGRAM_STATUS_BOT_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-        } finally {
-            if ($bstr -ne [IntPtr]::Zero) {
-                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-            }
-        }
-        $env:TELEGRAM_STATUS_CHAT_ID = [string]$cfg.status_chat_id
-        $env:ENABLE_TELEGRAM_STATUS_NOTIFICATIONS = 'true'
-    }
-}
-) {
+            if ([string]$cfg.$field -notmatch '^[0-9]+(\.[0-9]{1,2})?$') {
                 throw 'Approved paper risk ceilings must be exact nonnegative dollars'
             }
         }
