@@ -69,3 +69,11 @@ entry/exit rules. Consult `docs/ROBINHOOD_MCP_PHASE4.md` for known blockers.
 - Missing fees, quotes, timestamp provenance or fill evidence must produce unavailable or UNVERIFIED_ESTIMATE, not invented precise profits.
 - Local dashboard binds only loopback and stays read-only, escaping sensitive content and hiding private paid Telegram bodies; all notifications are metadata-only and local, never outbound.
 - User host, Robinhood OAuth, production credentials, real paid alerts and deployment are outside Phase 5. GitHub CI currently cannot start runners; mark Phase5 CI_BLOCKED until actual jobs execute.
+
+## Phase 6 Windows deployment and authorization boundary
+
+- Scope is **only** a Windows package and synthetic runner-rehearsal tests. Never run the installer against a person's real Windows host, alter Phoenix/Kalshi tasks/processes/files or enroll real credentials during GitHub phases.
+- Preserve the package's `PAPER_ONLY=true`, `LIVE_ENABLED=false`, `ALLOW_BROKER_WRITES=false` and no real broker write invariants, and require a clean reviewed full SHA before any future `setup.ps1 -Apply`.
+- `-DryRun` must never create files/tasks/virtualenvs; `-NoSchedule` tests must stay in fresh isolated directories. Stop rather than overwrite an unrelated scheduled task or any existing data. Use Windows-user DPAPI and restrictive local NTFS ACLs; never commit or log session/token details.
+- The Windows supervisor starts only the private read-only dashboard, optional legitimately authorized read-only Telegram client and optional metadata-only outbound operator status. It MUST NOT automatically enable a paper order cycle that would mark authentic alerts blocked without a verified instrument catalog, fresh quotes and risk preflight. No cloud services required.
+- CI for Phase 6 is **BLOCKED** (runner allocation fails before steps); 24 local focused Python tests are not a substitute. Do not merge, tag, deploy, claim release-ready, sign off Windows compatibility or progress to Phase 7 until separately instructed and all release/field gates pass.
