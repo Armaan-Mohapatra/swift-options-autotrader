@@ -9,7 +9,7 @@ def test_migrations_are_idempotent_and_enable_wal(tmp_path):
     db = tmp_path / "private" / "test.sqlite3"
     assert apply_migrations(db) == [
         "0001_initial.sql", "0002_telegram_ingest.sql",
-        "0003_signal_linkage.sql", "0004_paper_orders.sql",
+        "0003_signal_linkage.sql", "0004_paper_orders.sql", "0005_research_monitoring.sql",
     ]
     assert apply_migrations(db) == []
     with sqlite3.connect(db) as connection:
@@ -22,7 +22,7 @@ def test_migrations_are_idempotent_and_enable_wal(tmp_path):
         assert {
             "raw_events", "option_signals", "order_intents", "order_fills", "schema_migrations"
         } <= tables
-        assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 4
+        assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 5
 
 
 def test_event_dedupe_and_order_idempotency_constraints(tmp_path):

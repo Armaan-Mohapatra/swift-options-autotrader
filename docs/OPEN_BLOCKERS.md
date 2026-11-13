@@ -49,3 +49,9 @@ None of these blockers authorizes skipping tests, accessing user devices, or ena
   existing universal `uv.lock`. A platform-resolved lock and SBOM are needed.
 - Live brokerage write/cancel are intentionally disabled, not a future phase
   being activated automatically.
+
+### Phase 5 outstanding
+
+- **CI-005 / REMOTE_BLOCKED:** Windows/Linux GitHub Actions job attempts for draft Phase5 PR #14 fail before any runner or test steps start; 4/4 jobs show `runner_id=0`. See https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43367076794 and https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43367053314. Inspect run banner, Actions availability/billing/budgets and rerun. Local 87 passing focused tests are **not a CI substitute**.
+- **DATA-005:** The source messages/options bid-ask are entirely synthetic; no authenticated paid Swift channel, actual historical option quotes, audited trade costs or independently verified market fill data have been provided. No real profitability or forward win rate can be claimed.
+- **OPS-005:** Dashboard is a reviewed localhost read-only component, not a deployed/supervised Windows service. Local notification outbox has no outbound delivery or operator acknowledgement UI yet. Both remain Phase 6+ gates.

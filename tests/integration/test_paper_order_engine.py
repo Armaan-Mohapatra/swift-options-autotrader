@@ -113,7 +113,7 @@ def close_signal(db_path: Path, sid: str, *, mid: int = 999) -> None:
 @pytest.fixture()
 def rig(tmp_path: Path):
     db_path = tmp_path / "phase3.sqlite3"
-    assert len(apply_migrations(db_path)) == 4
+    assert len(apply_migrations(db_path)) == 5
     clock = Clock()
     broker = PaperBroker(db_path, clock=clock)
     limits = RiskCeilings(

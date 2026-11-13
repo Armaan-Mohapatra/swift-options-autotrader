@@ -60,3 +60,12 @@ future-write request payloads; it must **never call** `place_option_order` or
 `cancel_option_order` during GitHub phases. OAuth must remain local, opt-in and
 outside CI. Do not weaken the Phase 3 concrete-PaperBroker guard or existing
 entry/exit rules. Consult `docs/ROBINHOOD_MCP_PHASE4.md` for known blockers.
+
+## Phase 5 safe research and monitoring
+
+- Any historical replay MUST initialize a brand-new temporary SQLite database and pass messages through existing TelegramStore → SignalMatcher → PaperOrderEngine → PaperBroker. Never import historical fixtures into an active runtime or turn recovered messages into fresh production orders.
+- Fill assertions require contemporaneous option BID/ASK evidence and modeled size under a declared execution assumption, never alert text or option high/low alone. No synthetic quote becomes a real exchange fill. Preserve full FIFO trade/fill history.
+- Keep exact entry limit, broker acceptance plus 3,600 elapsed seconds, no adds, normal LOTTO handling, Swift NEW AVG separate from actual fill basis and 100% matching exits unchanged. Enforce stop/paused state and risk ceilings.
+- Missing fees, quotes, timestamp provenance or fill evidence must produce unavailable or UNVERIFIED_ESTIMATE, not invented precise profits.
+- Local dashboard binds only loopback and stays read-only, escaping sensitive content and hiding private paid Telegram bodies; all notifications are metadata-only and local, never outbound.
+- User host, Robinhood OAuth, production credentials, real paid alerts and deployment are outside Phase 5. GitHub CI currently cannot start runners; mark Phase5 CI_BLOCKED until actual jobs execute.

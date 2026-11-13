@@ -108,3 +108,18 @@ endpoint is pinned to the official Robinhood HTTPS address. See
 `docs/ROBINHOOD_MCP_PHASE4.md` for supported tool contracts, security gates,
 local-auth requirements and open validation gaps. Phase 3 continues to accept
 only the simulated `PaperBroker`; all real broker writes remain disabled.
+
+## Phase 5 — Evidence-driven PAPER replay and dashboard (draft PR #14)
+
+This phase adds a deterministic **offline** historical-replay harness, FIFO-based simulated options P&L, fill-assumption comparisons, a private localhost dashboard and deduplicated local notifications. It uses the **same Phase 2 signal matcher and Phase 3 paper execution engine**, isolated in a fresh temporary SQLite database for each replay. Its inputs are **synthetic or unverified historical observations** and do not prove real fills or profitability.
+
+```sh
+python -m swift_autotrader paper-replay --input tests/fixtures/swift_phase5_replay_synthetic.json --compare
+python -m swift_autotrader paper-report --fee-per-side-usd 0.65
+python -m swift_autotrader paper-notify-scan
+python -m swift_autotrader paper-dashboard --host 127.0.0.1 --port 8765
+```
+
+All commands remain PAPER-only. Dashboard responses hide raw paid Telegram message bodies; no trade/post controls or outbound notifications are exposed. See [Phase 5 guide](docs/PAPER_ANALYTICS_PHASE5.md) and [Phase 5 checkpoint](docs/PHASE_REPORTS/PHASE_5.md).
+
+**Verification status:** new Phase 3+5 local synthetic subset 87 passed; GitHub Windows/Linux Actions jobs failed before acquiring a runner (zero executed steps, see [Phase 5 PR #14](https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/14) and [run 43367076794](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43367076794)). **Do not label this phase CI_PASSED** unless a new run actually executes and succeeds.

@@ -1,0 +1,16 @@
+{
+  "source_type": "SYNTHETIC",
+  "channel_id": -1001234567000,
+  "catalog": [{"symbol":"SPY","right":"CALL","strike":"680","expiration":"2026-11-13","tick":"0.01","options_permission":true,"market_session_open":true,"buying_power_usd":"10000"}],
+  "risk": {"contracts_per_signal":2,"premium_per_signal_usd":"1000","total_exposure_usd":"3000","open_signal_count":5},
+  "costs": {"fee_per_contract_side_usd":"0.65","slippage_premium":"0.00","mark_max_age_seconds":120},
+  "events": [
+    {"kind":"message","at_utc":"2026-11-12T15:00:00Z","message_id":1,"text":"SPY LOTTO 680C 11/13 @ 1.20"},
+    {"kind":"quote","at_utc":"2026-11-12T15:00:30Z","quote_id":"synthetic-q1","contract":{"symbol":"SPY","right":"CALL","strike":"680","expiration":"2026-11-13"},"bid":"1.10","ask":"1.15","bid_size":10,"ask_size":2},
+    {"kind":"message","at_utc":"2026-11-12T15:01:00Z","message_id":2,"text":"SPY adding more, new avg .95","reply_to_message_id":1},
+    {"kind":"quote","at_utc":"2026-11-12T15:02:55Z","quote_id":"synthetic-q2","contract":{"symbol":"SPY","right":"CALL","strike":"680","expiration":"2026-11-13"},"bid":"1.35","ask":"1.40","bid_size":5,"ask_size":5},
+    {"kind":"message","at_utc":"2026-11-12T15:03:00Z","message_id":3,"text":"SPY SOLD HALF","reply_to_message_id":1},
+    {"kind":"quote","at_utc":"2026-11-12T15:03:05Z","quote_id":"synthetic-q3","contract":{"symbol":"SPY","right":"CALL","strike":"680","expiration":"2026-11-13"},"bid":"1.36","ask":"1.41","bid_size":5,"ask_size":5}
+  ],
+  "end_at_utc": "2026-11-12T15:03:10Z"
+}
