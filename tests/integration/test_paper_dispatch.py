@@ -428,3 +428,23 @@ def test_missing_quote_alert_resolves_only_after_confirmed_full_exit(rig):
             "SELECT COUNT(*) FROM paper_engine_alerts "
             "WHERE code='EXIT_QUOTE_MISSING' AND resolved=0"
         ).fetchone()[0] == 0
+
+def test_large_outage_has_bounded_provider_calls_and_preserves_source(rig):
+    path, _, feed, _, _ = rig
+    for index in range(48):
+        ingest(rig, "SPY 680C 11/13 @ 1.20", 2000 + index)
+    calls = 0
+
+    async def failing_feed(entries, active, now):
+        nonlocal calls
+        calls += 1
+        raise MarketEvidenceUnavailable("Simulated unavailable read-only provider")
+
+    feed.snapshot = failing_feed
+    result = cycle(rig)
+    assert result.entry_orders == 0
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM signal_parser_decisions"
+        ).fetchone()[0] == 0
+    assert calls <= 24, f"A single cycle called an unavailable provider {calls} times"

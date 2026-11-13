@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, date
 from decimal import Decimal
 from pathlib import Path
+from time import monotonic
 from typing import Callable, Protocol
 
 from swift_autotrader.broker.paper import PaperBroker, PaperMarketQuote, as_utc, iso
@@ -287,9 +288,22 @@ class PaperDispatcher:
         snapshots: list[MarketSnapshot] = []
         failed = False
 
+        # A provider outage must not produce an unbounded binary-search storm.
+        # Both RPC count and elapsed wall time bound each poll, even if every
+        # candidate is unverifiable and the recursive isolation keeps splitting.
+        cycle_deadline = monotonic() + 20.0
+        provider_calls = 0
+
         async def fetch(batch: Sequence[ParsedAlert], related: Sequence[OptionContract]):
-            item = await asyncio.wait_for(self.provider.snapshot(batch, related, now),
-                                          timeout=12)
+            nonlocal provider_calls
+            remaining = cycle_deadline - monotonic()
+            if provider_calls >= 24 or remaining <= 0:
+                raise MarketEvidenceUnavailable("Read-only market provider poll budget exhausted")
+            provider_calls += 1
+            item = await asyncio.wait_for(
+                self.provider.snapshot(batch, related, now),
+                timeout=min(12.0, remaining),
+            )
             item.validate(now, max_age_seconds=self.quote_max_age_seconds)
             return item
 

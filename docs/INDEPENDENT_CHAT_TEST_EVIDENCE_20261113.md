@@ -30,7 +30,7 @@ Other files in this reconstructed workspace were **not all Git-blob verified**. 
 
 ```text
 PYTHONPATH=.:src pytest -q --disable-warnings
-378 passed, 1 warning in 8.23s
+379 passed, 1 warning in 8.37s
 
 PYTHONPATH=.:src pytest -q tests/integration/test_paper_dispatch.py
 15 passed, 0 failed
@@ -50,6 +50,8 @@ This is **Linux CPython 3.13 only**, using a reconstructed checkout with synthet
 5. **Stale unresolved-exposure alert:** after a later quote-enabled exit filled in full, the previous `EXIT_QUOTE_MISSING` alert remained unresolved. It is now cleared only after actual fill totals prove zero remaining exposure, not on a sell submission. Regression now passes.
 
 Affected code: `scripts/build_windows_package.py`, `src/swift_autotrader/paper_dispatch.py`, `src/swift_autotrader/orders/engine.py`. Tests added to `tests/unit/test_independent_git_blob_identity.py` and `tests/integration/test_paper_dispatch.py`. These patches preserve the concrete PaperBroker-only gate and hard-denied real Robinhood submit/cancel methods.
+
+6. **Repeated provider outage amplified remote calls:** a synthetic 48-message failure generated **92 read-only provider calls in one cycle**, violating bounded resource expectations. A per-cycle 24-RPC hard cap and 20-second overall elapsed-time budget now prevent uncontrolled recursive retry amplification while leaving unverified sources undecided. The new failing-before / passing-after regression is `test_large_outage_has_bounded_provider_calls_and_preserves_source`.
 
 ## Outstanding mandatory gates
 
