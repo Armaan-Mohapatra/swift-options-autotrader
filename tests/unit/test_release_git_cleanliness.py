@@ -32,6 +32,12 @@ def _fixture_repo(tmp_path: Path) -> tuple[Path, str]:
         *builder.ALLOWED_SCRIPT,
         "src/swift_autotrader/core.py",
         "deployment/windows/setup.ps1",
+        "deployment/windows/common.ps1",
+        "deployment/windows/manage.ps1",
+        "deployment/windows/service.ps1",
+        "deployment/windows/secrets.ps1",
+        "deployment/windows/healthcheck.ps1",
+        "deployment/windows/extract_approved_package.py",
     )
     for name in required:
         target = root / name
@@ -82,3 +88,26 @@ def test_gitignored_code_cannot_be_smuggled_into_release(tmp_path: Path):
     with pytest.raises(RuntimeError, match="untracked|ignored"):
         builder.create_package(root, tmp_path / "release.zip", expected_commit=sha)
     assert not (tmp_path / "release.zip").exists()
+
+
+def test_reviewed_zip_round_trips_through_independent_extractor(tmp_path: Path):
+    """A real builder output should satisfy the separate installer verifier."""
+    import hashlib
+
+    extractor_path = Path(__file__).resolve().parents[2] / (
+        "deployment/windows/extract_approved_package.py"
+    )
+    spec = importlib.util.spec_from_file_location("swift_release_extractor", extractor_path)
+    assert spec is not None and spec.loader is not None
+    extractor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(extractor)
+
+    root, sha = _fixture_repo(tmp_path)
+    archive = tmp_path / "candidate.zip"
+    manifest = builder.create_package(root, archive, expected_commit=sha)
+    checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+    target = tmp_path / "extracted"
+    assert extractor.extract_approved_package(
+        archive, target, expected_sha256=checksum, expected_commit=sha,
+    ) == len(manifest["files"])
+    assert (target / "src/swift_autotrader/core.py").read_text() == "reviewed code\n"
