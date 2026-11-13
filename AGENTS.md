@@ -4,7 +4,7 @@
 
 - Read `docs/SOURCE_SPRINT_PLAN.md` **in full**, `docs/PROJECT_SPEC.md`, and the previous report in `docs/PHASE_REPORTS/` before changing code.
 - The sprint source is authoritative. `docs/PROJECT_SPEC.md` is the permanent project contract. If the source and implementation conflict, **stop and report**, do not quietly reinterpret.
-- Only implement the phase explicitly authorized by the user. Phase 0 provides the foundation, Phase 1 implements read-only authorized local Telegram ingestion and Phase 2 implements deterministic Swift-style parsing/SQLite signal matching with synthetic tests. Order execution, paper fills, Robinhood auth, notifications and Windows installation remain future gates. Phase 2 interpretation does **not** authorize any trade.
+- Only implement the phase explicitly authorized by the user. Phase 0 provides the foundation, Phase 1 implements read-only authorized local Telegram ingestion and Phase 2 implements deterministic Swift-style parsing/SQLite signal matching with synthetic tests. Phase 3 implements a local-only synthetic paper broker, durable order engine and regression tests. Real brokerage auth, live writes, dashboard and Windows installation remain future gates. Phase 2 interpretation does **not** authorize any real trade.
 - Never access a personal computer or modify unrelated trading software, repositories, data, processes, credentials or cloud resources.
 
 ## Mandatory trading semantics
@@ -42,3 +42,13 @@
 - An unverified or absent option instrument catalog must produce `REVIEW_REQUIRED`, never a fabricated expiration year or trade-eligible signal. Same-ticker ambiguity is never resolved by intuition.
 - A stored `CLOSE_REQUESTED` is just an intent; Phase 3 must independently verify actual filled quantity and lifecycle, with all external writes disabled.
 - Maintain stacked draft PR review order: Phase 0 #1, Phase 1 #10, Phase 2 #11. Do not merge without separate explicit authorization.
+
+## Phase 3 enforced boundaries
+
+- Use **only** concrete `PaperBroker` with the engine. Robinhood MCP remains deny-only, and `PAPER_ONLY=true`, `LIVE_ENABLED=false`, `ALLOW_BROKER_WRITES=false` are immutable for the sprint.
+- Source decisions must already be durable, fresh, uniquely matched Phase 2 events with a **verified instrument catalog**. Empty/unverified catalogs fail closed. The standalone CLI `paper-cycle` must not permanently block real messages merely because there is no provider.
+- Persist logical intent and idempotency identity before any simulated submission. Unknown outcomes reconcile against persisted broker journal and never trigger a new buy, price or identity.
+- Use exact source limit and exact option contract, not a current quote or percentage chase filter; LOTTO receives no altered policy. Broker acceptance, not message receipt, starts the one-hour cancel.
+- On any explicit partial/full exit, cancel resting entries and verify terminal status before sending an at-most-once exit intent covering **100%** of the actually filled balance. An unfilled exit stays exposed and alerts.
+- Strong stop/pause guards, local OS single-cycle lock, bounded fresh quote policy and fail-closed risk ceilings are required. No fake fills, no claim of live market accuracy.
+- Keep Phase 3 PR #12 draft and stacked on unmerged Phase 2 PR #11; no merges, account auth, user-PC installs, or deployment. Phase 4+ needs separate explicit authorization.

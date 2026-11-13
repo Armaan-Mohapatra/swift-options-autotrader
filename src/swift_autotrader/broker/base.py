@@ -1,13 +1,14 @@
-"""Broker interface contracts with no invented trading APIs."""
-
+"""Explicit paper brokerage contract; no hidden exchange transport."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Protocol
 
-from swift_autotrader.orders.commands import OrderIntent
+from swift_autotrader.orders.commands import OrderIntent, OrderSide
+from swift_autotrader.signals.identity import OptionContract
 
 
 class BrokerOrderState(StrEnum):
@@ -20,12 +21,27 @@ class BrokerOrderState(StrEnum):
     REJECTED = "REJECTED"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
+class BrokerFill:
+    fill_id: str
+    quantity: int
+    price: Decimal
+    filled_at_utc: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class BrokerOrderStatus:
     logical_order_id: str
     state: BrokerOrderState
     filled_quantity: int
     accepted_at_utc: datetime | None
+    fills: tuple[BrokerFill, ...] = ()
+    rejected_reason: str | None = None
+    contract: OptionContract | None = None
+    side: OrderSide | None = None
+    requested_quantity: int | None = None
+    limit_price: Decimal | None = None
+    idempotency_key: str | None = None
 
 
 class Broker(Protocol):

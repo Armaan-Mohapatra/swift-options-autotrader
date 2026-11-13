@@ -2,13 +2,13 @@
 
 **Status: PHASE 2 SWIFT-STYLE PARSING + DURABLE SIGNAL MATCHING (SYNTHETIC CI PASSED) — NOT A RUNNING TRADING BOT.**
 
-This private Python 3.11+ project is a **paper-only**, future Telegram-to-options-trading application. Phase 0 provides a secure, independently testable foundation. Phase 1 provides **optional read-only, locally authorized Telegram ingestion** (not enrolled or field tested). Phase 2 adds **deterministic offline Swift-style parsing, SQLite signal lineage, metadata-only average updates, full-close requests and review-required states**, tested on synthetic messages only. It does **not** connect to Robinhood, interpret *real authenticated* Swift content, simulate fills, submit brokerage orders or install on a Windows computer.
+This private Python 3.11+ project is a **paper-only**, future Telegram-to-options-trading application. Phase 0 provides a secure, independently testable foundation. Phase 1 provides **optional read-only, locally authorized Telegram ingestion** (not enrolled or field tested). Phase 2 adds **deterministic offline Swift-style parsing, SQLite signal lineage, metadata-only average updates, full-close requests and review-required states**, tested on synthetic messages only. Phase 3 now adds **synthetic-only paper fills**, persistent entry/close intents and a full paper order lifecycle. It does **not** connect to Robinhood, interpret authenticated Swift content, submit real brokerage orders or install on a Windows computer.
 
 The full authoritative sprint specification is preserved verbatim at [`docs/SOURCE_SPRINT_PLAN.md`](docs/SOURCE_SPRINT_PLAN.md). Its permanent behavioral contract is [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md). Never silently change the behavior described there.
 
 ## Safety invariants
 
-- `PAPER_ONLY=true`, `LIVE_ENABLED=false`, `ALLOW_BROKER_WRITES=false`. Attempts to enable live trading **fail startup**. There is no working external brokerage adapter or live broker login path in Phases 0–2.
+- `PAPER_ONLY=true`, `LIVE_ENABLED=false`, `ALLOW_BROKER_WRITES=false`. Attempts to enable live trading **fail startup**. There is no working external brokerage adapter or live broker login path in Phases 0–3.
 - Only long, single-leg **options** may eventually be eligible. A **LOTTO** label does not exclude an otherwise valid option.
 - Never buy again on `ADDING MORE` / averaging-down instructions. `NEW AVG` changes Swift metadata only, not actual fill cost or original limit.
 - `SOLD HALF`, other partial sales, `RUNNERS OUT` and `ALL OUT` all require **close 100% of our exact matching filled position**, after safe cancellation of unfilled entry quantity.
@@ -16,7 +16,7 @@ The full authoritative sprint specification is preserved verbatim at [`docs/SOUR
 - An **accepted** entry's unfilled remainder is subject to cancel-and-verify **3,600 seconds after broker acceptance**, not message receipt or submission. Races/partial fills must be reconciled.
 - Contract identity requires symbol, option type, strike, expiration and verified lineage; ambiguity blocks execution.
 
-The **message-classification and matching rules** now exist in Phase 2, but **order placement, fill reconciliation and cancellation rules are requirements for later phases**, not working execution logic. See [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
+Phase 2 classification/matching feeds Phase 3's **synthetic PAPER-only** order execution, fill reconciliation and cancellation. This is not live broker or authenticated-market validation. See [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
 
 ## Quick start (Python 3.11+)
 
@@ -63,8 +63,8 @@ All commands fail closed on unsafe environment flags. `.env.example` contains on
 | --- | --- | --- |
 | `telegram` | Phase 1 read-only authorized MTProto listener, synthetic tests | Requires later local authorization/forward verification |
 | `parser`, `signals` | Phase 2 executable deterministic parser, strict signal lineage, SQLite decisions/review queue | Real Swift grammar and option listings still require forward validation |
-| `orders`, `broker` | Order types, deadline calculation, deny-all real broker | Phase 3 paper state machine, Phase 4 MCP adapter |
-| `database` | Phase 0/1/2 WAL migrations: Telegram revisions, signals, averages, close requests and reviews | Phase 3+ confirmed executions and order reconciliation |
+| `orders`, `broker` | Phase 3 durable PAPER order engine, acceptance+3600s cancels, mock fills, risk checks, stop and reconciliation; real broker adapter remains deny-only | Phase 4 official read-only brokerage integration and actual instrument catalog |
+| `database` | Phase 0–3 SQLite WAL migrations, including durable paper broker journal, simulated fills, risk/stop audit, and parser metadata | Phase 4+ read-only brokerage verification and later real-market forward validation |
 | `analytics`, `dashboard`, `notifications` | Nonoperational namespaces | Phase 5 verified paper reporting |
 | `deployment/windows` | Explicit no-install healthcheck stub | Phase 6 installer and supervisor |
 
@@ -89,3 +89,13 @@ See [Telegram operator guide](docs/TELEGRAM_INGESTION.md) and [Phase 1 checkpoin
 ## Phase 2 deterministic interpreter and evidence
 
 See [Phase 2 parser guide](docs/SWIFT_PARSER_PHASE2.md), [checkpoint](docs/PHASE_REPORTS/PHASE_2.md) and [81 fully normalized synthetic examples](docs/PHASE_REPORTS/PHASE_2_PARSED_EXAMPLES.json). Phase 2 passed 208 tests/job across Linux and Windows Python 3.11/3.13 (https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43291903449). `LOTTO` is eligible under the same parser rules; `ADDING MORE` never buys again; `NEW AVG` never changes confirmed fill cost; all partial/runner exits record **CLOSE_100_PERCENT requests**, not completed sales. Without a verified options catalog, entry candidates go to `REVIEW_REQUIRED` rather than auto-trade. No real paid Swift content was used.
+
+## Phase 3: synthetic paper order lifecycle
+
+The single-leg PAPER-only order engine is implemented in `orders/engine.py` and `broker/paper.py`. It consumes only previously persisted, uniquely matched and fresh Phase 2 entry/close decisions, never raw Telegram text directly. Price and contract identity remain exact. A submitted paper order is not a fill. Acceptance timestamps come from the PAPER broker; an entry's timeout is **acceptance + 3,600 seconds**. After timeout, only the unfilled remainder is canceled and rechecked, including possible late fills.
+
+SOLD HALF, TRIM, RUNNERS OUT, ALL OUT and equivalent alerts request selling **all actual matching filled quantity**, after any resting entry remainder is canceled. ADD and averaging-down commands never create orders; Swift's NEW AVG is independent of the actual fill-weighted cost basis. Each source signal has at most one durable entry and one matching close intent; network ambiguity never authorizes a new identity.
+
+The synthetic test harness can provide a finite verified-**for-the-test** instrument set, tick size, session permission, buying power and fresh market observations. Production-quality market verification is **not available**. The standalone `paper-cycle` CLI therefore refuses to run even with `--confirm-simulation` until a reviewed verification provider is supplied; it does not poison durable signal eligibility using an empty catalog. `paper-health`, `paper-pause`, `paper-resume` and `paper-emergency-stop` operate on the dedicated migrated SQLite file. No deployment or unsupervised scheduled execution is configured.
+
+See [Phase 3 engineering guide](docs/PAPER_EXECUTION_PHASE3.md), [Phase 3 checkpoint](docs/PHASE_REPORTS/PHASE_3.md) and [draft PR #12](https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/12). The 253 synthetic and regression tests per job passed on Windows/Linux Python 3.11/3.13 at [code CI](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43354121094); the report-only checkpoint must be verified separately. No live broker writes or real trades are possible.
