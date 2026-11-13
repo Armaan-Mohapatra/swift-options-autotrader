@@ -159,7 +159,11 @@ class MCPReadOnlyOptionData:
                 review = await self.broker.review_order(account, instrument, test_intent)
                 if not review.unblocked:
                     raise MarketEvidenceUnavailable("Broker read-only review blocked")
-            key = f"{instrument.option_id}|{quote.observed_at_utc.isoformat()}"
+            # Distinct market observations can share a rounded timestamp.
+            # Include immutable quote payload so the broker detects real changes
+            # instead of aliasing different prices to the same journal event.
+            key = (f"{instrument.option_id}|{quote.observed_at_utc.isoformat()}|"
+                   f"{quote.bid}|{quote.ask}|{quote.bid_size}|{quote.ask_size}")
             from hashlib import sha256
             evidence = sha256(key.encode()).hexdigest()
             quotes[contract] = VerifiedQuote(

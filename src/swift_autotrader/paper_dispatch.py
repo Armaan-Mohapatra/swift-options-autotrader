@@ -12,7 +12,7 @@ import hashlib
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, date
 from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Protocol
@@ -148,32 +148,51 @@ class PaperDispatcher:
             limits=self.limits, clock=self.clock,
         )
         self.notifications = NotificationCenter(self.db_path)
+        self._pending_rows: list[tuple[int, ParsedAlert, bool, datetime, int | None]] = []
 
     def _pending_and_active(self) -> tuple[list[ParsedAlert], list[OptionContract]]:
+        """Select recent source events fairly; never use canceled zero-fill legs.
+
+        Descending index selection prevents an ancient, unverifiable source
+        backlog from starving fresh exits and entries. Decisions are later
+        committed in original revision order for replay/idempotency.
+        """
         with sqlite3.connect(self.db_path) as db:
             pending = db.execute(
-                "SELECT e.body,r.eligible_for_future_processing "
+                "SELECT r.revision_id,e.body,r.eligible_for_future_processing,"
+                "r.telegram_sent_at_utc,r.reply_to_message_id "
                 "FROM telegram_message_revisions r "
                 "JOIN raw_events e ON e.event_id=r.raw_event_id "
                 "LEFT JOIN signal_parser_decisions p ON p.revision_id=r.revision_id "
                 "WHERE r.channel_id=? AND p.revision_id IS NULL "
-                "ORDER BY r.revision_id LIMIT 500",
+                "ORDER BY r.revision_id DESC LIMIT 2000",
                 (str(self.channel_id),),
             ).fetchall()
             active_rows = db.execute(
                 "SELECT DISTINCT s.underlying,s.option_right,s.strike,s.expiration_date "
                 "FROM option_signals s JOIN order_intents o ON o.signal_id=s.signal_id "
-                "WHERE s.state NOT IN ('CLOSED','REJECTED')"
+                "WHERE o.side='BUY_TO_OPEN' AND ("
+                "o.state IN ('ACCEPTED','PARTIALLY_FILLED','CANCEL_PENDING') "
+                "OR (SELECT COALESCE(SUM(f.filled_quantity),0) FROM order_fills f "
+                "WHERE f.logical_order_id=o.logical_order_id) > "
+                "(SELECT COALESCE(SUM(f2.filled_quantity),0) FROM order_fills f2 "
+                "JOIN order_intents o2 ON f2.logical_order_id=o2.logical_order_id "
+                "WHERE o2.signal_id=o.signal_id AND o2.side='SELL_TO_CLOSE')) "
             ).fetchall()
-        from datetime import date
         from swift_autotrader.signals.identity import OptionRight
-        active = [OptionContract(r[0], OptionRight(r[1]), Decimal(r[2]),
-                                 date.fromisoformat(r[3])) for r in active_rows]
-        entries = []
-        for body, eligible in pending:
-            alert = parse_message(body)
-            if eligible and alert.intent is SignalIntent.ENTRY:
-                entries.append(alert)
+        active = [OptionContract(row[0], OptionRight(row[1]), Decimal(row[2]),
+                                 date.fromisoformat(row[3])) for row in active_rows]
+        self._pending_rows = [
+            (int(rid), parse_message(body), bool(eligible),
+             datetime.fromisoformat(str(sent).replace("Z", "+00:00")),
+             int(reply) if reply is not None else None)
+            for rid, body, eligible, sent, reply in reversed(pending)
+        ]
+        now = as_utc(self.clock())
+        entries = [alert for _rid, alert, eligible, sent, _reply in self._pending_rows
+                   if eligible and alert.intent is SignalIntent.ENTRY
+                   and 0 <= (now - as_utc(sent)).total_seconds()
+                   <= self.limits.entry_max_age_seconds]
         return entries, active
 
     def _record_quote(self, quote: VerifiedQuote) -> None:
@@ -192,42 +211,120 @@ class PaperDispatcher:
             )
 
     async def run_once(self) -> DispatchResult:
-        now = as_utc(self.clock())
-        entries, active = self._pending_and_active()
-        try:
-            snapshot = await asyncio.wait_for(
-                self.provider.snapshot(entries, active, now), timeout=12,
-            )
-            snapshot.validate(now, max_age_seconds=self.quote_max_age_seconds)
-            catalog = StaticInstrumentCatalog(snapshot.instruments)
-            for alert in entries:
-                contract, reason = resolve_entry(alert, catalog, as_of=now.date())
-                if contract is None or reason is not None:
-                    raise MarketEvidenceUnavailable("Entry contract unresolved; preserve source")
-                if contract not in snapshot.quotes:
-                    raise MarketEvidenceUnavailable("Fresh quoted market data required for entry")
-        except (MarketEvidenceUnavailable, OSError, TimeoutError, RuntimeError, ValueError):
-            self.notifications.record(
-                "APPLICATION", "MARKET_DATA_UNAVAILABLE", source_key="paper-dispatch",
-            )
-            # Reconcile existing orders and 3,600-second cancellations WITHOUT
-            # consuming source or opening a new entry on empty preflight data.
-            cycle = self.engine.run_cycle(allow_entries=False)
-            return DispatchResult("PAUSED_DATA_UNAVAILABLE", 0, 0, 0, 0,
-                                  cycle.cancellation_requests)
+        """Process exits independently, and isolate unverifiable entry quotes.
 
+        No missing entry data may block a known exit, fresh newer entry, or
+        cancellation watchdog. A source entry is checkpointed only after its
+        precise contract and matching quote pass verification.
+        """
+        now = as_utc(self.clock())
+        _all_entries, active = self._pending_and_active()
+        rows = self._pending_rows
+        matcher = SignalMatcher(self.db_path, self.channel_id)
+        # A follow-up replying to an unprocessed BUY must wait for that BUY
+        # to be verified first. An already linked position is actionable.
+        with sqlite3.connect(self.db_path) as db:
+            unlinked = {
+                int(row[0]) for row in db.execute(
+                    "SELECT r.message_id FROM telegram_message_revisions r "
+                    "LEFT JOIN signal_parser_decisions p ON p.revision_id=r.revision_id "
+                    "WHERE r.channel_id=? AND p.revision_id IS NULL "
+                    "AND r.event_kind='new'",
+                    (str(self.channel_id),),
+                )
+            }
+        pending_entry_messages = {
+            int(message) for message in unlinked
+        }
+        # Keep exit and status interpretation independent of the option feed.
+        followup_ids = [
+            rid for rid, alert, _eligible, _sent, reply in rows
+            if alert.intent is not SignalIntent.ENTRY
+            and (reply is None or reply not in pending_entry_messages)
+        ][:500]
+        decisions = matcher.process_pending(revision_ids=followup_ids)
+        # Establish active-contract quote evidence separately so failure in a
+        # new BUY candidate cannot prevent an existing matching exit.
+        snapshots: list[MarketSnapshot] = []
+        failed = False
+
+        async def fetch(batch: Sequence[ParsedAlert], related: Sequence[OptionContract]):
+            item = await asyncio.wait_for(self.provider.snapshot(batch, related, now),
+                                          timeout=12)
+            item.validate(now, max_age_seconds=self.quote_max_age_seconds)
+            return item
+
+        if active:
+            try:
+                snapshots.append(await fetch([], active))
+            except (MarketEvidenceUnavailable, OSError, TimeoutError, RuntimeError, ValueError):
+                failed = True
+        eligible_rows = [
+            (rid, alert) for rid, alert, eligible, sent, _reply in rows
+            if eligible and alert.intent is SignalIntent.ENTRY
+            and 0 <= (now - as_utc(sent)).total_seconds()
+            <= self.limits.entry_max_age_seconds
+        ]
+        verified_ids: list[int] = []
+        # Batch and bisect to isolate one bad contract, without hammering a
+        # provider for every ordinary BUY. A group never exceeds the cap of 12.
+        async def review(group: list[tuple[int, ParsedAlert]]) -> None:
+            nonlocal failed
+            if not group:
+                return
+            try:
+                snap = await fetch([a for _rid, a in group], [])
+                catalog = StaticInstrumentCatalog(snap.instruments)
+                for _rid, alert in group:
+                    contract, reason = resolve_entry(alert, catalog, as_of=now.date())
+                    if contract is None or reason is not None or contract not in snap.quotes:
+                        raise MarketEvidenceUnavailable("Unverified fresh entry quote")
+                snapshots.append(snap)
+                verified_ids.extend(rid for rid, _alert in group)
+            except (MarketEvidenceUnavailable, OSError, TimeoutError, RuntimeError, ValueError):
+                failed = True
+                if len(group) > 1:
+                    half = len(group) // 2
+                    await review(group[:half])
+                    await review(group[half:])
+
+        for index in range(0, len(eligible_rows), 12):
+            await review(eligible_rows[index:index + 12])
+
+        instruments: dict[OptionContract, Preflight] = {}
+        quotes: dict[OptionContract, VerifiedQuote] = {}
+        for snap in snapshots:
+            if snap.source not in {"SYNTHETIC_TEST", "MCP_READONLY"}:
+                failed = True
+                continue
+            instruments.update(snap.instruments)
+            for contract, quote in snap.quotes.items():
+                prev = quotes.get(contract)
+                if prev is None or quote.observed_at_utc >= prev.observed_at_utc:
+                    quotes[contract] = quote
+        if verified_ids:
+            catalog = StaticInstrumentCatalog(instruments)
+            decisions.extend(SignalMatcher(self.db_path, self.channel_id,
+                                           catalog=catalog).process_pending(
+                                               revision_ids=verified_ids,
+                                           ))
+        # A pending reply to an entry can now be resolved in the same cycle.
+        if verified_ids:
+            remaining = [rid for rid, alert, _eligible, _sent, _reply in rows
+                         if alert.intent is not SignalIntent.ENTRY
+                         and rid not in followup_ids]
+            decisions.extend(SignalMatcher(self.db_path, self.channel_id,
+                                           catalog=StaticInstrumentCatalog(instruments)
+                                           ).process_pending(revision_ids=remaining[:500]))
         self.preflight.instruments.clear()
-        self.preflight.instruments.update(snapshot.instruments)
-        matcher = SignalMatcher(self.db_path, self.channel_id, catalog=catalog)
-        decisions = matcher.process_pending(limit=500)
+        self.preflight.instruments.update(instruments)
         exit_quotes: dict[OptionContract, ExitQuote] = {}
         fill_count = 0
-        for contract, quote in snapshot.quotes.items():
+        for contract, quote in quotes.items():
             self._record_quote(quote)
-            check = snapshot.instruments[contract]
+            check = instruments[contract]
             if not check.market_session_open:
                 continue
-            # A quote observed before paper order acceptance cannot retro-fill.
             fill_count += self.broker.observe_quote(
                 PaperMarketQuote(quote.quote_id, contract, quote.bid, quote.ask,
                                  quote.bid_size, quote.ask_size, quote.observed_at_utc),
@@ -236,9 +333,14 @@ class PaperDispatcher:
             exit_quotes[contract] = ExitQuote(
                 contract, quote.bid, check.premium_tick, quote.observed_at_utc,
             )
-        # Reconcile previous fills, issue exits, then create newly eligible BUYs.
-        cycle = self.engine.run_cycle(quotes=exit_quotes)
-        return DispatchResult("PAPER_ONLY", len(decisions), cycle.entry_submissions,
+        if failed:
+            self.notifications.record("APPLICATION", "MARKET_DATA_UNAVAILABLE",
+                                      source_key="paper-dispatch")
+        cycle = self.engine.run_cycle(quotes=exit_quotes, allow_entries=bool(verified_ids))
+        status = "PAPER_ONLY" if verified_ids or (not failed and snapshots) or decisions else (
+            "PAUSED_DATA_UNAVAILABLE" if failed else "PAPER_ONLY"
+        )
+        return DispatchResult(status, len(decisions), cycle.entry_submissions,
                               cycle.close_submissions, fill_count, cycle.cancellation_requests)
 
 
