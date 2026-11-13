@@ -86,15 +86,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             elif args.command == "paper-cycle":
                 if not args.confirm_simulation:
                     raise ConfigurationError("Explicit --confirm-simulation required")
-                cycle = engine.run_cycle()
-                payload = {
-                    "status": "PAPER_CYCLE", "entry_submissions": cycle.entry_submissions,
-                    "close_submissions": cycle.close_submissions,
-                    "cancellation_requests": cycle.cancellation_requests,
-                    "blocked_entries": cycle.blocked_entries, "open_alerts": cycle.alerts,
-                    "verified_instrument_provider": "NOT_CONFIGURED",
-                    "broker_writes_attempted": 0,
-                }
+                # No independently verified option catalog is configured here.
+                # Never mark authenticated Swift signals BLOCKED just because a
+                # diagnostic-only CLI was invoked with an empty preflight source.
+                raise ConfigurationError(
+                    "Paper cycle requires a verified instrument provider; "
+                    "use the isolated synthetic test harness in Phase 3"
+                )
             if args.command != "paper-cycle":
                 payload = {"status": "PAPER_CONTROL", **engine.health()}
         elif args.command in {"parse-replay", "parse-health"}:
