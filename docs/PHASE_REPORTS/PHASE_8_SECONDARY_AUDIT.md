@@ -18,14 +18,14 @@ Based strictly on Phase 7 source commit `8c33e5d85b4abe2bfd0c07e059247096ef68b31
 | Canceled zero-fill leg kept requesting quotes | Reproduced failure | Derive active contracts from live resting entry state OR positive bought-minus-sold quantity |
 | Stale unverifiable entry starved new valid signals | Reproduced failure | Prioritize fresh eligible source revisions independent of older unresolved entries, retain source provenance |
 | 13+ pending entries exceeded provider's 12-contract cap | Reproduced failure | Batch and bisect read-only contract validation, allowing other entries to progress without a fabricated contract |
-| Data outage could freeze processing and permit unsafe replay | Reproduced regression | Leave unverifiable entries undecided, parse matched exits independently, prohibit duplicate intent on recovery; watchdog always executes with `allow_entries=False` if no verified entries |
+| Data outage checkpoint and duplicate-order risk | **Guard test already passed on PR #20**; no baseline duplicate found | Preserve durable idempotency; isolate matched exits while keeping watchdog active even if market-data provider fails |
 | Missing matching exit quote blocked exit recording | Reproduced failure | Persist close request and `EXIT_QUOTE_MISSING`/equivalent unresolved-exposure alert; no invented sell fill |
 | Quote timestamp used as unique quote identity | Reproduced evidence-aliasing failure | Include actual bid, ask and displayed sizes in SHA-256 identity; identical observations remain idempotent |
 | Approved ZIP installer copied management scripts from arbitrary launching directory | Reproduced source-policy failure | PowerShell checks owner-approved archive SHA, extracts verifier from that checked archive, copies installed scripts from verified extracted source |
 | Missing package version validation | Reproduced failure | Bind version in manifest to `pyproject.toml`; reject mismatch after file SHA verification |
 | Unsupported `System.IO.File::CreateNew` used by draft ZIP verifier | Regression-first source test | Use supported `System.IO.File::Open(..., FileMode.CreateNew, ...)` overload |
 
-Tests were written and observed failing before the implementation changes, then rerun successfully against a reconstructed local Python 3.13 workspace. Names added to `tests/integration/test_paper_dispatch.py`, `tests/unit/test_mcp_paper_data.py` and `tests/unit/test_release_archive_verification.py`. Extra PR #19 tests copied without rewriting strategy semantics.
+The six specifically named dispatcher tests were written first, then run against the original PR #20 module: **5 failed and 1 passed** (the already-correct duplicate-on-recovery guard). Replacing that original module with the remediation implementation gave **6 passed**. The quote timestamp collision and ZIP provenance tests were also observed failing before their fixes. All regressions were subsequently green against a reconstructed local Python 3.13 workspace. Names added to `tests/integration/test_paper_dispatch.py`, `tests/unit/test_mcp_paper_data.py` and `tests/unit/test_release_archive_verification.py`. Extra PR #19 tests copied without rewriting strategy semantics.
 
 ## Local evidence and strictly limited interpretation
 
