@@ -65,3 +65,17 @@ Existing Phase 0–6 tests further cover cancel/fill races, conflicting fill ide
 5. Retain no-live policy. Verified market-data/preflight wiring and forward paper testing need separate review; local Windows installation must **not** turn on any automatic live order path.
 
 **STOP:** Phase 7 GitHub source-development audit complete but CI/release gates blocked. No background jobs, account setup, computer installation, auto-trading or Phase 8 work has been initiated.
+
+
+## Published Phase 7 source audit checkpoint
+
+- Draft, stacked and **unmerged** Phase 7 PR: https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/17
+- Tested local source/code-and-doc checkpoint: `9bcac1f9a6a0618e3a45966084493a33a346f8d8`; any later report-only commit must be checked again against GitHub.
+- Full 4-job Windows/Linux Python 3.11/3.13 PR workflow: https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43375219814 — **FAILURE BEFORE RUNNER** for 4/4 jobs; no actual pytest, Ruff, dependency, compilation or secret check steps executed.
+- Isolated Windows PowerShell installer PR workflow: https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43375219885 — **FAILURE BEFORE RUNNER** for 1/1 job; no PowerShell/installation/backup/uninstall verification executed.
+- Corresponding push runs https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43375183497 and https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43375183498 likewise failed before runner allocation. The cause is **not confirmed**; do not assume account billing is proven.
+- Verified remote tree at that checkpoint: **139 tracked source files, zero paths matching forbidden .session, database, .env, token JSON or private-key filename patterns**. Existing `uv.lock` has 12 package sections and 37 SHA-256 artifact references. This is *static structural evidence*, not credential-value assurance, CVE clearance, signed SBOM or an executed CI audit.
+- The remote `RobinhoodMCPBroker` still has unconditional `BrokerWritesDisabledError` for submit/cancel/get_order, and its MCP tool-call allowlist rejects write tool names. Phase 3 paper engine type-check remains concrete `PaperBroker` only.
+- GitHub runner-allocation blocker comment added to issue [#15](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/15); Phase 7 parent issue [#9](https://github.com/Armaan-Mohapatra/swift-options-autotrader/issues/9) updated, both left open.
+- **Decision remains NO-GO:** no Phase 7 GitHub release, tag, signed package, Windows installation, real broker activity, or live trading. Review draft PR and resolve gates before a future paper-only tag.
+
