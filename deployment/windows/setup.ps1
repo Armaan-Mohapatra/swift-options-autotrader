@@ -86,7 +86,17 @@ foreach ($folder in $folders) {
 }
 $release = Join-Path $root ('releases\' + $actualCommit)
 if (Test-Path -LiteralPath $release) {
-    throw 'Release already exists; use manage.ps1 rather than overwriting installed code.'
+    # Successful repeated Apply of the same release is an idempotent no-op.
+    $activeFile = Join-Path $root 'active-release.txt'
+    $installedPython = Join-Path $release '.venv\Scripts\python.exe'
+    if ((Test-Path -LiteralPath $activeFile -PathType Leaf) -and
+        (Test-Path -LiteralPath $installedPython -PathType Leaf) -and
+        (Get-Content -LiteralPath $activeFile -Raw -Encoding Ascii).Trim() -eq $actualCommit) {
+        [ordered]@{ status = 'ALREADY_INSTALLED'; commit = $actualCommit;
+                     root = $root; mode = 'PAPER_ONLY' } | ConvertTo-Json
+        return
+    }
+    throw 'Incomplete or different release exists; stop for operator review.'
 }
 New-Item -ItemType Directory -Path $release -Force | Out-Null
 # Copy source via strict allowlist; never copy .git, .env, sessions, logs or credentials.
@@ -114,7 +124,7 @@ if (-not (Test-Path -LiteralPath $manifest)) {
         created_utc = [DateTime]::UtcNow.ToString('o')
         installation_guid = [Guid]::NewGuid().ToString('D')
     }
-    [System.IO.File]::WriteAllText($manifest, ($document | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText($manifest, ($document | ConvertTo-Json -Depth 3), ([System.Text.UTF8Encoding]::new($false)))
 }
 $settingsFile = Join-Path $root 'config\settings.json'
 if (-not (Test-Path -LiteralPath $settingsFile)) {
@@ -123,7 +133,7 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
         telegram_enabled = $false; telegram_channel_id = $null; telegram_api_id = $null
         status_notifications_enabled = $false; status_chat_id = $null
     }
-    [System.IO.File]::WriteAllText($settingsFile, ($settings | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText($settingsFile, ($settings | ConvertTo-Json -Depth 3), ([System.Text.UTF8Encoding]::new($false)))
 }
 $uvvenv = Join-Path $root 'tools\uv-bootstrap'
 if (-not (Test-Path -LiteralPath (Join-Path $uvvenv 'Scripts\uv.exe'))) {
@@ -141,7 +151,7 @@ if ($LASTEXITCODE -ne 0 -or $uvVersion -notmatch '^uv 0\.10\.0(\s|$)') {
 }
 if ($NoDependencyDownload) { $env:UV_OFFLINE = '1' }
 try {
-    & $uvexe sync --project $release --locked --no-dev --extra telegram --no-editable --python 3.11
+    & $uvexe sync --project $release --locked --no-dev --extra telegram --no-editable --no-managed-python --python 3.11
     if ($LASTEXITCODE -ne 0) { throw 'Locked dependency installation failed.' }
 } finally {
     Remove-Item Env:UV_OFFLINE -ErrorAction SilentlyContinue
@@ -157,6 +167,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fail-closed configuration validation failed.' 
 if ($LASTEXITCODE -ne 0) { throw 'Database initialization failed.' }
 & $python -m swift_autotrader smoke
 if ($LASTEXITCODE -ne 0) { throw 'Application smoke test failed.' }
+Remove-Item Env:TELEGRAM_API_HASH -ErrorAction SilentlyContinue
+Remove-Item Env:TELEGRAM_STATUS_BOT_TOKEN -ErrorAction SilentlyContinue
 $active = Join-Path $root 'active-release.txt'
 $previous = Join-Path $root 'previous-release.txt'
 if (Test-Path -LiteralPath $active) {

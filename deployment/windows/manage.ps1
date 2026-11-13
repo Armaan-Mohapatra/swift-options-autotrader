@@ -18,6 +18,17 @@ $root = Resolve-SwiftInstallRoot -InstallRoot $InstallRoot
 Assert-SwiftManifest $root
 $taskName = 'SwiftAutoTrader-Paper-Local'
 $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+# Refuse to operate a colliding task owned by another application/installation.
+if ($null -ne $task) {
+    $expectedRunner = Join-Path $root 'scripts\service.ps1'
+    $taskArguments = @($task.Actions | ForEach-Object { [string]$_.Arguments })
+    if (@($taskArguments | Where-Object {
+        $_.Contains('"' + $expectedRunner + '"') -and
+        $_.Contains('"' + $root + '"')
+    }).Count -ne 1) {
+        throw 'Task name collision or task points to another installation. No changes made.'
+    }
+}
 if ($DryRun -or $WhatIfPreference) {
     [ordered]@{ status = 'PREVIEW_NO_CHANGES'; action = $Action; root = $root;
         has_task = ($null -ne $task); live_broker_writes = $false } | ConvertTo-Json

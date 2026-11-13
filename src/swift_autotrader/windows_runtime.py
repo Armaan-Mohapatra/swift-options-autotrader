@@ -334,9 +334,12 @@ class PaperSupervisor:
 
     def _notify_scan(self) -> None:
         try:
+            scan_env = {key: value for key, value in self.env.items()
+                        if key not in {"TELEGRAM_STATUS_BOT_TOKEN",
+                                       "TELEGRAM_API_HASH", "TELEGRAM_SESSION_PATH"}}
             result = subprocess.run(
                 [sys.executable, "-m", "swift_autotrader", "paper-notify-scan"],
-                cwd=self.root, env=self.env, capture_output=True, timeout=10,
+                cwd=self.root, env=scan_env, capture_output=True, timeout=10,
                 check=False,
             )
             if result.returncode != 0:
@@ -352,6 +355,7 @@ class PaperSupervisor:
     def run(self, *, max_cycles: int | None = None) -> None:
         with single_instance(self.root / "state" / "service.lock"):
             self.stop_marker.unlink(missing_ok=True)
+            failed = False
             try:
                 for c in self.children:
                     self._start(c)
@@ -367,12 +371,13 @@ class PaperSupervisor:
                         break
                     self.sleep(5)
             except BaseException:
+                failed = True
                 self._heartbeat("FAILED")
                 raise
             finally:
                 for c in reversed(self.children):
                     self._stop_child(c)
-                self._heartbeat("STOPPED")
+                self._heartbeat("FAILED" if failed else "STOPPED")
                 self.stop_marker.unlink(missing_ok=True)
 
 

@@ -47,3 +47,11 @@ def test_uninstall_guards_and_backups():
     assert "Unregister-ScheduledTask" in manage
     assert "-confirm-offline" in manage
     assert "BACKED_UP" not in manage or "Backup" in manage
+
+
+def test_task_identity_prevents_collisions_and_reinstall_is_idempotent():
+    manage = (WINDOWS / "manage.ps1").read_text()
+    setup = (WINDOWS / "setup.ps1").read_text()
+    assert "Task name collision" in manage
+    assert "ALREADY_INSTALLED" in setup
+    assert "--no-managed-python" in setup

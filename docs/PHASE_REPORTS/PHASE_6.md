@@ -1,12 +1,12 @@
 # Phase 6 checkpoint — Windows local PAPER deployment source
 
-**Status: CODE_COMPLETE / LOCAL_TESTED / GITHUB_WINDOWS_CI_PENDING_OR_BLOCKED / PAPER_ONLY / NO_HOST_INSTALL.** This is NOT a live/trading-ready release. The Phase 5 base PR #14 remains **CI_BLOCKED**, with GitHub Actions jobs failing before runner assignment; the current Phase 6 workflow must be independently verified on Windows before any release-ready claim.
+**Status: CODE_COMPLETE / LOCAL_TESTED / GITHUB_WINDOWS_CI_PENDING_OR_BLOCKED / PAPER_ONLY / NO_HOST_INSTALL.** This is NOT a live/trading-ready release. The Phase 5 base PR #14 remains **CI_BLOCKED**, with GitHub Actions jobs failing before runner assignment; the Phase 6 [Windows PR workflow](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371067323) and [multi-OS PR workflow](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371067349) also failed **prior to runner allocation** (zero executed steps), so no Windows CI pass can be claimed.
 
 ## Provenance
 
 - Private repository: https://github.com/Armaan-Mohapatra/swift-options-autotrader
 - Base: `codex/phase5-analytics-dashboard` at `ce3d65130b7d9ea976de87515a779c5438dd90c0`, draft PR #14, unmerged.
-- Branch: `codex/phase6-windows-deployment`; separate draft PR, full SHA and run URLs to be recorded after GitHub publication.
+- Branch: `codex/phase6-windows-deployment`; [draft PR #16](https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/16) is stacked on Phase 5 and unmerged. First implementation commit: `d8475105efd956f071a6cc4339b45f615124b9f3`; later hardening/report commits may advance HEAD.
 - `main`, earlier draft PRs and Phoenix/Kalshi/other repositories remain unmodified. No user's physical Windows computer was accessed.
 
 ## Implemented source
@@ -30,7 +30,7 @@ PYTHONPATH=src python -m pytest -q \
   tests/integration/test_windows_deployment_contract.py
 ```
 
-**23 passed, 0 failed, 0 skipped** on the isolated development Python runtime. Python source compiled and heuristic secret scan passed. The local Phase 5 working tree was reconstructed from earlier source bundles rather than a private Git clone; a broad run yielded **248 passed, 14 failed, 37 setup errors**, predominantly because stale local Phase 0–3 fixture copies expected fewer migrations and an older `Settings` interface. This is **NOT** a successful complete regression and must **NOT** be used as the release gate. The authoritative GitHub branch must run CI using actual remote source files. PowerShell syntax/execution and Windows Task Scheduler registration were **NOT locally run** (Linux development host).
+**24 passed, 0 failed, 0 skipped** on the isolated development Python runtime. Python source compiled and heuristic secret scan passed. The local Phase 5 working tree was reconstructed from earlier source bundles rather than a private Git clone; a broad run yielded **248 passed, 14 failed, 37 setup errors**, predominantly because stale local Phase 0–3 fixture copies expected fewer migrations and an older `Settings` interface. This is **NOT** a successful complete regression and must **NOT** be used as the release gate. The authoritative GitHub branch must run CI using actual remote source files. PowerShell syntax/execution and Windows Task Scheduler registration were **NOT locally run** (Linux development host).
 
 ## Known limits — must be verified before installation
 
