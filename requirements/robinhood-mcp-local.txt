@@ -1,0 +1,5 @@
+# LOCAL WINDOWS ONLY, after explicit owner authorization; never needed for CI.
+# Official MIT-licensed MCP Python SDK v2; transitive hashes/SBOM require local review.
+mcp==2.3.0
+# SDK v2 platform dependencies include HTTPX2 and Windows APIs as appropriate.
+# Do not put tokens, device codes, account IDs or refresh tokens in this file.

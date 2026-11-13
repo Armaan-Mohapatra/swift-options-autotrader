@@ -42,3 +42,12 @@ These additional variables are read by `RiskCeilings.from_environment()` or `Exi
 Further checks require exact contract identity, verified test instrument, current market session permission, options permission, tick increment and modeled buying power. There is **no implicit trusted feed**: the standalone CLI supplies an empty instrument provider, refuses `paper-cycle --confirm-simulation` and does not turn synthetic option-chain guesses into "verified" live instruments. Build and test paper cycles via an explicitly supplied synthetic `PaperPreflight` in isolated fixtures. Options-only, no quote price chasing, no new average repricing. `paper-health` and control commands require an explicitly migrated local SQLite database. `paper-emergency-stop` persists a stop and requests cancellation of resting paper entries; manual API approval is required to reset the emergency flag.
 
 All original trading safety flags remain enforced; real broker writes are impossible. No unattended scheduled execution or Windows deployment exists in Phase 3.
+
+## Phase 4 local-only MCP diagnostics
+
+No Robinhood credentials are ever configured in GitHub or standard env files.
+`mcp-diagnostics` prints read-only/offline status by default. On the separately
+authorized Windows host only, `--connect` plus
+`ROBINHOOD_MCP_INTERACTIVE=true` enables a human PKCE OAuth flow using DPAPI
+storage outside the checkout. This flow has not been field validated; keep all
+real brokerage write flags false. See `ROBINHOOD_MCP_PHASE4.md`.
