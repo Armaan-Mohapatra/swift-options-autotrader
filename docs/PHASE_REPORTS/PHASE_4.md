@@ -1,6 +1,6 @@
 # Phase 4 — Official Robinhood MCP adapter (2026-11-12)
 
-**Status: IMPLEMENTED / LOCAL_MOCK_TESTED / CI_PENDING / REQUIRES_LOCAL_AUTH.**
+**Status: IMPLEMENTED / TESTED / CI_PASSED / MOCK_ONLY / REQUIRES_LOCAL_AUTH.**
 
 ## Source and scope
 
@@ -19,10 +19,10 @@ Read all normative documents and previous Phase 0–3 reports. Phase 4 is stacke
 - Repository: https://github.com/Armaan-Mohapatra/swift-options-autotrader (PRIVATE).
 - Base: `codex/phase3-paper-order-engine` at `1988ff6a142b429b6dea90915a52c52424a827b5`.
 - Phase branch: `codex/phase4-robinhood-mcp`.
-- PR: PENDING.
-- Final commit SHA: PENDING.
-- GitHub Windows/Linux CI run: PENDING.
-- Verified local MCP/order-engine subset: 63 pass at initial checkpoint. Final counts to be taken from GitHub after upload.
+- PR: https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/13 (DRAFT, stacked, unmerged).
+- Last fully CI-verified **code** commit: `404c675ceeae61b97a6f1a2dbd8c12ec9d6691bf`. Subsequent report-only changes may advance branch HEAD; re-run CI before merging.
+- First lint-failing CI: https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43358046793 (4 Ruff violations, fixed in code commit).\n- **Successful Windows/Linux CI run**: https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43358223441 — 4/4 SUCCESS; actual job logs inspected.
+- **275 distinct tests**, **1,100 total test executions**, all passed; 0 failures, 0 skips on four runners: Ubuntu 3.11/3.13 and Windows 3.11/3.13. Ruff, compileall, pinned uv.lock install, existing dependency audit and heuristic secrets scan all pass.\n- Local Phase 3+MCP-focused subset: 63 passed. The actual SDK transport and Windows DPAPI OAuth path were **not authenticated or exercised in CI** (mock test protocol only).
 
 ## Unverified and hard blockers
 
@@ -34,3 +34,14 @@ Read all normative documents and previous Phase 0–3 reports. Phase 4 is stacke
 ## Next phase
 
 Phase 5 only after owner review. Continue synthetic historical paper replay/reporting/dashboard. Do not link personal accounts or deploy without separate approval.
+
+## Verified acceptance and limitations
+
+- [x] Exact original Decimal premium preserved in inert single-leg buy-open and sell-close request construction; no quote chase or LOTTO exclusion; 3,600-second accepted-order deadlines remain in unchanged Phase 3 engine.
+- [x] Stable UUIDv5 ref_id from persistent logical idempotency key; no duplicate submission or automatic retry after unknown outcome; status normalization distinguishes pending_cancelled, partial, filled, rejected and unknown.
+- [x] Strict account/option identity, price timestamp and review guards, mock read-only calls and offline CLI; tests assert all MCP trade/cancel tool invocations remain impossible.
+- [x] GitHub PR #13 draft on Phase 3 branch. 17 source/doc/test paths reviewed, none outside this repository or earlier engine changes.
+- [ ] Actual Robinhood OAuth/PKCE, tool schemas and permissions, live quotes and account data, successful read-only review/order-history responses and Windows DPAPI behavior remain **REQUIRES_LOCAL_AUTH**.
+- [ ] A universal transitive hash lock including the optional SDK, external signed dependency attestations and real-world forward paper fills remain outstanding; do not mark as LIVE_APPROVED.
+
+**Stop after Phase 4:** No merges, real orders, Telegram user enrollments or Windows installation. Phase 5 requires a separate user instruction.
