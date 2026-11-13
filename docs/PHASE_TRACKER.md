@@ -10,7 +10,7 @@ Each phase requires its own explicit user instruction and an independently revie
 | 3 | Durable paper order engine & reconciliation | Limit exact, accepted + 3600s, fill/cancel races, crash idempotency, kill switch, no real writes | **CI_PASSED / SYNTHETIC_ONLY — draft PR #12; no verified real option catalog or local deployment** |
 | 4 | Official documented Robinhood MCP adapter | Contract tests, approval/preflight mocks, local auth blockers clear, no live writes | **CI_PASSED / MOCK_ONLY / REQUIRES_LOCAL_AUTH — draft PR #13** |
 | 5 | Replay, reporting, dashboard, notices | No-lookahead, reconciled P&L with data provenance; local-only dashboard | **CODE_COMPLETE / LOCAL_TESTED / CI_BLOCKED — draft PR #14** |
-| 6 | Windows 24/7 operations package | Installation dry-run, rollback, restart single-instance tests in CI; **no user device changes** | NOT_STARTED |
+| 6 | Windows 24/7 operations package | Dry-run-first installer, pinned runtime, Task Scheduler, singleton, online backups, rollback; no user device changes | **CODE_COMPLETE / LOCAL_TESTED / CI_BLOCKED — draft PR #16** |
 | 7 | End-to-end integration audit, paper release handoff | Complete synthetic scenarios, security/license audit, passing CI; release still paper-only | NOT_STARTED |
 
 Statuses: `NOT_STARTED`, `CODE_COMPLETE`, `CI_PASSED`, `REQUIRES_LOCAL_AUTH`, `FORWARD_TESTING`, `LIVE_APPROVED` only with corresponding evidence. `LOCAL_TESTED` and `REMOTE_BLOCKED` are informational labels and **not** equivalent to `CI_PASSED`.
@@ -27,3 +27,7 @@ Phase 4 CI: https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions
 ### Phase 5 review checkpoint
 
 Local regression: 87/87 passed for paper engine and Phase 5 analytics/replay/dashboard/notification tests. GitHub CI failed at runner startup with no test steps executed on the 4 Windows/Linux Python jobs ([run 43367076794](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43367076794)); whether Actions billing/budget or GitHub service policy is responsible must be checked by the repo owner. Do not proceed with merge/release on this result.
+
+### Phase 6 review checkpoint
+
+[Draft PR #16](https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/16) provides the isolated Windows PAPER package and runbook. Twenty-four focused portable tests passed locally; the [Windows installer rehearsal](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371545210) and [full cross-platform matrix](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371545243) failed before runners were assigned (zero executed steps). No real host install, Task Scheduler registration, OAuth or brokerage write was performed. Not release-certified. Phase 7 NOT_STARTED.

@@ -1,6 +1,6 @@
 # Phase 6 checkpoint — Windows local PAPER deployment source
 
-**Status: CODE_COMPLETE / LOCAL_TESTED / GITHUB_WINDOWS_CI_PENDING_OR_BLOCKED / PAPER_ONLY / NO_HOST_INSTALL.** This is NOT a live/trading-ready release. The Phase 5 base PR #14 remains **CI_BLOCKED**, with GitHub Actions jobs failing before runner assignment; the Phase 6 [Windows PR workflow](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371067323) and [multi-OS PR workflow](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371067349) also failed **prior to runner allocation** (zero executed steps), so no Windows CI pass can be claimed.
+**Status: CODE_COMPLETE / LOCAL_TESTED / CI_BLOCKED / PAPER_ONLY / NO_HOST_INSTALL.** This is NOT a live/trading-ready release. The Phase 5 base PR #14 remains **CI_BLOCKED**, with GitHub Actions jobs failing before runner assignment; the Phase 6 [Windows PR workflow](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371067323) and [multi-OS PR workflow](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371067349) also failed **prior to runner allocation** (zero executed steps), so no Windows CI pass can be claimed.
 
 ## Provenance
 
@@ -47,3 +47,7 @@ PYTHONPATH=src python -m pytest -q \
 Read [beginner runbook](../WINDOWS_RUNBOOK.md). Have Codex check the host's Python 3.11 launcher/Git, NTFS/BitLocker, network, Task Scheduler, identity/logon, available disk/memory and existing trading apps; verify reviewed commit SHA; run dry-run; request permission to install; use the isolated `-Apply` mode after CI approval; perform local Telegram session/DPAPI enrollment; start task; validate dashboard/reconnect/reboots/backups/restore/rollback and resource consumption. Live brokerage writes remain disabled; do not run any production broker orders.
 
 **Phase 6 stop gate:** No merge, release tag, live auth or Windows installation performed; Phase 7 integration/security audit needs separate instruction. CI must pass before "release-ready" can truthfully be claimed.
+
+## Final hardening and CI evidence
+
+The follow-up implementation hardening commit `19204a5766d1f2d1dc7f9962ccbeef1f31adaba6` added idempotent same-release install handling, validation of scheduled-task target identity before status/control actions, BOM-free Windows settings manifests, `uv` system-Python selection, preservation of failed child status and a secret-filtered status bot environment. Its local focused suite **24 passed** and compilation/heuristic secret scan passed. The final-code [Windows workflow run 43371545210](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371545210) and [multi-OS run 43371545243](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371545243) each reported **failure before runners were assigned** (zero steps). A follow-up documentation-only commit may supersede this code commit; consult PR #16 for HEAD and its own CI. Do not claim CI passed.
