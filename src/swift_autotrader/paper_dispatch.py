@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, date
 from decimal import Decimal
 from pathlib import Path
+from time import monotonic
 from typing import Callable, Protocol
 
 from swift_autotrader.broker.paper import PaperBroker, PaperMarketQuote, as_utc, iso
@@ -195,6 +196,42 @@ class PaperDispatcher:
                    <= self.limits.entry_max_age_seconds]
         return entries, active
 
+    def _recoverable_entries(self, now: datetime) -> list[tuple[str, ParsedAlert, OptionContract]]:
+        """Revalidate durable, previously parsed unexecuted entries after a crash.
+
+        No persisted parser decision alone grants permission to execute. Each
+        recovered signal must receive a fresh independent contract/quote review.
+        """
+        with sqlite3.connect(self.db_path) as db:
+            rows = db.execute(
+                "SELECT s.signal_id,s.underlying,s.option_right,s.strike,"
+                "s.expiration_date,e.body,r.telegram_sent_at_utc "
+                "FROM option_signals s "
+                "JOIN signal_metadata m ON m.signal_id=s.signal_id "
+                "JOIN telegram_message_revisions r ON r.revision_id=m.first_revision_id "
+                "JOIN raw_events e ON e.event_id=r.raw_event_id "
+                "JOIN signal_parser_decisions p ON p.revision_id=m.first_revision_id "
+                "WHERE r.channel_id=? AND r.eligible_for_future_processing=1 "
+                "AND p.status='RECORDED' AND p.intent='ENTRY' "
+                "AND NOT EXISTS(SELECT 1 FROM order_intents o WHERE o.signal_id=s.signal_id) "
+                "AND NOT EXISTS(SELECT 1 FROM paper_engine_decisions d WHERE d.signal_id=s.signal_id) "
+                "AND NOT EXISTS(SELECT 1 FROM signal_close_requests c WHERE c.signal_id=s.signal_id) "
+                "ORDER BY m.first_revision_id DESC LIMIT 48",
+                (str(self.channel_id),),
+            ).fetchall()
+        from swift_autotrader.signals.identity import OptionRight
+        eligible: list[tuple[str, ParsedAlert, OptionContract]] = []
+        for sid, symbol, right, strike, expiry, body, sent_at in reversed(rows):
+            sent = datetime.fromisoformat(str(sent_at).replace('Z', '+00:00'))
+            if not 0 <= (now - as_utc(sent)).total_seconds() <= self.limits.entry_max_age_seconds:
+                continue
+            contract = OptionContract(symbol, OptionRight(right), Decimal(strike),
+                                      date.fromisoformat(expiry))
+            alert = parse_message(body)
+            if alert.intent is SignalIntent.ENTRY:
+                eligible.append((sid, alert, contract))
+        return eligible
+
     def _record_quote(self, quote: VerifiedQuote) -> None:
         evidence_hash = hashlib.sha256(quote.evidence_reference.encode("utf-8")).hexdigest()
         provenance = "SYNTHETIC" if quote.source == "SYNTHETIC_TEST" else "EXTERNAL_UNVERIFIED"
@@ -220,7 +257,7 @@ class PaperDispatcher:
         now = as_utc(self.clock())
         # Run the local order watchdog BEFORE optional external read-only data.
         # A long quote lookup must never postpone a due entry cancellation.
-        self.engine.run_cycle(allow_entries=False)
+        watchdog = self.engine.run_cycle(allow_entries=False, process_closes=False)
         _all_entries, active = self._pending_and_active()
         rows = self._pending_rows
         matcher = SignalMatcher(self.db_path, self.channel_id)
@@ -251,9 +288,22 @@ class PaperDispatcher:
         snapshots: list[MarketSnapshot] = []
         failed = False
 
+        # A provider outage must not produce an unbounded binary-search storm.
+        # Both RPC count and elapsed wall time bound each poll, even if every
+        # candidate is unverifiable and the recursive isolation keeps splitting.
+        cycle_deadline = monotonic() + 20.0
+        provider_calls = 0
+
         async def fetch(batch: Sequence[ParsedAlert], related: Sequence[OptionContract]):
-            item = await asyncio.wait_for(self.provider.snapshot(batch, related, now),
-                                          timeout=12)
+            nonlocal provider_calls
+            remaining = cycle_deadline - monotonic()
+            if provider_calls >= 24 or remaining <= 0:
+                raise MarketEvidenceUnavailable("Read-only market provider poll budget exhausted")
+            provider_calls += 1
+            item = await asyncio.wait_for(
+                self.provider.snapshot(batch, related, now),
+                timeout=min(12.0, remaining),
+            )
             item.validate(now, max_age_seconds=self.quote_max_age_seconds)
             return item
 
@@ -270,23 +320,38 @@ class PaperDispatcher:
         ]
         # Bound per-cycle network work. Unprocessed events remain in the
         # durable store and will be revisited next cycle, not falsely skipped.
-        eligible_rows = eligible_rows[:48]
+        recovered = self._recoverable_entries(now)
+        # Give previously durable, unsubmitted source signals the same fresh
+        # read-only review as new signals, without exceeding the network cap.
+        recovery_candidates = [(None, alert, sid, contract)
+                               for sid, alert, contract in recovered]
+        available_slots = max(0, 48 - len(recovery_candidates))
+        eligible_rows = eligible_rows[:available_slots]
+        candidates = recovery_candidates + [(rid, alert, None, None)
+                                             for rid, alert in eligible_rows]
         verified_ids: list[int] = []
+        verified_recovery_ids: set[str] = set()
         # Batch and bisect to isolate one bad contract, without hammering a
         # provider for every ordinary BUY. A group never exceeds the cap of 12.
-        async def review(group: list[tuple[int, ParsedAlert]]) -> None:
+        async def review(group: list[tuple[int | None, ParsedAlert, str | None,
+                                            OptionContract | None]]) -> None:
             nonlocal failed
             if not group:
                 return
             try:
-                snap = await fetch([a for _rid, a in group], [])
+                snap = await fetch([alert for _rid, alert, _sid, _expected in group], [])
                 catalog = StaticInstrumentCatalog(snap.instruments)
-                for _rid, alert in group:
+                for _rid, alert, _sid, expected in group:
                     contract, reason = resolve_entry(alert, catalog, as_of=now.date())
-                    if contract is None or reason is not None or contract not in snap.quotes:
-                        raise MarketEvidenceUnavailable("Unverified fresh entry quote")
+                    if (contract is None or reason is not None
+                        or contract not in snap.quotes
+                        or (expected is not None and contract != expected)):
+                        raise MarketEvidenceUnavailable("Unverified exact fresh entry quote")
                 snapshots.append(snap)
-                verified_ids.extend(rid for rid, _alert in group)
+                verified_ids.extend(rid for rid, _alert, _sid, _expected in group
+                                    if rid is not None)
+                verified_recovery_ids.update(sid for _rid, _alert, sid, _expected in group
+                                             if sid is not None)
             except (MarketEvidenceUnavailable, OSError, TimeoutError, RuntimeError, ValueError):
                 failed = True
                 if len(group) > 1:
@@ -294,8 +359,8 @@ class PaperDispatcher:
                     await review(group[:half])
                     await review(group[half:])
 
-        for index in range(0, len(eligible_rows), 12):
-            await review(eligible_rows[index:index + 12])
+        for index in range(0, len(candidates), 12):
+            await review(candidates[index:index + 12])
 
         instruments: dict[OptionContract, Preflight] = {}
         quotes: dict[OptionContract, VerifiedQuote] = {}
@@ -345,12 +410,22 @@ class PaperDispatcher:
         if failed:
             self.notifications.record("APPLICATION", "MARKET_DATA_UNAVAILABLE",
                                       source_key="paper-dispatch")
-        cycle = self.engine.run_cycle(quotes=exit_quotes, allow_entries=bool(verified_ids))
-        status = "PAPER_ONLY" if verified_ids or (not failed and snapshots) or decisions else (
+        verified_signal_ids = set(verified_recovery_ids)
+        verified_signal_ids.update(
+            str(decision.signal_id) for decision in decisions
+            if decision.intent == 'ENTRY' and decision.status == 'RECORDED'
+            and decision.signal_id is not None
+        )
+        cycle = self.engine.run_cycle(
+            quotes=exit_quotes, allow_entries=bool(verified_signal_ids),
+            allowed_signal_ids=frozenset(verified_signal_ids),
+        )
+        status = "PAPER_ONLY" if verified_signal_ids or (not failed and snapshots) or decisions else (
             "PAUSED_DATA_UNAVAILABLE" if failed else "PAPER_ONLY"
         )
         return DispatchResult(status, len(decisions), cycle.entry_submissions,
-                              cycle.close_submissions, fill_count, cycle.cancellation_requests)
+                              cycle.close_submissions, fill_count,
+                              watchdog.cancellation_requests + cycle.cancellation_requests)
 
 
 async def supervise_dispatch(

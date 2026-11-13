@@ -346,3 +346,105 @@ def test_due_cancellation_occurs_before_network_provider_request(rig):
     feed.snapshot = check_cancel_before_data
     result = cycle(rig)
     assert result.status == "PAUSED_DATA_UNAVAILABLE"
+
+# Independent chat-audit regressions against the PR #22 paper dispatcher.
+def test_pre_network_watchdog_does_not_create_false_exit_quote_alert(rig):
+    from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog
+    path, clock, feed, _, _ = rig
+    ingest(rig, "SPY 680C 11/13 @ 1.20", 1101)
+    assert cycle(rig).entry_orders == 1
+    clock.now += timedelta(seconds=2)
+    assert cycle(rig).simulated_fills == 2
+    ingest(rig, "SPY ALL OUT", 1102, reply=1101)
+    SignalMatcher(path, CHANNEL, catalog=StaticInstrumentCatalog([CONTRACT])).process_pending()
+    feed.bid, feed.ask = Decimal("1.35"), Decimal("1.40")
+    assert cycle(rig).exit_orders == 1
+    with sqlite3.connect(path) as db:
+        false_alerts = db.execute(
+            "SELECT COUNT(*) FROM paper_engine_alerts WHERE code='EXIT_QUOTE_MISSING' AND resolved=0"
+        ).fetchone()[0]
+    assert false_alerts == 0, "A verified fresh quote was available during the cycle"
+
+
+def test_crash_after_persisted_parser_decision_recovers_paper_entry(rig):
+    from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog
+    path, _, _, _, _ = rig
+    ingest(rig, "SPY 680C 11/13 @ 1.20", 1101)
+    decided = SignalMatcher(path, CHANNEL, catalog=StaticInstrumentCatalog([CONTRACT])).process_pending()
+    assert len(decided) == 1 and decided[0].status == "RECORDED"
+    first = cycle(rig)
+    assert first.entry_orders == 1, "Durable source signals need fresh evidence and replay"
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM order_intents WHERE side='BUY_TO_OPEN'"
+        ).fetchone()[0] == 1
+
+
+def test_verified_recovered_entry_does_not_block_unverified_other_signal(rig):
+    from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog
+    path, _, _, _, _ = rig
+    other = OptionContract("QQQ", OptionRight.CALL, Decimal("480"), date(2026, 11, 13))
+    ingest(rig, "SPY 680C 11/13 @ 1.20", 1201)
+    ingest(rig, "QQQ 480C 11/13 @ 1.20", 1202)
+    result = SignalMatcher(
+        path, CHANNEL, catalog=StaticInstrumentCatalog([CONTRACT, other])
+    ).process_pending()
+    assert len(result) == 2 and all(decision.status == "RECORDED" for decision in result)
+    assert cycle(rig).entry_orders == 1
+    with sqlite3.connect(path) as db:
+        names = db.execute(
+            "SELECT s.underlying FROM order_intents o "
+            "JOIN option_signals s ON o.signal_id=s.signal_id"
+        ).fetchall()
+        unrelated_decisions = db.execute(
+            "SELECT COUNT(*) FROM paper_engine_decisions d "
+            "JOIN option_signals s ON d.signal_id=s.signal_id WHERE s.underlying='QQQ'"
+        ).fetchone()[0]
+    assert names == [("SPY",)]
+    assert unrelated_decisions == 0, "QQQ must remain unblocked without market evidence"
+
+
+def test_missing_quote_alert_resolves_only_after_confirmed_full_exit(rig):
+    path, clock, feed, _, _ = rig
+    ingest(rig, "SPY 680C 11/13 @ 1.20", 1301)
+    assert cycle(rig).entry_orders == 1
+    clock.now += timedelta(seconds=2)
+    assert cycle(rig).simulated_fills == 2
+    ingest(rig, "SPY ALL OUT", 1302, reply=1301)
+    feed.quoted = False
+    assert cycle(rig).exit_orders == 0
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM paper_engine_alerts "
+            "WHERE code='EXIT_QUOTE_MISSING' AND resolved=0"
+        ).fetchone()[0] >= 1
+    feed.quoted = True
+    feed.bid, feed.ask = Decimal("1.36"), Decimal("1.40")
+    assert cycle(rig).exit_orders == 1
+    clock.now += timedelta(seconds=2)
+    assert cycle(rig).simulated_fills == 2
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM paper_engine_alerts "
+            "WHERE code='EXIT_QUOTE_MISSING' AND resolved=0"
+        ).fetchone()[0] == 0
+
+def test_large_outage_has_bounded_provider_calls_and_preserves_source(rig):
+    path, _, feed, _, _ = rig
+    for index in range(48):
+        ingest(rig, "SPY 680C 11/13 @ 1.20", 2000 + index)
+    calls = 0
+
+    async def failing_feed(entries, active, now):
+        nonlocal calls
+        calls += 1
+        raise MarketEvidenceUnavailable("Simulated unavailable read-only provider")
+
+    feed.snapshot = failing_feed
+    result = cycle(rig)
+    assert result.entry_orders == 0
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM signal_parser_decisions"
+        ).fetchone()[0] == 0
+    assert calls <= 24, f"A single cycle called an unavailable provider {calls} times"

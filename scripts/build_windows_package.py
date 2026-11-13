@@ -106,6 +106,19 @@ def create_package(source: Path, output: Path, *, expected_commit: str | None = 
         tracked = {p.decode("utf-8") for p in indexed.split(b"\0") if p}
         if set(sources) - tracked:
             raise RuntimeError("Release source includes untracked or ignored files")
+        # Git's clean status is based on normalized content. On Windows a
+        # CRLF checkout can be clean while its bytes differ from HEAD blobs.
+        # A release claiming a reviewed commit MUST contain exactly its blobs.
+        for relative, payload in sources.items():
+            try:
+                committed = subprocess.run(
+                    ["git", "-C", str(source), "show", f"HEAD:{relative}"],
+                    capture_output=True, check=True, timeout=10,
+                ).stdout
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise RuntimeError("Cannot verify committed release blob") from exc
+            if payload != committed:
+                raise RuntimeError(f"Release source bytes differ from committed Git blob: {relative}")
     version = tomllib.loads(sources["pyproject.toml"].decode("utf-8"))["project"]["version"]
     if not isinstance(version, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", version):
         raise RuntimeError("Unsupported release package version")
