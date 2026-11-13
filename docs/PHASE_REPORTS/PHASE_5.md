@@ -1,13 +1,16 @@
 # Phase 5 — historical replay, paper performance and localhost dashboard
 
-**Status:** IMPLEMENTED / LOCAL_TESTED (initial); MOCK_ONLY / SYNTHETIC_ONLY / REQUIRES_LOCAL_DATA. GitHub CI evidence and final branch SHA will be appended only after verification.
+**Status:** IMPLEMENTED / LOCAL_TESTED / CI_BLOCKED / MOCK_ONLY / SYNTHETIC_ONLY / REQUIRES_LOCAL_DATA. This is NOT CI_PASSED or forward-validated.
 
 ## Provenance
 
 - PRIVATE repository: https://github.com/Armaan-Mohapatra/swift-options-autotrader
 - Base checkpoint: Phase 4 `fc7514375f506d2bff82402176f97b96b3f3ab47` (draft PR #13, unmerged).
 - Feature branch: `codex/phase5-analytics-dashboard` (stacked). Do not alter earlier branches or `main`.
-- PR/commit/CI: pending publication and final verification, **do not infer green from local tests**.
+- Draft PR #14: https://github.com/Armaan-Mohapatra/swift-options-autotrader/pull/14
+- Last locally tested code commit: `4191310ddc196c8874584302eb53f4fb493dfb26`. Documentation commit may advance HEAD; check latest ref.
+- GitHub CI (PR) https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43367076794 **FAILED BEFORE RUNNER START**; earlier push https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43367053314 similarly failed. 4/4 jobs had 0 steps, no assigned runner; no test failures were executed and no Windows/Linux pass can be asserted.
+- Earlier Phase 4 baseline was green: https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43358530766, 4/4 jobs, 275 passed/job. This does NOT validate Phase 5 code.
 
 ## Implemented
 
@@ -25,7 +28,8 @@ Sanitized fixture `tests/fixtures/swift_phase5_replay_synthetic.json` deliberate
 
 ## Current validation
 
-- Locally new replay/metrics/dashboard/notifications regression tests pass in isolated development environment. Final exact test counts must come from GitHub CI including inherited Phase 0–4 suites.
+- Locally **87 passed, 0 failed, 0 skipped**, Python 3.13, Phase 3 engine and Phase 5 replay/metrics/dashboard/notification/CLI focused suite. Test command: `PYTHONPATH=src pytest -q tests/integration/test_paper_order_engine.py tests/integration/test_phase2_to_paper.py tests/integration/test_phase5_replay.py tests/unit/test_phase5_analytics.py tests/unit/test_phase5_notifications.py tests/integration/test_phase5_dashboard.py tests/integration/test_phase5_cli.py`. This uses temporary Phase 1 placeholders in an isolated reconstructed local development environment, NOT a complete clean-room regression of all repository files. The authoritative Phase 1 files remain unchanged in GitHub.
+- `python -m compileall` passed on local Phase5 code. GitHub Ruff, lock/license audit, secret heuristic and the complete inherited suite have NOT executed due zero-runner CI failures. There is no valid Phase5 Windows/Linux test count.
 - Local documentation and tests deliberately avoid the user's actual Swift paid content, Robinhood account, Windows computer and broker credentials.
 - No outbound notifications are sent; the notification outbox is local only.
 
@@ -37,3 +41,11 @@ Sanitized fixture `tests/fixtures/swift_phase5_replay_synthetic.json` deliberate
 - Phase 4 OAuth still requires locally approved manual enrollment/validation; signing/SBOM and full optional SDK dependency lock remain outstanding.
 
 **Stop after Phase 5** and await explicit owner review before Phase 6, merging, deployment, authentication or any real trading.
+
+## Execution evidence and external CI blocker
+
+Final Phase5 feature branch contains five additional defensive repairs at `4191310ddc196c8874584302eb53f4fb493dfb26`: enforce original entry/exit limit consistency on ledger reads, persist quote provenance, show quote-coverage uncertainty for unfilled entries, preserve session boundaries and surface unresolved alerts without outbound notifications. These passed the 87 local tests above.
+
+GitHub Actions failure is **prior to runner allocation**, as observed from the GitHub REST jobs endpoint (four failed jobs with empty `steps`, `runner_id=0`, ~0ms billed). The exact root cause cannot be established from accessible logs (log download returns BlobNotFound). Repo owner should inspect the run's banner/annotation and GitHub Actions settings, usage budgets and billing, then re-run the PR matrix. Do not assert CI success, merge or release until all mandatory checks actually pass.
+
+Source quality caveat: the replay accepts explicitly labeled `HISTORICAL_UNVERIFIED` third-party evidence without independently verifying it; synthetic option quotes/depth, modeled slippage/fees, simplified 100 option multiplier and close-only drawdown do not reproduce exchange queue priority or total portfolio return. The illustrative `$42` gross/`$39.40` net numbers are fabricated **as fixtures** and must never be reported as real Swift returns. Private source content remains local.
