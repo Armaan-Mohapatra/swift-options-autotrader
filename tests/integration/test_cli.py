@@ -31,7 +31,7 @@ def test_migrate_is_explicit(monkeypatch, capsys, tmp_path):
     assert db.is_file()
     assert json.loads(capsys.readouterr().out)["applied_versions"] == [
         "0001_initial.sql", "0002_telegram_ingest.sql",
-        "0003_signal_linkage.sql", "0004_paper_orders.sql",
+        "0003_signal_linkage.sql", "0004_paper_orders.sql", "0005_research_monitoring.sql",
     ]
     assert main(["migrate"]) == 0
     assert json.loads(capsys.readouterr().out)["applied_versions"] == []

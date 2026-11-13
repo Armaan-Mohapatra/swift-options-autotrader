@@ -7,6 +7,7 @@ import importlib.util
 import json
 import sqlite3
 import sys
+from decimal import Decimal, InvalidOperation
 from collections.abc import Sequence
 
 from swift_autotrader import __version__
@@ -34,6 +35,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser("paper-pause", help="Prevent new paper entries")
     commands.add_parser("paper-resume", help="Resume paper entries unless emergency-stopped")
     commands.add_parser("paper-emergency-stop", help="Stop paper entries and cancel resting buys")
+    report = commands.add_parser("paper-report", help="Read confirmed paper fills and P&L")
+    report.add_argument("--fee-per-side-usd", default=None)
+    history = commands.add_parser("paper-replay", help="Isolated quote-evidence historical replay")
+    history.add_argument("--input", required=True)
+    history.add_argument("--compare", action="store_true")
+    dashboard = commands.add_parser("paper-dashboard", help="Local read-only dashboard")
+    dashboard.add_argument("--host", default="127.0.0.1")
+    dashboard.add_argument("--port", type=int, default=8765)
+    dashboard.add_argument("--fee-per-side-usd", default=None)
+    commands.add_parser("paper-notify-scan", help="Queue local metadata-only alerts")
     diagnostics = commands.add_parser(
         "mcp-diagnostics", help="Robinhood MCP diagnostics; offline unless --connect"
     )
@@ -72,6 +83,45 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "connection_attempted": False,
                     "real_broker_writes_enabled": False,
                 }
+        elif args.command == "paper-replay":
+            from pathlib import Path
+
+            from swift_autotrader.analytics.replay import replay_from_file
+
+            payload = replay_from_file(Path(args.input), compare=args.compare)
+        elif args.command == "paper-report":
+            from swift_autotrader.analytics.metrics import CostModel, PaperAnalytics
+
+            try:
+                fee = Decimal(args.fee_per_side_usd) if args.fee_per_side_usd else None
+            except InvalidOperation as exc:
+                raise ValueError("invalid fee input") from exc
+            payload = PaperAnalytics(
+                config.db_path, costs=CostModel(fee_per_contract_side_usd=fee)
+            ).snapshot()
+        elif args.command == "paper-dashboard":
+            from swift_autotrader.analytics.metrics import CostModel
+            from swift_autotrader.dashboard.app import serve_local
+
+            try:
+                fee = Decimal(args.fee_per_side_usd) if args.fee_per_side_usd else None
+            except InvalidOperation as exc:
+                raise ValueError("invalid fee input") from exc
+            serve_local(
+                config.db_path, host=args.host, port=args.port,
+                costs=CostModel(fee_per_contract_side_usd=fee),
+            )
+            payload = {"status": "DASHBOARD_STOPPED", "mode": "PAPER_ONLY"}
+        elif args.command == "paper-notify-scan":
+            from swift_autotrader.notifications.alerts import NotificationCenter
+
+            center = NotificationCenter(config.db_path)
+            payload = {
+                "status": "LOCAL_NOTIFICATION_SCAN",
+                "mode": "PAPER_ONLY",
+                "notifications_new": center.scan(),
+                "pending_codes": [n.code for n in center.pending()],
+            }
         elif args.command == "migrate":
             payload = {"status": "MIGRATED", "applied_versions": apply_migrations(config.db_path)}
         elif args.command == "telegram-health":
