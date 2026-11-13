@@ -77,3 +77,12 @@ entry/exit rules. Consult `docs/ROBINHOOD_MCP_PHASE4.md` for known blockers.
 - `-DryRun` must never create files/tasks/virtualenvs; `-NoSchedule` tests must stay in fresh isolated directories. Stop rather than overwrite an unrelated scheduled task or any existing data. Use Windows-user DPAPI and restrictive local NTFS ACLs; never commit or log session/token details.
 - The Windows supervisor starts only the private read-only dashboard, optional legitimately authorized read-only Telegram client and optional metadata-only outbound operator status. It MUST NOT automatically enable a paper order cycle that would mark authentic alerts blocked without a verified instrument catalog, fresh quotes and risk preflight. No cloud services required.
 - CI for Phase 6 is **BLOCKED** (runner allocation fails before steps); 24 local focused Python tests are not a substitute. Do not merge, tag, deploy, claim release-ready, sign off Windows compatibility or progress to Phase 7 until separately instructed and all release/field gates pass.
+
+
+## Phase 7 final audit controls
+
+- See `docs/ARCHITECTURE.md`, `docs/PHASE_REPORTS/PHASE_7.md`, and `CHANGELOG.md`; do not label Phase 7 CI_PASSED or RELEASED while GitHub Actions jobs have zero runner allocation or no executed steps.
+- Run the full inherited Windows/Linux Python 3.11/3.13 matrix, isolated Windows PowerShell/NoSchedule install, and offline audit on the **same exact final SHA**; earlier Phase 4 green checks cannot validate Phase 5–7 source.
+- Preserve exact Swift original limit, broker acceptance + 3,600 seconds, no adds, Swift average separation, close 100%, and no market-price invention. The paper engine must accept only a concrete PaperBroker; MCP trade/cancel functions remain hard-denied.
+- No source-content, credential, host-machine, task-scheduler, release-tag, deployment or live-trading side effects during the GitHub audit. Local operator steps remain separately approved.
+- The Windows supervisor does not automate source-to-paper execution; do not claim unattended 24/7 paper trading until independently verified instrument/quote/preflight wiring and forward validation are reviewed.
