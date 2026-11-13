@@ -19,7 +19,6 @@ from swift_autotrader.orders.exit_policy import ExitQuote
 from swift_autotrader.orders.risk import PaperPreflight, Preflight, RiskCeilings
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 
-
 NOW = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
 CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 13))
 OTHER = OptionContract("SPY", OptionRight.PUT, Decimal("675"), date(2026, 11, 13))
@@ -609,9 +608,11 @@ def test_broker_confirmation_lost_after_submission_recovers_from_journal(rig):
         original(intent)
         raise ConnectionError("synthetic interruption after broker acceptance")
 
-    with patch.object(broker, "submit_order", side_effect=submit_then_disconnect):
-        with pytest.raises(ConnectionError):
-            engine.run_cycle()
+    with (
+        patch.object(broker, "submit_order", side_effect=submit_then_disconnect),
+        pytest.raises(ConnectionError),
+    ):
+        engine.run_cycle()
     assert get(path, "SELECT state FROM order_intents WHERE logical_order_id=?",
                (entry_id(sid),))[0] == "INTENT_RECORDED"
     new_engine = PaperOrderEngine(
@@ -636,3 +637,29 @@ def test_quote_does_not_fill_until_broker_accepts(rig):
             clock.now - timedelta(seconds=5),
         ), max_age_seconds=1)
     assert broker.get_order(entry_id(sid)).filled_quantity == 0
+
+
+def test_single_host_lock_prevents_overlapping_cycles(rig):
+    from swift_autotrader.orders.engine import _cycle_lock
+    path, _, _, engine = rig
+    with _cycle_lock(path), pytest.raises(RuntimeError, match="already running"):
+        engine.run_cycle()
+    for _ in range(3):
+        engine.run_cycle()
+    assert path.with_suffix(path.suffix + ".cycle.lock").stat().st_size == 1
+
+
+def test_terminal_order_status_regression_requires_review(rig):
+    from unittest.mock import patch
+    path, clock, broker, engine = rig
+    sid = synthetic_signal(path)
+    engine.run_cycle()
+    broker.cancel_order(entry_id(sid))
+    engine.run_cycle()
+    impossible = replace(broker.get_order(entry_id(sid)), state=BrokerOrderState.ACCEPTED)
+    with (
+        patch.object(broker, "get_order", return_value=impossible),
+        pytest.raises(Exception, match="regression"),
+    ):
+        engine.run_cycle()
+    assert "RECONCILIATION_REQUIRED" in engine.health()["open_alerts"]

@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Callable
 
 from swift_autotrader.broker.base import BrokerFill, BrokerOrderState, BrokerOrderStatus
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
@@ -66,12 +67,17 @@ class PaperBroker:
             ).fetchone():
                 raise RuntimeError("Phase 3 migration missing")
 
-    def _db(self) -> sqlite3.Connection:
+    @contextmanager
+    def _db(self):
         db = sqlite3.connect(str(self.db_path), isolation_level=None, timeout=10)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout=10000")
-        db.execute("PRAGMA foreign_keys=ON")
-        return db
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA busy_timeout=10000")
+            db.execute("PRAGMA foreign_keys=ON")
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def _same_order(row: sqlite3.Row, intent: OrderIntent) -> bool:

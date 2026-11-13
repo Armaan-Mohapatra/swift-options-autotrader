@@ -14,7 +14,6 @@ from swift_autotrader.orders.risk import PaperPreflight, Preflight, RiskCeilings
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog
 
-
 NOW = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
 CHANNEL = "-1001234567000"  # Synthetic example, never a paid channel ID.
 CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 13))

@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import os
-from contextlib import contextmanager
 import sqlite3
+from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Callable, Mapping
-from zoneinfo import ZoneInfo
 
 from swift_autotrader.broker.base import BrokerOrderState, BrokerOrderStatus
 from swift_autotrader.broker.paper import PaperBroker, as_utc, dt, iso
@@ -24,7 +23,9 @@ from swift_autotrader.orders.exit_policy import ExitPolicy, ExitQuote
 from swift_autotrader.orders.policy import deadline_from_acceptance
 from swift_autotrader.orders.risk import PreflightProvider, RiskCeilings, rejection_reason
 from swift_autotrader.orders.state_machine import (
-    ACTIVE, TERMINAL, broker_transition_allowed,
+    ACTIVE,
+    TERMINAL,
+    broker_transition_allowed,
 )
 from swift_autotrader.orders.watchdog import cancellation_due
 from swift_autotrader.signals.identity import OptionContract, OptionRight
@@ -39,9 +40,9 @@ def _cycle_lock(db_path: Path):
     """
     filename = db_path.with_suffix(db_path.suffix + ".cycle.lock")
     with filename.open("a+b") as stream:
-        stream.seek(0)
-        stream.write(b"0")
-        stream.flush()
+        if stream.tell() == 0:
+            stream.write(b"0")
+            stream.flush()
         stream.seek(0)
         if os.name == "nt":
             import msvcrt
@@ -111,14 +112,19 @@ class PaperOrderEngine:
             ).fetchone():
                 raise RuntimeError("Phase 3 migration missing")
 
-    def _db(self) -> sqlite3.Connection:
+    @contextmanager
+    def _db(self):
         if not self.db_path.is_file():
             raise RuntimeError("run migrate before using paper order engine")
         db = sqlite3.connect(str(self.db_path), isolation_level=None, timeout=10)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys=ON")
-        db.execute("PRAGMA busy_timeout=10000")
-        return db
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA foreign_keys=ON")
+            db.execute("PRAGMA busy_timeout=10000")
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def _contract(row: sqlite3.Row) -> OptionContract:
@@ -465,7 +471,7 @@ class PaperOrderEngine:
             self._block(sid, "STALE_ENTRY_NO_REPLAY", now)
             return False
         contract = self._contract(signal)
-        if contract.expiration < now.astimezone(ZoneInfo("America/New_York")).date():
+        if contract.expiration < now.date():
             self._block(sid, "EXPIRED_OPTION", now)
             return False
         price = Decimal(signal["original_limit"])
@@ -505,7 +511,7 @@ class PaperOrderEngine:
                 (sid,),
             ).fetchone()
         if entry is not None and entry["state"] in ACTIVE:
-            self._attempt_cancel(str(entry["logical_order_id"]), now)
+            did_cancel = self._attempt_cancel(str(entry["logical_order_id"]), now)
             with self._db() as db:
                 entry = db.execute(
                     "SELECT * FROM order_intents WHERE logical_order_id=?",
@@ -514,7 +520,7 @@ class PaperOrderEngine:
             if entry["state"] in ACTIVE:
                 # Wait for terminal confirmation; a fill can race the cancel.
                 self._signal_state(sid, "CLOSE_REQUESTED")
-                return False, True
+                return False, did_cancel
         buys, sold = self._summary(sid)
         if sold > buys:
             raise ReconciliationError("sell fills exceed actual buy fills")
@@ -584,11 +590,12 @@ class PaperOrderEngine:
                 "WHERE side='BUY_TO_OPEN' ORDER BY logical_order_id"
             ).fetchall()
         for row in entries:
-            if row["state"] in {"ACCEPTED", "PARTIALLY_FILLED"} and (
-                stopped or cancellation_due(dt(row["accepted_at_utc"]), now)
+            if (
+                row["state"] in {"ACCEPTED", "PARTIALLY_FILLED"}
+                and (stopped or cancellation_due(dt(row["accepted_at_utc"]), now))
+                and self._attempt_cancel(str(row["logical_order_id"]), now)
             ):
-                if self._attempt_cancel(str(row["logical_order_id"]), now):
-                    cancels += 1
+                cancels += 1
         with self._db() as db:
             closing = db.execute(
                 "SELECT s.* FROM option_signals s "
