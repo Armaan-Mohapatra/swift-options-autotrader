@@ -26,6 +26,7 @@ def test_package_excludes_secrets_and_verifies_hashes(tmp_path):
         p = checkout / file
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("synthetic test file", encoding="utf-8")
+    (checkout / "pyproject.toml").write_text('[project]\nname="swift-options-autotrader"\nversion="0.1.0"\n')
     (checkout / "src/swift_autotrader").mkdir(parents=True)
     (checkout / "src/swift_autotrader/__init__.py").write_text("# safe")
     (checkout / "deployment/windows").mkdir(parents=True)

@@ -188,3 +188,23 @@ def test_bounded_review_rejects_excessive_candidate_set_before_mcp_calls():
     with pytest.raises(MarketEvidenceUnavailable, match="Too many contracts"):
         run(broker, entries)
     assert broker.calls == []
+
+def test_same_option_timestamp_with_changed_quote_content_has_distinct_evidence():
+    broker = FakeReadBroker()
+    def custom_quote(bid, ask):
+        async def quote(instrument, *, now=None, max_age_seconds=30):
+            return MCPQuote(instrument.option_id, bid, ask, NOW, 6, 6)
+        return quote
+    broker.quote = custom_quote(Decimal('1.10'), Decimal('1.15'))
+    one = run(broker, [parse_message('SPY 680C 11/13 @ 1.20')])
+    broker.quote = custom_quote(Decimal('1.11'), Decimal('1.16'))
+    two = run(broker, [parse_message('SPY 680C 11/13 @ 1.20')])
+    assert one.quotes[CALL].quote_id != two.quotes[CALL].quote_id
+    assert one.quotes[CALL].evidence_reference != two.quotes[CALL].evidence_reference
+
+
+def test_same_option_identical_quote_content_is_idempotent():
+    broker = FakeReadBroker()
+    a = run(broker, [parse_message('SPY 680C 11/13 @ 1.20')])
+    b = run(broker, [parse_message('SPY 680C 11/13 @ 1.20')])
+    assert a.quotes[CALL].quote_id == b.quotes[CALL].quote_id

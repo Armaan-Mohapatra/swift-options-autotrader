@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import subprocess
+import tomllib
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -82,10 +83,14 @@ def create_package(source: Path, output: Path, *, expected_commit: str | None = 
         if not expected_commit or commit != expected_commit:
             raise RuntimeError("Checkout differs from expected, reviewed full SHA")
     sources = collect_sources(source)
+    version = tomllib.loads(sources["pyproject.toml"].decode("utf-8"))["project"]["version"]
+    if not isinstance(version, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", version):
+        raise RuntimeError("Unsupported release package version")
     manifest: dict[str, object] = {
         "project": "swift-options-autotrader", "phase": 6,
         "mode": "PAPER_ONLY", "live_enabled": False,
         "broker_writes_enabled": False, "source_commit": commit,
+        "package_version": version,
         "files": {p: hashlib.sha256(raw).hexdigest() for p, raw in sources.items()},
     }
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -120,6 +125,8 @@ def verify_package(path: Path) -> dict[str, object]:
         if manifest.get("broker_writes_enabled") is not False:
             raise RuntimeError("Unsafe brokerage package")
         hashes = manifest.get("files")
+        if "pyproject.toml" not in members:
+            raise RuntimeError("Release has no versioned pyproject.toml")
         if not isinstance(hashes, dict) or set(members) != set(hashes) | {
             "PACKAGE_MANIFEST.json"
         }:
@@ -127,6 +134,12 @@ def verify_package(path: Path) -> dict[str, object]:
         for name, expected in hashes.items():
             if hashlib.sha256(bundle.read(name)).hexdigest() != expected:
                 raise RuntimeError("Package file hash mismatch")
+        try:
+            version = tomllib.loads(bundle.read("pyproject.toml").decode("utf-8"))["project"]["version"]
+        except (ValueError, KeyError, UnicodeDecodeError) as exc:
+            raise RuntimeError("Release has unreadable package version") from exc
+        if manifest.get("package_version") != version:
+            raise RuntimeError("Release manifest package version mismatch")
         return manifest
 
 
