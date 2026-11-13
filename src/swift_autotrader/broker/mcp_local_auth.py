@@ -97,7 +97,7 @@ class WindowsDPAPITokenStorage:
 class LoopbackAuthorization:
     """Start local callback BEFORE opening browser; do not log callback query."""
 
-    def __init__(self, *, port: int = 8765):
+    def __init__(self, *, port: int = 8766):
         if not 1024 <= port <= 65535:
             raise ValueError("Unprivileged local callback port required")
         self.port = port
@@ -167,10 +167,17 @@ async def local_readonly_diagnostics() -> dict[str, object]:
         os.environ.get("ROBINHOOD_MCP_INTERACTIVE") != "true"
     ):
         raise LocalAuthNotConfigured("Windows interactive local authorization required")
-    path = Path.home() / "AppData" / "Local" / "SwiftAutoTrader" / "secrets" / "oauth.dpapi"
-    loopback = LoopbackAuthorization()
+    managed_root = os.environ.get("SWIFT_INSTALL_ROOT", "").strip()
+    if not managed_root:
+        raise LocalAuthNotConfigured("Approved installed Swift root is required for OAuth")
+    from swift_autotrader.windows_runtime import validate_install_root
+
+    root = validate_install_root(Path(managed_root))
+    path = root / "secrets" / "oauth.dpapi"
+    loopback = LoopbackAuthorization(port=8766)
     enrollment = OAuthEnrollment(
         WindowsDPAPITokenStorage(path), loopback.redirect, loopback.callback,
+        redirect_uri="http://127.0.0.1:8766/callback",
     )
     async with authenticated_mcp_client(enrollment) as client:
         adapter = RobinhoodMCPBroker(client)

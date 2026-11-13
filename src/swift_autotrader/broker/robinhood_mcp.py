@@ -20,9 +20,10 @@ from swift_autotrader.broker.base import (
     BrokerOrderState,
     BrokerOrderStatus,
 )
+from swift_autotrader.broker.mcp_transport import ROBINHOOD_MCP_ENDPOINT
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.risk import Preflight
-from swift_autotrader.signals.identity import OptionContract
+from swift_autotrader.signals.identity import OptionContract, OptionRight
 
 
 class BrokerWritesDisabledError(PermissionError):
@@ -166,6 +167,8 @@ class MCPInstrument:
     contract: OptionContract
     tradable: bool
     chain_id: str | None
+    minimum_tick: Decimal | None = None
+    multiplier: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +177,8 @@ class MCPQuote:
     bid: Decimal
     ask: Decimal
     observed_at_utc: datetime
+    bid_size: int | None = None
+    ask_size: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,7 +364,19 @@ class RobinhoodMCPBroker:
                     item.get("tradability") == "tradable"
                     and item.get("state") == "active"
                 )
-                matches.append(MCPInstrument(_identifier(option_id), contract, tradable, chain_id))
+                # Optional vendor-advertised instrument rules; never infer a tick or multiplier.
+                tick_raw = item.get("minimum_tick")
+                tick = _money(tick_raw, "minimum_tick") if tick_raw is not None else None
+                if tick is not None and tick <= 0:
+                    raise MCPContractError("Nonpositive option tick")
+                multiplier_raw = item.get("multiplier")
+                multiplier = None
+                if multiplier_raw is not None:
+                    if type(multiplier_raw) is not int or multiplier_raw < 1:
+                        raise MCPContractError("Unknown option multiplier")
+                    multiplier = multiplier_raw
+                matches.append(MCPInstrument(_identifier(option_id), contract, tradable,
+                                             chain_id, tick, multiplier))
         if len(matches) != 1 or not matches[0].tradable:
             raise MCPContractError("Exact, unique, tradable option instrument not verified")
         return matches[0]
@@ -380,16 +397,22 @@ class RobinhoodMCPBroker:
         age = (current.astimezone(UTC) - observed).total_seconds()
         if age < 0 or age > max_age_seconds or ask < bid:
             raise MCPContractError("Option quote is stale or crossed")
-        return MCPQuote(instrument.option_id, bid, ask, observed)
+        # Robinhood's published overview confirms quote tools, but not every
+        # response field. In their absence size remains unknown, NOT infinite.
+        def opt_size(name: str) -> int | None:
+            val = matches[0].get(name)
+            if val is None:
+                return None
+            if type(val) is not int or val < 0:
+                raise MCPContractError("Invalid displayed option depth")
+            return val
+        return MCPQuote(instrument.option_id, bid, ask, observed,
+                        opt_size("bid_size"), opt_size("ask_size"))
 
     @staticmethod
     def order_arguments(account: MCPAccount, instrument: MCPInstrument,
                         intent: OrderIntent) -> dict[str, Any]:
-        if (
-            not account.eligible
-            or not instrument.tradable
-            or intent.contract != instrument.contract
-        ):
+        if not account.eligible or not instrument.tradable or intent.contract != instrument.contract:
             raise MCPContractError("Unverified account or option contract")
         side = "buy" if intent.side is OrderSide.BUY_TO_OPEN else "sell"
         effect = "open" if intent.side is OrderSide.BUY_TO_OPEN else "close"

@@ -138,3 +138,8 @@ The dedicated Windows deployment folder contains a preview-first PowerShell inst
 The local 24/7 supervisor currently runs an optional authorized **read-only Telegram listener**, a loopback-only read-only dashboard and local notification scanning. It does **not** operate an unattended verified-market-data-fed paper trading loop. Historical replay is synthetic or user-supplied unverified research and is not proof of genuine Swift profitability. The Robinhood adapter is permanently write-disabled in this development version. No computer installation, Telegram enrollment, real broker connection or live orders were performed.
 
 **Release decision:** Do not merge/tag/release while cross-platform regression, Windows PowerShell installer rehearsal, supply-chain/optional MCP locking, and source review remain incomplete. Proposed future paper candidate `v0.7.0-paper.1` has **not** been created.
+
+
+## Phase 8 — opt-in verified-data PAPER dispatcher (draft; not certified)
+
+Draft Phase 8 source implements an isolated paper-dispatch worker from TelegramStore → SignalMatcher → strict read-only option data/quotes → PaperOrderEngine/PaperBroker → analytics. New code includes release ZIP SHA and manifest verification and opt-in Windows supervision; defaults remain OFF. Real Robinhood OAuth/field contracts, complete MCP transitive dependency lock, native Windows installation, forward PAPER execution and final CI remain UNVERIFIED. No live brokerage writes are possible. See [Phase 8 technical report](docs/PAPER_DISPATCH_PHASE8.md), [Phase 8 checkpoint](docs/PHASE_REPORTS/PHASE_8.md), and [Pre-Codex handoff](docs/PRE_CODEX_HANDOFF.md). Do not install/merge/tag without required green gates and explicit approval.

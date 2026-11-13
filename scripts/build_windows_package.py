@@ -22,7 +22,9 @@ ALLOWED_DOCS = (
     "docs/WINDOWS_RUNBOOK.md", "docs/OPERATIONS.md", "docs/ROLLBACK.md",
     "docs/SECURITY.md", "docs/CONFIGURATION.md",
     "docs/PAPER_EXECUTION_PHASE3.md", "docs/PAPER_ANALYTICS_PHASE5.md",
-    "docs/PHASE_REPORTS/PHASE_6.md", "docs/PHASE_REPORTS/PHASE_7.md", "docs/IMPLEMENTATION_STATUS.md",
+    "docs/PHASE_REPORTS/PHASE_6.md", "docs/PHASE_REPORTS/PHASE_7.md",
+    "docs/PHASE_REPORTS/PHASE_8.md", "docs/PAPER_DISPATCH_PHASE8.md",
+    "docs/PRE_CODEX_HANDOFF.md", "docs/IMPLEMENTATION_STATUS.md",
 )
 ALLOWED_SCRIPT = (
     "scripts/audit_lock.py", "scripts/scan_secrets.py",
@@ -34,7 +36,7 @@ def collect_sources(source: Path) -> dict[str, bytes]:
     source = source.resolve()
     selected = [*ALLOWED_TOP_FILES, *ALLOWED_DOCS, *ALLOWED_SCRIPT]
     for directory, suffixes in (
-        ("src", {".py", ".sql"}), ("deployment/windows", {".ps1", ".md"}),
+        ("src", {".py", ".sql"}), ("deployment/windows", {".ps1", ".md", ".py"}),
     ):
         folder = source / directory
         if not folder.is_dir():

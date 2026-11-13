@@ -37,3 +37,11 @@ Changes are described in developer/source terms, not as validated market trading
 ## Phase 0 — Foundation (unreleased)
 
 - Project specification, paper-only skeleton, initial SQLite WAL and CI scaffolding.
+
+
+## Unreleased — proposed Phase 8 pre-Codex source
+
+- Added opt-in continuous PAPER dispatcher from durable source events to existing parser/engine and quote-evidenced simulation, with provider-outage source preservation and cancellation watchdog.
+- Added fail-closed read-only MCP option evidence adapter, approval reviews, strict quote freshness/size/tick/multiplier/session checks, and noninteractive encrypted-token Windows worker.
+- Extended Windows runtime supervision with optional paper-only child; added exact SHA-256 release ZIP verification and safe archive extraction.
+- Added synthetic end-to-end/provider/security/ZIP tests. No certified final-commit CI, complete optional SDK lock, official account auth, Windows install or real fills. No tag/release.

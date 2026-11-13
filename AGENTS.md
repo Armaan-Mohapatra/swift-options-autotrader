@@ -86,3 +86,8 @@ entry/exit rules. Consult `docs/ROBINHOOD_MCP_PHASE4.md` for known blockers.
 - Preserve exact Swift original limit, broker acceptance + 3,600 seconds, no adds, Swift average separation, close 100%, and no market-price invention. The paper engine must accept only a concrete PaperBroker; MCP trade/cancel functions remain hard-denied.
 - No source-content, credential, host-machine, task-scheduler, release-tag, deployment or live-trading side effects during the GitHub audit. Local operator steps remain separately approved.
 - The Windows supervisor does not automate source-to-paper execution; do not claim unattended 24/7 paper trading until independently verified instrument/quote/preflight wiring and forward validation are reviewed.
+
+
+## Phase 8 unattended PAPER safety gate
+
+Phase 8's opt-in worker may only call PaperBroker through the existing PaperOrderEngine, with strict verified read-only contract/quote evidence. Unavailable market data must preserve source events; allow_entries=False must still reconcile/cancel existing resting orders. Never run the CLI's diagnostic paper-cycle without a verified provider. Do not treat mocked MCP schemas or synthetic quote data as evidence of authentic broker market fields. The supervisor enables the paper worker only after explicit local configuration; live trades always forbidden. Final full CI, locked optional SDK and native Windows tests remain release blockers. Refer to docs/PRE_CODEX_HANDOFF.md.
