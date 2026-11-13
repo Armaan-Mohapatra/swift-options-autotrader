@@ -143,3 +143,11 @@ The local 24/7 supervisor currently runs an optional authorized **read-only Tele
 ## Phase 8 — opt-in verified-data PAPER dispatcher (draft; not certified)
 
 Draft Phase 8 source implements an isolated paper-dispatch worker from TelegramStore → SignalMatcher → strict read-only option data/quotes → PaperOrderEngine/PaperBroker → analytics. New code includes release ZIP SHA and manifest verification and opt-in Windows supervision; defaults remain OFF. Real Robinhood OAuth/field contracts, complete MCP transitive dependency lock, native Windows installation, forward PAPER execution and final CI remain UNVERIFIED. No live brokerage writes are possible. See [Phase 8 technical report](docs/PAPER_DISPATCH_PHASE8.md), [Phase 8 checkpoint](docs/PHASE_REPORTS/PHASE_8.md), and [Pre-Codex handoff](docs/PRE_CODEX_HANDOFF.md). Do not install/merge/tag without required green gates and explicit approval.
+
+## Phase 8 secondary audit remediation — NOT RELEASE-CERTIFIED
+
+Two parallel candidate branches exist: draft PR #19 and draft PR #20. A separate remediation PR based on **PR #20** contains selectively isolated entry validation, exit/watchdog continuity during provider outages, nonzero-fill contract selection, collision-resistant option quote evidence and improved release-ZIP script provenance. PR #19's independent paper tests and architecture supplement are preserved without merging either candidate branch.
+
+**Installation STOP:** GitHub Actions cannot allocate Windows/Linux runners (issue #15), and the universal `uv.lock` does **not** include the opt-in PAPER dispatcher dependencies (`mcp==2.3.0`, the HTTPX2 v2 transport, `exchange-calendars`, Windows `pywin32`). The installer currently installs only the Telegram extra. No approved release should be published or installed, and the dispatcher MUST NOT be enabled, until a fully hashed cross-platform lock and actual Windows installation rehearsal pass. No authentic Robinhood MCP account/quote fields or source messages were accessed. See [secondary audit](docs/PHASE_REPORTS/PHASE_8_SECONDARY_AUDIT.md).
+
+The paper-only broker write prohibition remains in force. No user computer installation, PR merge, real credentials, account authentication, order placement or official GitHub release has been authorized.
