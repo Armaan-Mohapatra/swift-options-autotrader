@@ -15,14 +15,18 @@ param(
     [switch]$Apply,
     [switch]$DryRun,
     [switch]$NoSchedule,
+    [string]$PackageZip = '',
+    [ValidatePattern('^[0-9a-fA-F]{64}$')][string]$PackageSha256 = '',
     [switch]$NoDependencyDownload
 )
 . (Join-Path $PSScriptRoot 'common.ps1')
 Assert-SwiftWindows
 $source = [System.IO.Path]::GetFullPath($SourceRoot)
+$packageMode = -not [string]::IsNullOrWhiteSpace($PackageZip)
 $root = Resolve-SwiftInstallRoot -InstallRoot $InstallRoot
-if (-not (Test-Path -LiteralPath (Join-Path $source 'uv.lock') -PathType Leaf) -or
-    -not (Test-Path -LiteralPath (Join-Path $source 'pyproject.toml') -PathType Leaf)) {
+if (-not $packageMode -and
+    (-not (Test-Path -LiteralPath (Join-Path $source 'uv.lock') -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $source 'pyproject.toml') -PathType Leaf))) {
     throw 'A reviewed checkout with pyproject.toml and uv.lock is required.'
 }
 if ($root.StartsWith($source.TrimEnd([char]'\') + '\', [StringComparison]::OrdinalIgnoreCase) -or
@@ -36,6 +40,7 @@ $plan = [ordered]@{
         'install pinned uv==0.10.0 then locked Python runtime dependencies',
         'initialize SQLite WAL, verify smoke and dashboard loopback',
         'register user-scoped restartable logon task unless -NoSchedule')
+    package_archive = $(if ($packageMode) { $PackageZip } else { 'NONE' })
     live_broker_writes = $false
     telegram_authentication = 'MANUAL_LATER'
 }
@@ -54,16 +59,39 @@ $pyVersion = & py.exe -3.11 -c 'import sys; print(sys.version_info[:2] == (3, 11
 if ($LASTEXITCODE -ne 0 -or $pyVersion.Trim() -ne 'True') {
     throw 'Python 3.11 must be installed and selectable as py -3.11.'
 }
-if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
-    throw 'Git is required to verify the source SHA and clean checkout.'
-}
-$actualCommit = (& git.exe -C $source rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $ExpectedCommit.ToLowerInvariant()) {
-    throw 'Source checkout does not match the reviewed commit.'
-}
-$dirty = (& git.exe -C $source status --porcelain)
-if ($LASTEXITCODE -ne 0 -or $dirty) {
-    throw 'Source checkout has local changes; review them before installation.'
+$stage = ''
+if ($packageMode) {
+    # A SHA-pinned release ZIP may replace a Git checkout. Always verify
+    # the owner-approved full commit, complete file manifest and SHA-256
+    # BEFORE extracting, copying or running any package-supplied Python.
+    if (-not $PackageSha256 -or -not (Test-Path -LiteralPath $PackageZip -PathType Leaf)) {
+        throw 'Provide the approved release ZIP and its independent SHA-256 digest.'
+    }
+    $verifiedArchive = [System.IO.Path]::GetFullPath($PackageZip)
+    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('SwiftPaperRelease-' +
+               [Guid]::NewGuid().ToString('N'))
+    $verifier = Join-Path $PSScriptRoot 'extract_approved_package.py'
+    if (-not (Test-Path -LiteralPath $verifier -PathType Leaf)) {
+        throw 'Reviewed release verification helper is missing.'
+    }
+    & py.exe -3.11 $verifier --archive $verifiedArchive --target $stage `
+        --sha256 $PackageSha256.ToLowerInvariant() `
+        --commit $ExpectedCommit.ToLowerInvariant()
+    if ($LASTEXITCODE -ne 0) { throw 'Approved release verification failed.' }
+    $source = $stage
+    $actualCommit = $ExpectedCommit.ToLowerInvariant()
+} else {
+    if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
+        throw 'Git is required to verify the source SHA and clean checkout.'
+    }
+    $actualCommit = (& git.exe -C $source rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $ExpectedCommit.ToLowerInvariant()) {
+        throw 'Source checkout does not match the reviewed commit.'
+    }
+    $dirty = (& git.exe -C $source status --porcelain)
+    if ($LASTEXITCODE -ne 0 -or $dirty) {
+        throw 'Source checkout has local changes; review them before installation.'
+    }
 }
 if (Test-Path -LiteralPath $root) {
     $marker = Join-Path $root 'deployment.json'
@@ -113,7 +141,7 @@ foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $source 'src') -Recurs
     New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
     Copy-Item -LiteralPath $file.FullName -Destination $target
 }
-foreach ($file in @('common.ps1','setup.ps1','manage.ps1','service.ps1','secrets.ps1','healthcheck.ps1')) {
+foreach ($file in @('common.ps1','setup.ps1','manage.ps1','service.ps1','secrets.ps1','healthcheck.ps1','extract_approved_package.py')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $root ('scripts\' + $file)) -Force
 }
 $manifest = Join-Path $root 'deployment.json'
@@ -132,6 +160,9 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
         mode = 'PAPER_ONLY'; live_enabled = $false
         telegram_enabled = $false; telegram_channel_id = $null; telegram_api_id = $null
         status_notifications_enabled = $false; status_chat_id = $null
+        paper_dispatch_enabled = $false; paper_data_source = 'none'
+        paper_max_contracts = 1; paper_max_premium_usd = '0'
+        paper_max_exposure_usd = '0'; paper_max_open_signals = 1
     }
     [System.IO.File]::WriteAllText($settingsFile, ($settings | ConvertTo-Json -Depth 3), ([System.Text.UTF8Encoding]::new($false)))
 }
@@ -193,6 +224,9 @@ if (-not $NoSchedule) {
         -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
         -Settings $settings -Principal $principal | Out-Null
+}
+if ($stage -and (Test-Path -LiteralPath $stage)) {
+    Remove-Item -LiteralPath $stage -Recurse -Force
 }
 [ordered]@{
     status = 'INSTALLED_PAPER_ONLY'; commit = $actualCommit; install_root = $root

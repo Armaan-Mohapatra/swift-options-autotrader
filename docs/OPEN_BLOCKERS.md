@@ -72,3 +72,13 @@ None of these blockers authorizes skipping tests, accessing user devices, or ena
 - **Unattended paper lifecycle:** Phase 6 Windows supervisor currently runs read-only listener/dashboard/notifications; no safe continuously verified paper order dispatcher. Automatic paper trading should not be claimed until a separately reviewed forward-data integration exists.
 - **Windows local qualification:** actual Task Scheduler at-logon startup, DPAPI and NTFS access, resource budgets, PowerShell setup/restore and laptop coexistence with Phoenix/Kalshi have not been tested on the user device.
 - **Stacked PRs:** Phase 0–6 and Phase 7 remain draft and unmerged pending owner review. No Phase 7 version tag/GitHub release is authorized until mandatory test/release gates pass.
+
+
+## Phase 8 release blockers (2026-11-13)
+
+- B1: GitHub Actions issue #15: jobs never allocate a runner; mandatory final Windows/Linux Python 3.11/3.13 matrix and Windows installation rehearsal have NOT executed.
+- B2: Full hashes/transitive lock, CVE/licensing and native-import/OAuth contract verification for mcp==2.3.0/httpx2, pywin32 and exchange-calendars are not established. Cannot certify a fully operational Windows data-fed worker.
+- B3: Official Robinhood MCP public documents advertise read-only option quotes and contract tools, but do not certify the exact bid/ask-depth, minimum-tick, multiplier, session and timestamp fields that the worker requires. Fail closed until field-verified under separate authorization.
+- B4: Native Windows Task Scheduler, DPAPI, exact-commit ZIP install, back-up restore/rollback and resource use are untested; no computer touched.
+- B5: Real paid Swift messages/permissions and genuine option quote performance remain unverified. Synthetic paper P&L is not real trading.
+- B6: Eight preceding PRs and the new Phase8 review PR are unmerged; do not tag or release without explicit owner approval.

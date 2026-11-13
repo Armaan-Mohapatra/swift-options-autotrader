@@ -101,6 +101,7 @@ function Set-SwiftEnvironment {
     if ($cfg.mode -ne 'PAPER_ONLY' -or $cfg.live_enabled -ne $false) {
         throw 'Forbidden configuration: only paper mode is allowed.'
     }
+    $env:SWIFT_INSTALL_ROOT = $InstallRoot
     $env:PAPER_ONLY = 'true'
     $env:LIVE_ENABLED = 'false'
     $env:ALLOW_BROKER_WRITES = 'false'
@@ -113,6 +114,8 @@ function Set-SwiftEnvironment {
     $env:LOG_LEVEL = 'INFO'
     $env:TELEGRAM_ENABLED = 'false'
     $env:ENABLE_TELEGRAM_STATUS_NOTIFICATIONS = 'false'
+    $env:PAPER_DISPATCH_ENABLED = 'false'
+    $env:PAPER_MARKET_DATA_SOURCE = 'none'
     if ($cfg.telegram_enabled -eq $true) {
         if ($null -eq $cfg.telegram_channel_id -or $null -eq $cfg.telegram_api_id) {
             throw 'Telegram channel and API ID must be configured by the operator.'
@@ -137,6 +140,33 @@ function Set-SwiftEnvironment {
         $env:SWIFT_TELEGRAM_CHANNEL_ID = [string]$cfg.telegram_channel_id
         $env:TELEGRAM_API_ID = [string]$cfg.telegram_api_id
         $env:TELEGRAM_SESSION_PATH = $session
+    }
+    if ($cfg.paper_dispatch_enabled -eq $true) {
+        if ($cfg.telegram_enabled -ne $true -or
+            $cfg.paper_data_source -ne 'robinhood_mcp_readonly') {
+            throw 'Approved Telegram and official read-only MCP are both required.'
+        }
+        $tokenFile = Join-Path $InstallRoot 'secrets\oauth.dpapi'
+        if (-not (Test-Path -LiteralPath $tokenFile -PathType Leaf)) {
+            throw 'Manually enrolled Windows user OAuth tokens required.'
+        }
+        foreach ($property in @('paper_max_premium_usd','paper_max_exposure_usd')) {
+            if ([string]$cfg.$property -notmatch '^[0-9]+(\.[0-9]{1,2})?$') {
+                throw 'Approved paper budgets must be nonnegative exact dollar strings.'
+            }
+        }
+        if ([decimal]$cfg.paper_max_premium_usd -le 0 -or
+            [decimal]$cfg.paper_max_exposure_usd -le 0 -or
+            [int]$cfg.paper_max_contracts -le 0 -or
+            [int]$cfg.paper_max_open_signals -le 0) {
+            throw 'Explicit positive PAPER-only risk ceilings are required.'
+        }
+        $env:PAPER_DISPATCH_ENABLED = 'true'
+        $env:PAPER_MARKET_DATA_SOURCE = 'robinhood_mcp_readonly'
+        $env:MAX_CONTRACTS_PER_SIGNAL = [string]$cfg.paper_max_contracts
+        $env:MAX_PREMIUM_PER_SIGNAL_USD = [string]$cfg.paper_max_premium_usd
+        $env:PAPER_MAX_TOTAL_EXPOSURE_USD = [string]$cfg.paper_max_exposure_usd
+        $env:PAPER_MAX_OPEN_SIGNALS = [string]$cfg.paper_max_open_signals
     }
     if ($cfg.status_notifications_enabled -eq $true) {
         $tokenFile = Join-Path $InstallRoot 'secrets\status_bot_token.dpapi'

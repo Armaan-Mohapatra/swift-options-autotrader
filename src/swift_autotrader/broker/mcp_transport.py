@@ -40,7 +40,7 @@ class OAuthEnrollment:
     token_storage: Any
     redirect_handler: Callable[[str], Awaitable[None]]
     callback_handler: Callable[[], Awaitable[Any]]
-    redirect_uri: str = "http://127.0.0.1:8765/callback"
+    redirect_uri: str = "http://127.0.0.1:8766/callback"
 
     def __post_init__(self) -> None:
         uri = urlparse(self.redirect_uri)
@@ -100,9 +100,7 @@ async def authenticated_mcp_client(
         read=read_timeout_seconds, connect=connect_timeout_seconds,
         write=connect_timeout_seconds, pool=connect_timeout_seconds,
     )
-    async with (
-        httpx2.AsyncClient(auth=provider, timeout=timeout, trust_env=False) as http,
-        streamable_http_client(url, http_client=http) as transport,
-        Client(transport) as client,
-    ):
-        yield client
+    async with httpx2.AsyncClient(auth=provider, timeout=timeout, trust_env=False) as http:
+        async with streamable_http_client(url, http_client=http) as transport:
+            async with Client(transport) as client:
+                yield client
