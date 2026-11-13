@@ -15,18 +15,18 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 ALLOWED_TOP_FILES = (
-    "pyproject.toml", "uv.lock", "README.md", "AGENTS.md", ".python-version",
+    "pyproject.toml", "uv.lock", "README.md", "AGENTS.md", "CHANGELOG.md", ".python-version",
 )
 ALLOWED_DOCS = (
-    "docs/PROJECT_SPEC.md", "docs/SOURCE_SPRINT_PLAN.md",
+    "docs/PROJECT_SPEC.md", "docs/SOURCE_SPRINT_PLAN.md", "docs/ARCHITECTURE.md",
     "docs/WINDOWS_RUNBOOK.md", "docs/OPERATIONS.md", "docs/ROLLBACK.md",
     "docs/SECURITY.md", "docs/CONFIGURATION.md",
     "docs/PAPER_EXECUTION_PHASE3.md", "docs/PAPER_ANALYTICS_PHASE5.md",
-    "docs/PHASE_REPORTS/PHASE_6.md", "docs/IMPLEMENTATION_STATUS.md",
+    "docs/PHASE_REPORTS/PHASE_6.md", "docs/PHASE_REPORTS/PHASE_7.md", "docs/IMPLEMENTATION_STATUS.md",
 )
 ALLOWED_SCRIPT = (
     "scripts/audit_lock.py", "scripts/scan_secrets.py",
-    "scripts/build_windows_package.py",
+    "scripts/build_windows_package.py", "scripts/phase7_verify.py",
 )
 
 

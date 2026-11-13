@@ -41,6 +41,7 @@ def database(tmp_path):
     assert apply_migrations(db) == [
         "0001_initial.sql", "0002_telegram_ingest.sql",
         "0003_signal_linkage.sql", "0004_paper_orders.sql",
+        "0005_research_monitoring.sql",
     ]
     return db
 

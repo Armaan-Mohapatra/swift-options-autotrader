@@ -1,7 +1,7 @@
 name: Phase 6 isolated Windows deployment checks
 on:
   push:
-    branches: ["codex/phase6-windows-deployment"]
+    branches: ["codex/phase6-windows-deployment", "codex/phase7-final-integration-audit"]
   pull_request:
     paths:
       - "deployment/windows/**"
