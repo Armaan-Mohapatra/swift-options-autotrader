@@ -28,6 +28,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     replay = commands.add_parser("parse-replay", help="Classify stored events; no broker writes")
     replay.add_argument("--limit", type=int, default=500)
     commands.add_parser("parse-health", help="Read parser decision counts without connecting")
+    commands.add_parser("paper-health", help="Read only simulated order/stop state")
+    commands.add_parser("paper-pause", help="Prevent new paper entries")
+    commands.add_parser("paper-resume", help="Resume paper entries unless emergency-stopped")
+    commands.add_parser("paper-emergency-stop", help="Stop paper entries and cancel resting buys")
+    paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
+    paper_cycle.add_argument("--confirm-simulation", action="store_true")
     args = parser.parse_args(argv)
     try:
         config = Settings.from_env()
@@ -43,7 +49,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "telegram_connections_attempted": 0,
                 "orders_submitted": 0,
                 "parser_implemented": True,
-                "paper_execution_implemented": False,
+                "paper_execution_implemented": True,
+                "paper_execution_mode": "SYNTHETIC_ONLY_WITH_EXPLICIT_PREFLIGHT",
                 "configuration": config.public_summary(),
             }
         elif args.command == "migrate":
@@ -52,6 +59,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             if config.telegram_channel_id is None:
                 raise ConfigurationError("Configure a Telegram channel ID for local health")
             payload = TelegramStore(config.db_path, config.telegram_channel_id).health()
+        elif args.command in {"paper-health", "paper-pause", "paper-resume",
+                              "paper-emergency-stop", "paper-cycle"}:
+            # No catalog/real market adapter is created here. Entries always
+            # fail instrument verification in this CLI until a future reviewed
+            # read-only adapter is explicitly plugged into the engine.
+            from swift_autotrader.broker.paper import PaperBroker
+            from swift_autotrader.orders.engine import PaperOrderEngine
+            from swift_autotrader.orders.exit_policy import ExitPolicy
+            from swift_autotrader.orders.risk import PaperPreflight, RiskCeilings
+
+            engine = PaperOrderEngine(
+                config.db_path, PaperBroker(config.db_path),
+                preflight=PaperPreflight(),
+                limits=RiskCeilings.from_environment(),
+                exit_policy=ExitPolicy.from_environment(),
+            )
+            if args.command == "paper-pause":
+                engine.set_paused(True)
+            elif args.command == "paper-resume":
+                if engine.health()["emergency_stop"]:
+                    raise ConfigurationError("Cannot resume while emergency stop is active")
+                engine.set_paused(False)
+            elif args.command == "paper-emergency-stop":
+                engine.emergency_stop()
+            elif args.command == "paper-cycle":
+                if not args.confirm_simulation:
+                    raise ConfigurationError("Explicit --confirm-simulation required")
+                cycle = engine.run_cycle()
+                payload = {
+                    "status": "PAPER_CYCLE", "entry_submissions": cycle.entry_submissions,
+                    "close_submissions": cycle.close_submissions,
+                    "cancellation_requests": cycle.cancellation_requests,
+                    "blocked_entries": cycle.blocked_entries, "open_alerts": cycle.alerts,
+                    "verified_instrument_provider": "NOT_CONFIGURED",
+                    "broker_writes_attempted": 0,
+                }
+            if args.command != "paper-cycle":
+                payload = {"status": "PAPER_CONTROL", **engine.health()}
         elif args.command in {"parse-replay", "parse-health"}:
             if config.telegram_channel_id is None:
                 raise ConfigurationError("Configure a single source channel ID to classify")
