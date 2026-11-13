@@ -37,3 +37,10 @@ See `docs/PHASE_REPORTS/PHASE_4.md` for CI evidence and caveats.
 ## Phase 6 branch checkpoint
 
 Windows source and detailed [installation walkthrough](WINDOWS_RUNBOOK.md), [operations](OPERATIONS.md) and [rollback](ROLLBACK.md) are available on unmerged draft PR #16. Local focused tests: 24 passed. [Final-change Windows smoke CI](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371545210) and [inherited full CI](https://github.com/Armaan-Mohapatra/swift-options-autotrader/actions/runs/43371545243) failed before runner allocation. This is **CI_BLOCKED**, not a code-test pass or a Windows deployment. The supervisor monitors a localhost dashboard and optional read-only authorized Telegram updates; it deliberately does not automatically execute paper orders without independently verified instruments/preflight. No live broker writes.
+
+
+## Phase 7 — final audit checkpoint
+
+**STATUS: CODE_AUDIT_IMPLEMENTED / LOCAL_TESTED_ON_RECONSTRUCTED_WORKSPACE / CI_BLOCKED / RELEASE_WITHHELD.** Phase 7 branch `codex/phase7-final-integration-audit` adds the synthetic end-to-end acceptance suite, offline safety verification, inherited migration fixture fix, architecture/changelog and release decision. New suite: 25 passed locally; selected Phase 3–7 suite: 80 passed locally. These are not full authoritative clean-checkout GitHub CI results. The Phase 5 and Phase 6 GitHub jobs failed before runner allocation. Do not call this build release-certified or publish a version tag. See [Phase 7 report](PHASE_REPORTS/PHASE_7.md) and [architecture](ARCHITECTURE.md).
+
+**Remaining:** GitHub issue #15 runner availability, issue #2 supply-chain/SBOM/optional MCP lock, mandatory Windows installer rehearsal, reviewed stacked draft PRs, original private Telegram and actual authenticated read-only Robinhood field verification, verified instrument feed, automatic paper loop and Windows host resource tests. Trading remains PAPER_ONLY with all real broker writes disabled.

@@ -62,3 +62,13 @@ None of these blockers authorizes skipping tests, accessing user devices, or ena
 - **OPS-006 / NOT_DEPLOYED:** No local user installation, Windows Task Scheduler, DPAPI, authorized Telegram session, dashboard uptime, CPU/RAM/disk measurement or reboot/logoff recovery has been validated. These are future manually approved Codex host checks. Scheduled task is user logon-only, not a pre-login service.
 - **SEC-006 / BUILD_GAPS:** `uv==0.10.0` bootstrap is version-pinned but its wheel not SHA-pinned; optional MCP SDK transitive dependency lock, signed build/SBOM and full CVE audit are outstanding. Do not tag a signed/release-ready binary or relax the paper-only guard.
 - **EXEC-006 / INTENTIONAL SAFETY GATE:** No automatic live or simulated trades in the Windows supervisor until real contract, quote, trading-session, permissions and buying-power preflight inputs have been verified; replay remains isolated synthetic research. No Phase 7 development authorized.
+
+
+## Phase 7 release gate (unresolved)
+
+- **GitHub Actions runner allocation issue #15:** the Phase 5 and 6 Windows/Linux jobs terminated before runner assignment, so complete tests, installer rehearsals and a signed SHA-bound build are unverified. Inspect Actions run banner/annotation, repository policies, billing and usage; rerun against the exact final Phase 7 commit and record actual passing job links.
+- **Supply-chain issue #2:** `uv==0.10.0` bootstrap wheel is version-pinned but not artifact hash-pinned; the optional MCP SDK full transitive lock, independent CVE review, signed SBOM/provenance and reproducible build assurance remain open.
+- **Real market/data access:** paid Telegram format and read authorization, actual option-chain year/instrument, official Robinhood OAuth/permissions/reviews/quotes/fill schemas, market-hours/tick rules, and verified historical NBBO/fees remain field-unverified. No live orders enabled.
+- **Unattended paper lifecycle:** Phase 6 Windows supervisor currently runs read-only listener/dashboard/notifications; no safe continuously verified paper order dispatcher. Automatic paper trading should not be claimed until a separately reviewed forward-data integration exists.
+- **Windows local qualification:** actual Task Scheduler at-logon startup, DPAPI and NTFS access, resource budgets, PowerShell setup/restore and laptop coexistence with Phoenix/Kalshi have not been tested on the user device.
+- **Stacked PRs:** Phase 0–6 and Phase 7 remain draft and unmerged pending owner review. No Phase 7 version tag/GitHub release is authorized until mandatory test/release gates pass.

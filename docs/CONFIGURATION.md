@@ -51,3 +51,8 @@ authorized Windows host only, `--connect` plus
 `ROBINHOOD_MCP_INTERACTIVE=true` enables a human PKCE OAuth flow using DPAPI
 storage outside the checkout. This flow has not been field validated; keep all
 real brokerage write flags false. See `ROBINHOOD_MCP_PHASE4.md`.
+
+
+## Phase 7 release-safety reminder
+
+`PAPER_ONLY=true`, `LIVE_ENABLED=false` and `ALLOW_BROKER_WRITES=false` are enforced startup invariants. No environment flag, installer step, mock OAuth session or GitHub release candidate can authorize real broker writes; the adapter's live `submit_order`, `get_order` and `cancel_order` methods stay deny-only. Entry risk caps default to $0 until separately approved explicit synthetic preflight. The Windows supervisor has no verified instrument catalog or automatic paper-order dispatch. Any Telegram session, API hash and optional status bot token must be enrolled **locally and manually** under the approved Windows user's DPAPI/NTFS-protected directories. Never commit `.env`, `.session`, database, bot token or paid-channel text. See `docs/PHASE_REPORTS/PHASE_7.md` for unverified conditions.
