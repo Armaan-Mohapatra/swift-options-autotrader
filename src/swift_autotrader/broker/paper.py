@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
-from collections.abc import Callable
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Callable
 
 from swift_autotrader.broker.base import BrokerFill, BrokerOrderState, BrokerOrderStatus
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
@@ -67,17 +66,12 @@ class PaperBroker:
             ).fetchone():
                 raise RuntimeError("Phase 3 migration missing")
 
-    @contextmanager
-    def _db(self):
+    def _db(self) -> sqlite3.Connection:
         db = sqlite3.connect(str(self.db_path), isolation_level=None, timeout=10)
-        try:
-            db.row_factory = sqlite3.Row
-            db.execute("PRAGMA busy_timeout=10000")
-            db.execute("PRAGMA foreign_keys=ON")
-            with db:
-                yield db
-        finally:
-            db.close()
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=10000")
+        db.execute("PRAGMA foreign_keys=ON")
+        return db
 
     @staticmethod
     def _same_order(row: sqlite3.Row, intent: OrderIntent) -> bool:
@@ -226,13 +220,18 @@ class PaperBroker:
             )
         return self.get_order(logical_order_id)
 
-    def observe_quote(self, quote: PaperMarketQuote, *, max_age_seconds: int = 15) -> int:
+    def observe_quote(
+        self, quote: PaperMarketQuote, *, max_age_seconds: int = 15,
+        slippage: Decimal = Decimal(0), min_improvement: Decimal = Decimal(0),
+    ) -> int:
         """Deterministic simulated quote crossing, atomic and idempotent.
 
         Prices and displayed liquidity are explicit synthetic inputs. A BUY can
         fill only at quoted ASK <= original limit; a SELL only when BID >= limit.
         No quote means no fill. The entire event commits in one SQLite write.
         """
+        if any(not x.is_finite() or x < 0 for x in (slippage, min_improvement)):
+            raise ValueError("invalid price execution assumption")
         when = as_utc(quote.observed_at_utc)
         age = (as_utc(self.clock()) - when).total_seconds()
         if not quote.quote_id or not 0 <= age <= max_age_seconds:
@@ -274,10 +273,12 @@ class PaperBroker:
             remaining_bid = quote.bid_size
             for order in orders:
                 buy = order["side"] == "BUY_TO_OPEN"
-                price = quote.ask if buy else quote.bid
-                if (buy and price > Decimal(order["limit_price"])) or (
-                    not buy and price < Decimal(order["limit_price"])
-                ):
+                price = quote.ask + slippage if buy else quote.bid - slippage
+                if price <= 0 or (buy and price + min_improvement > Decimal(
+                    order["limit_price"]
+                )) or (not buy and price - min_improvement < Decimal(
+                    order["limit_price"]
+                )):
                     continue
                 filled = int(db.execute(
                     "SELECT COALESCE(SUM(quantity),0) FROM paper_broker_fills "
