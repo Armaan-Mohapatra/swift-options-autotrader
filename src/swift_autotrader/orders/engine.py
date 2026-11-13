@@ -149,6 +149,17 @@ class PaperOrderEngine:
                 (signal_id, order_id, code, iso(now)),
             )
 
+    def _resolve_closed_exit_alerts(self, signal_id: str) -> None:
+        """Clear stale missing-quote warnings only after actual full closure."""
+        with self._db() as db:
+            db.execute(
+                "UPDATE paper_engine_alerts SET resolved=1 WHERE signal_id=? "
+                "AND code IN ('EXIT_QUOTE_MISSING','EXIT_QUOTE_STALE',"
+                "'EXIT_QUOTE_CONTRACT_MISMATCH','EXIT_QUOTE_INVALID',"
+                "'EXIT_INVALID_TICK','EXIT_PRICE_UNKNOWN','UNFILLED_EXIT')",
+                (signal_id,),
+            )
+
     def _state(self, order_id: str, state: str, now: datetime, *,
                detail: str | None = None) -> None:
         """Append state change only after its corresponding durable status update."""
@@ -526,6 +537,7 @@ class PaperOrderEngine:
             raise ReconciliationError("sell fills exceed actual buy fills")
         if buys == sold:
             self._signal_state(sid, "CLOSED")
+            self._resolve_closed_exit_alerts(sid)
             if entry is None:
                 with self._db() as db:
                     db.execute(
@@ -561,14 +573,19 @@ class PaperOrderEngine:
 
     def run_cycle(
         self, *, quotes: Mapping[OptionContract, ExitQuote] | None = None,
-        allow_entries: bool = True,
+        allow_entries: bool = True, process_closes: bool = True,
+        allowed_signal_ids: frozenset[str] | None = None,
     ) -> CycleResult:
         with _cycle_lock(self.db_path):
-            return self._run_cycle_locked(quotes=quotes, allow_entries=allow_entries)
+            return self._run_cycle_locked(
+                quotes=quotes, allow_entries=allow_entries,
+                process_closes=process_closes, allowed_signal_ids=allowed_signal_ids,
+            )
 
     def _run_cycle_locked(
         self, *, quotes: Mapping[OptionContract, ExitQuote] | None = None,
-        allow_entries: bool = True,
+        allow_entries: bool = True, process_closes: bool = True,
+        allowed_signal_ids: frozenset[str] | None = None,
     ) -> CycleResult:
         now = as_utc(self.clock())
         quotes = dict(quotes or {})
@@ -604,10 +621,11 @@ class PaperOrderEngine:
                 "JOIN signal_close_requests c ON c.signal_id=s.signal_id "
                 "ORDER BY c.first_revision_id"
             ).fetchall()
-        for signal in closing:
-            submitted, cancelled = self._close_signal(signal, now, quotes)
-            close_submissions += int(submitted)
-            cancels += int(cancelled)
+        if process_closes:
+            for signal in closing:
+                submitted, cancelled = self._close_signal(signal, now, quotes)
+                close_submissions += int(submitted)
+                cancels += int(cancelled)
         if allow_entries and not paused and not stopped:
             with self._db() as db:
                 candidates = db.execute(
@@ -625,6 +643,10 @@ class PaperOrderEngine:
                     "ORDER BY m.first_revision_id"
                 ).fetchall()
             for signal in candidates:
+                # An unrelated verified alert may never mark this signal
+                # permanently BLOCKED while its own quote remains missing.
+                if allowed_signal_ids is not None and str(signal["signal_id"]) not in allowed_signal_ids:
+                    continue
                 if self._open_entry(signal, now):
                     entry_submissions += 1
                 else:
