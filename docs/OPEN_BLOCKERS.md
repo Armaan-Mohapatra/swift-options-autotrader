@@ -72,3 +72,12 @@ None of these blockers authorizes skipping tests, accessing user devices, or ena
 - **Unattended paper lifecycle:** Phase 6 Windows supervisor currently runs read-only listener/dashboard/notifications; no safe continuously verified paper order dispatcher. Automatic paper trading should not be claimed until a separately reviewed forward-data integration exists.
 - **Windows local qualification:** actual Task Scheduler at-logon startup, DPAPI and NTFS access, resource budgets, PowerShell setup/restore and laptop coexistence with Phoenix/Kalshi have not been tested on the user device.
 - **Stacked PRs:** Phase 0–6 and Phase 7 remain draft and unmerged pending owner review. No Phase 7 version tag/GitHub release is authorized until mandatory test/release gates pass.
+
+
+## Phase 8 unresolved release gates
+
+- **G8-1 / external:** GitHub Actions account spending/payment restriction prevents hosted Windows/Linux runners from allocating; mandatory final CI still unexecuted. Avoid repeated retries; issue #15.
+- **G8-2 / dependencies:** optional `mcp==2.3.0`, Windows `pywin32`, `httpx2` and exchange calendar transitive dependencies are not hashed in universal `uv.lock`; native Windows install and security audit required.
+- **G8-3 / data:** Robinhood official read-only tool names are known, but option **depth, minimum tick, multiplier, exchange-session and actual response shapes** are not authenticated/field verified. Missing values are hard blockers, not fabricated defaults.
+- **G8-4 / deployment:** optional worker and Windows supervisor source were modified, but actual PowerShell/DPAPI/TaskScheduler tests, released ZIP and resource budgets are not certified.
+- **G8-5 / operational:** real authorized Swift channel formats, listener field connectivity and forward quote-based paper performance remain unverified. No real brokerage writes are permitted.

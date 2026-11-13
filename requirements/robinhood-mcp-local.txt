@@ -1,5 +1,7 @@
-# LOCAL WINDOWS ONLY, after explicit owner authorization; never needed for CI.
-# Official MIT-licensed MCP Python SDK v2; transitive hashes/SBOM require local review.
+# OPTIONAL WINDOWS READ-ONLY MCP PAPER provider; NOT release-lock certified.
+# Requires full transitive Windows artifact hashes, native CI and separate owner review.
 mcp==2.3.0
-# SDK v2 platform dependencies include HTTPX2 and Windows APIs as appropriate.
-# Do not put tokens, device codes, account IDs or refresh tokens in this file.
+exchange-calendars==4.13.1
+pywin32==312; sys_platform == "win32"
+# mcp 2.3.0 depends on httpx2>=2.10.0; all transitive versions must be
+# resolved and independently locked BEFORE use. No real account data here.

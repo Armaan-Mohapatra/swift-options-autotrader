@@ -561,12 +561,14 @@ class PaperOrderEngine:
 
     def run_cycle(
         self, *, quotes: Mapping[OptionContract, ExitQuote] | None = None,
+        allow_entries: bool = True,
     ) -> CycleResult:
         with _cycle_lock(self.db_path):
-            return self._run_cycle_locked(quotes=quotes)
+            return self._run_cycle_locked(quotes=quotes, allow_entries=allow_entries)
 
     def _run_cycle_locked(
         self, *, quotes: Mapping[OptionContract, ExitQuote] | None = None,
+        allow_entries: bool = True,
     ) -> CycleResult:
         now = as_utc(self.clock())
         quotes = dict(quotes or {})
@@ -606,7 +608,7 @@ class PaperOrderEngine:
             submitted, cancelled = self._close_signal(signal, now, quotes)
             close_submissions += int(submitted)
             cancels += int(cancelled)
-        if not paused and not stopped:
+        if allow_entries and not paused and not stopped:
             with self._db() as db:
                 candidates = db.execute(
                     "SELECT s.* FROM option_signals s "

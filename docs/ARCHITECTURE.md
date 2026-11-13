@@ -54,3 +54,8 @@ An isolated release directory under the configured managed root holds pinned Pyt
 6. Actual Windows installation, real Telegram subscription/MTProto read-only field tests, verified option chains/quotes, automatic paper-cycle wiring and forward runs remain separate, explicitly authorized work.
 
 See [Phase 7 audit checkpoint](PHASE_REPORTS/PHASE_7.md), [Windows runbook](WINDOWS_RUNBOOK.md), [operations](OPERATIONS.md), and [rollback](ROLLBACK.md).
+
+
+## Phase 8 source candidate addendum (supersedes Phase 7 worker inventory only)
+
+The source adds `PaperDispatcher` and `MCPReadOnlyOptionData` to bridge fresh durable Telegram entries to simulated order cycles, only when independently verified read-only instrument data, dated quotes, displayed size, tick, account buying power and session gates are available. The Windows supervisor now has an **opt-in** third PAPER worker, disabled by default, besides dashboard and read-only Telegram listener. On provider outage, entries remain unparsed and reconciliation/cancellation continues without new BUYs. This is a **mock-tested code candidate, not an authenticated deployed process**. Optional SDK dependencies are not release-locked and the official MCP field compatibility is unknown; do not call the installed pipeline operational until separate certification and local field tests. See [Phase 8 notes](PAPER_DISPATCH_PHASE8.md).
