@@ -211,3 +211,92 @@ def test_recovered_telegram_entry_never_requests_market_contract(rig):
     entries, _active = worker._pending_and_active()
     assert entries == []
     assert cycle(rig).entry_orders == 0
+
+# Phase 8 secondary-audit regression cases, authored before implementation fixes.
+def test_unverifiable_pending_entry_does_not_block_unrelated_full_exit(rig):
+    path, clock, feed, _, _ = rig
+    ingest(rig, 'SPY 680C 11/13 @ 1.20', 101)
+    assert cycle(rig).entry_orders == 1
+    clock.now += timedelta(seconds=2)
+    assert cycle(rig).simulated_fills == 2
+    ingest(rig, 'QQQ 480C 11/13 @ 1.20', 102)
+    ingest(rig, 'SPY SOLD HALF', 103, reply=101)
+    feed.bid, feed.ask = Decimal('1.30'), Decimal('1.35')
+    response = cycle(rig)
+    assert response.exit_orders == 1
+    with sqlite3.connect(path) as con:
+        assert con.execute("SELECT COUNT(*) FROM signal_close_requests").fetchone()[0] == 1
+        assert con.execute("SELECT COUNT(*) FROM signal_parser_decisions p JOIN telegram_message_revisions r ON p.revision_id=r.revision_id WHERE r.message_id=102").fetchone()[0] == 0
+
+
+def test_canceled_zero_fill_not_in_active_quote_set(rig):
+    path, clock, feed, _, worker = rig
+    ingest(rig, 'SPY 680C 11/13 @ 1.20', 101)
+    feed.ask, feed.bid = Decimal('1.50'), Decimal('1.45')
+    assert cycle(rig).entry_orders == 1
+    clock.now += timedelta(seconds=3600)
+    assert cycle(rig).cancellations == 1
+    assert worker._pending_and_active()[1] == []
+    with sqlite3.connect(path) as con:
+        assert con.execute("SELECT COUNT(*) FROM order_fills").fetchone()[0] == 0
+
+
+def test_stale_unverified_source_never_blocks_fresh_eligible_entry(rig):
+    path, clock, feed, _, _ = rig
+    ingest(rig, 'QQQ 480C 11/13 @ 1.20', 101)
+    assert cycle(rig).status == 'PAUSED_DATA_UNAVAILABLE'
+    clock.now += timedelta(seconds=121)
+    ingest(rig, 'SPY 680C 11/13 @ 1.20', 102)
+    result = cycle(rig)
+    assert result.entry_orders == 1
+    with sqlite3.connect(path) as con:
+        assert con.execute("SELECT COUNT(*) FROM order_intents WHERE side='BUY_TO_OPEN'").fetchone()[0] == 1
+
+
+def test_thirteen_pending_entries_do_not_hit_provider_cap_forever(rig):
+    path, clock, feed, _, _ = rig
+    original_snapshot = feed.snapshot
+    async def capped(entries, active, now):
+        if len(entries) > 12:
+            raise MarketEvidenceUnavailable('Too many pending entries')
+        return await original_snapshot(entries, active, now)
+    feed.snapshot = capped
+    for idx in range(13):
+        ingest(rig, 'SPY 680C 11/13 @ 1.20', 101 + idx)
+    first = cycle(rig)
+    assert first.status == 'PAPER_ONLY'
+    with sqlite3.connect(path) as con:
+        assert con.execute('SELECT COUNT(*) FROM signal_parser_decisions').fetchone()[0] == 13
+
+
+def test_market_data_failure_preserves_checkpoint_without_duplicate_buy(rig):
+    path, clock, feed, _, _ = rig
+    ingest(rig, 'SPY 680C 11/13 @ 1.20', 101)
+    assert cycle(rig).entry_orders == 1
+    clock.now += timedelta(seconds=1)
+    ingest(rig, 'QQQ 480C 11/13 @ 1.20', 102)
+    feed.down = True
+    for _ in range(2):
+        assert cycle(rig).entry_orders == 0
+    feed.down = False
+    assert cycle(rig).entry_orders == 0
+    with sqlite3.connect(path) as con:
+        assert con.execute("SELECT COUNT(*) FROM order_intents WHERE side='BUY_TO_OPEN'").fetchone()[0] == 1
+
+
+def test_exit_without_quote_persists_unresolved_exposure_alert(rig):
+    path, clock, feed, _, _ = rig
+    ingest(rig, 'SPY 680C 11/13 @ 1.20', 101)
+    assert cycle(rig).entry_orders == 1
+    clock.now += timedelta(seconds=2)
+    assert cycle(rig).simulated_fills == 2
+    ingest(rig, 'QQQ 480C 11/13 @ 1.20', 102)
+    ingest(rig, 'SPY ALL OUT', 103, reply=101)
+    feed.quoted = False
+    result = cycle(rig)
+    assert result.exit_orders == 0
+    with sqlite3.connect(path) as con:
+        assert con.execute("SELECT COUNT(*) FROM signal_close_requests").fetchone()[0] == 1
+        assert con.execute("SELECT COUNT(*) FROM paper_engine_alerts WHERE code='EXIT_QUOTE_MISSING' AND resolved=0").fetchone()[0] > 0 or con.execute("SELECT COUNT(*) FROM paper_engine_alerts WHERE code='EXIT_PRICE_UNKNOWN' AND resolved=0").fetchone()[0] > 0
+        assert con.execute("SELECT COUNT(*) FROM order_intents WHERE side='SELL_TO_CLOSE'").fetchone()[0] == 0
+

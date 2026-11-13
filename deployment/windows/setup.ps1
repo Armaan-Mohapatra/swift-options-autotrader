@@ -70,14 +70,35 @@ if ($packageMode) {
     $verifiedArchive = [System.IO.Path]::GetFullPath($PackageZip)
     $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('SwiftPaperRelease-' +
                [Guid]::NewGuid().ToString('N'))
-    $verifier = Join-Path $PSScriptRoot 'extract_approved_package.py'
-    if (-not (Test-Path -LiteralPath $verifier -PathType Leaf)) {
-        throw 'Reviewed release verification helper is missing.'
+    # Verify the independently approved ZIP using Windows' own SHA-256 first.
+    # Never execute a verifier from the launch directory or from an unchecked ZIP.
+    $zipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $verifiedArchive).Hash.ToLowerInvariant()
+    if ($zipHash -ne $PackageSha256.ToLowerInvariant()) {
+        throw 'Approved ZIP checksum mismatch; no package code was executed.'
     }
-    & py.exe -3.11 $verifier --archive $verifiedArchive --target $stage `
-        --sha256 $PackageSha256.ToLowerInvariant() `
-        --commit $ExpectedCommit.ToLowerInvariant()
-    if ($LASTEXITCODE -ne 0) { throw 'Approved release verification failed.' }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $reader = [System.IO.Compression.ZipFile]::OpenRead($verifiedArchive)
+    $verifier = Join-Path ([System.IO.Path]::GetTempPath()) ('SwiftPaperVerifier-' +
+                 [Guid]::NewGuid().ToString('N') + '.py')
+    try {
+        $verifierEntry = $reader.GetEntry('deployment/windows/extract_approved_package.py')
+        if ($null -eq $verifierEntry -or $verifierEntry.Length -gt 2000000) {
+            throw 'Approved ZIP has no bounded release verifier.'
+        }
+        $inputStream = $verifierEntry.Open()
+        try {
+            $outputStream = [System.IO.File]::Open($verifier, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+            try { $inputStream.CopyTo($outputStream) } finally { $outputStream.Dispose() }
+        } finally { $inputStream.Dispose() }
+    } finally { $reader.Dispose() }
+    try {
+        & py.exe -3.11 $verifier --archive $verifiedArchive --target $stage `
+            --sha256 $PackageSha256.ToLowerInvariant() `
+            --commit $ExpectedCommit.ToLowerInvariant()
+        if ($LASTEXITCODE -ne 0) { throw 'Approved release verification failed.' }
+    } finally {
+        Remove-Item -LiteralPath $verifier -Force -ErrorAction SilentlyContinue
+    }
     $source = $stage
     $actualCommit = $ExpectedCommit.ToLowerInvariant()
 } else {
@@ -142,7 +163,7 @@ foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $source 'src') -Recurs
     Copy-Item -LiteralPath $file.FullName -Destination $target
 }
 foreach ($file in @('common.ps1','setup.ps1','manage.ps1','service.ps1','secrets.ps1','healthcheck.ps1','extract_approved_package.py')) {
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $root ('scripts\' + $file)) -Force
+    Copy-Item -LiteralPath (Join-Path $source ('deployment/windows/' + $file)) -Destination (Join-Path $root ('scripts\' + $file)) -Force
 }
 $manifest = Join-Path $root 'deployment.json'
 if (-not (Test-Path -LiteralPath $manifest)) {

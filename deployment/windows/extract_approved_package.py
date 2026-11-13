@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import shutil
+import tomllib
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -78,8 +79,19 @@ def extract_approved_package(
             if (not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected)
                 or hashlib.sha256(bundle.read(info.filename)).hexdigest() != expected):
                 raise RuntimeError("Release file integrity verification failed")
-        if not {"pyproject.toml", "uv.lock", "deployment/windows/setup.ps1"} <= set(entries):
-            raise RuntimeError("Release missing required installation files")
+        try:
+            version = tomllib.loads(bundle.read("pyproject.toml").decode("utf-8"))["project"]["version"]
+        except (KeyError, UnicodeDecodeError, ValueError) as exc:
+            raise RuntimeError("Release package version is unreadable") from exc
+        if manifest.get("package_version") != version:
+            raise RuntimeError("Release package version mismatch")
+        required = {"pyproject.toml", "uv.lock", "deployment/windows/setup.ps1",
+                    "deployment/windows/common.ps1", "deployment/windows/manage.ps1",
+                    "deployment/windows/service.ps1", "deployment/windows/secrets.ps1",
+                    "deployment/windows/healthcheck.ps1",
+                    "deployment/windows/extract_approved_package.py"}
+        if not required <= set(entries):
+            raise RuntimeError("Release missing required installation scripts")
         # Only after full verification create output; no ZIP extractall traversal.
         target.mkdir(parents=True, exist_ok=False)
         for info in infos:

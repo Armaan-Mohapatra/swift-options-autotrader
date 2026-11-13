@@ -124,18 +124,27 @@ class SignalMatcher:
             raise RuntimeError("Phase 2 migration required; run migrate")
         return con
 
-    def process_pending(self, limit: int = 500) -> list[Decision]:
+    def process_pending(
+        self, limit: int = 500, *, revision_ids: Sequence[int] | None = None,
+    ) -> list[Decision]:
         if not 1 <= limit <= 5000:
             raise ValueError("limit must be between 1 and 5000")
-        with self._connect() as con:
-            revisions = [
-                int(row[0]) for row in con.execute(
-                    "SELECT r.revision_id FROM telegram_message_revisions r "
-                    "LEFT JOIN signal_parser_decisions p ON p.revision_id=r.revision_id "
-                    "WHERE r.channel_id=? AND p.revision_id IS NULL "
-                    "ORDER BY r.revision_id LIMIT ?", (self.channel_id, limit),
-                )
-            ]
+        if revision_ids is None:
+            with self._connect() as con:
+                revisions = [
+                    int(row[0]) for row in con.execute(
+                        "SELECT r.revision_id FROM telegram_message_revisions r "
+                        "LEFT JOIN signal_parser_decisions p ON p.revision_id=r.revision_id "
+                        "WHERE r.channel_id=? AND p.revision_id IS NULL "
+                        "ORDER BY r.revision_id LIMIT ?", (self.channel_id, limit),
+                    )
+                ]
+        else:
+            # Target only source revisions for which an independently verified
+            # instrument exists. Other pending entries must remain untouched.
+            revisions = sorted(set(revision_ids))
+            if len(revisions) > limit or any(type(i) is not int or i <= 0 for i in revisions):
+                raise ValueError("Invalid bounded revision selection")
         outcomes: list[Decision] = []
         for revision_id in revisions:
             with self._connect() as con:
