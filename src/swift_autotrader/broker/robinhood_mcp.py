@@ -222,9 +222,15 @@ class RobinhoodMCPBroker:
     even if future connection code has successfully authenticated.
     """
 
-    def __init__(self, client: MCPAsyncClient | None = None, *, timeout_seconds: float = 15.0):
+    def __init__(
+        self, client: MCPAsyncClient | None = None, *, timeout_seconds: float = 15.0,
+        approved_account_number: str | None = None,
+    ):
         if not 1 <= timeout_seconds <= 60:
             raise ValueError("MCP read timeout outside range")
+        if approved_account_number is not None:
+            _identifier(approved_account_number)
+        self.approved_account_number = approved_account_number
         self.client = client
         self.timeout_seconds = timeout_seconds
         self._discovered: dict[str, dict[str, Any]] | None = None
@@ -272,6 +278,15 @@ class RobinhoodMCPBroker:
     async def _call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in READ_TOOLS:
             raise BrokerWritesDisabledError("MCP write tools are forbidden")
+        if (
+            self.approved_account_number is not None
+            and name in {
+                "get_portfolio", "get_option_orders", "get_option_positions",
+                "review_option_order",
+            }
+            and arguments.get("account_number") != self.approved_account_number
+        ):
+            raise MCPContractError("Requested account differs from approved MCP account")
         if self._discovered is None:
             await self.discover()
         assert self._discovered is not None
@@ -308,6 +323,9 @@ class RobinhoodMCPBroker:
         matches = [a for a in accounts if a.agentic_allowed]
         if len(matches) != 1 or not matches[0].eligible:
             raise MCPContractError("One option-approved external-agent account required")
+        if (self.approved_account_number is not None
+                and matches[0].account_number != self.approved_account_number):
+            raise MCPContractError("Approved MCP account changed; no fallback permitted")
         return matches[0]
 
     async def buying_power(self, account: MCPAccount) -> Decimal:

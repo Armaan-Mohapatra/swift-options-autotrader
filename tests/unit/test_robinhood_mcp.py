@@ -423,3 +423,30 @@ def test_opaque_option_pagination_cursor_is_accepted_without_url_following():
     assert _next_cursor({"next": "https://api.example.test/?cursor=abc%3D%3D"}) == "abc=="
     with pytest.raises(MCPContractError):
         _next_cursor({"next": "./../../unsafe-path"})
+
+
+def test_pinned_mcp_account_refuses_permission_transfer_or_ambiguity():
+    fake, _ = setup()
+    adapter = RobinhoodMCPBroker(fake, approved_account_number=ACCOUNT.account_number)
+    assert wait(adapter.external_account()) == ACCOUNT
+    records = fake.responses["get_accounts"]["accounts"]
+    records[1]["agentic_allowed"] = False
+    records[0]["agentic_allowed"] = True
+    with pytest.raises(MCPContractError, match="no fallback"):
+        wait(adapter.external_account())
+    records[1]["agentic_allowed"] = True
+    with pytest.raises(MCPContractError):
+        wait(adapter.external_account())
+
+
+def test_pinned_mcp_account_blocks_other_account_rpc_before_transport():
+    fake, _ = setup()
+    adapter = RobinhoodMCPBroker(fake, approved_account_number=ACCOUNT.account_number)
+    other = MCPAccount("unrelated-readonly", True, "option_level_2")
+    with pytest.raises(MCPContractError, match="differs"):
+        wait(adapter.buying_power(other))
+    with pytest.raises(MCPContractError, match="differs"):
+        wait(adapter.review_order(other, INSTRUMENT, intent()))
+    assert not fake.calls
+    assert wait(adapter.buying_power(ACCOUNT)) == Decimal("1000.00")
+    assert fake.calls[-1][1]["account_number"] == ACCOUNT.account_number
