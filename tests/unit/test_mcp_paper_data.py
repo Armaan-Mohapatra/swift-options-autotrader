@@ -177,9 +177,11 @@ def test_calendar_dependency_absence_must_fail_closed():
             raise ImportError('test: deliberately absent')
         return real_import(name, *args, **kwargs)
 
-    with patch('builtins.__import__', side_effect=without_exchange_calendar):
-        with pytest.raises(MarketEvidenceUnavailable, match='calendar|session'):
-            ExchangeCalendarsSession().is_regular_session_open(NOW)
+    with (
+        patch('builtins.__import__', side_effect=without_exchange_calendar),
+        pytest.raises(MarketEvidenceUnavailable, match='calendar|session'),
+    ):
+        ExchangeCalendarsSession().is_regular_session_open(NOW)
 
 
 def test_bounded_review_rejects_excessive_candidate_set_before_mcp_calls():
