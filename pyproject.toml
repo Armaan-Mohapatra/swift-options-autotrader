@@ -9,9 +9,12 @@ description = "Read-only authorized Telegram ingestion for a future paper-only o
 requires-python = ">=3.11"
 license = {text = "Proprietary - private project"}
 authors = [{name = "Swift Options AutoTrader maintainers"}]
-dependencies = []
+dependencies = [
+    "tzdata>=2026.6",
+]
 
 [project.optional-dependencies]
+paper-market = ["mcp==2.3.0", "httpx2>=2.10.0", "exchange-calendars", "pywin32; sys_platform == 'win32'"]
 telegram = ["Telethon==1.45.0"]
 dev = ["pytest==9.2.0", "ruff==0.16.8"]
 
