@@ -254,6 +254,12 @@ class RobinhoodMCPBroker:
             if isinstance(name, str) and name in READ_TOOLS | WRITE_TOOLS:
                 if name in seen:
                     raise MCPContractError("Duplicate MCP tool advertisement")
+                camel = item.get("inputSchema")
+                snake = item.get("input_schema")
+                if camel is not None and snake is not None and camel != snake:
+                    raise MCPContractError("Conflicting MCP tool schema aliases")
+                if camel is None and isinstance(snake, Mapping):
+                    item["inputSchema"] = snake
                 seen[name] = item
         missing = sorted(READ_TOOLS - set(seen))
         mismatches = []

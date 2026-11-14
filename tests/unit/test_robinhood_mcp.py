@@ -450,3 +450,38 @@ def test_pinned_mcp_account_blocks_other_account_rpc_before_transport():
     assert not fake.calls
     assert wait(adapter.buying_power(ACCOUNT)) == Decimal("1000.00")
     assert fake.calls[-1][1]["account_number"] == ACCOUNT.account_number
+
+
+def test_sdk_snake_case_schema_survives_discovery_and_account_scoped_reads():
+    fake, _ = setup()
+    original_list = fake.list_tools
+
+    async def list_tools():
+        response = await original_list()
+        for tool in response.tools:
+            tool["input_schema"] = tool.pop("inputSchema")
+        return response
+
+    fake.list_tools = list_tools
+    adapter = RobinhoodMCPBroker(fake, approved_account_number=ACCOUNT.account_number)
+    assert wait(adapter.discover()).status == "READ_ONLY_SCHEMA_OK"
+    account = wait(adapter.external_account())
+    assert wait(adapter.buying_power(account)) == Decimal("1000.00")
+    assert wait(adapter.orders(account)) == []
+    assert wait(adapter.positions(account)) == []
+    assert not any(name in WRITE_TOOLS for name, _ in fake.calls)
+
+
+def test_sdk_conflicting_schema_aliases_are_rejected_before_broker_read():
+    fake, adapter = setup()
+    original_list = fake.list_tools
+
+    async def list_tools():
+        response = await original_list()
+        response.tools[0]["input_schema"] = {"properties": {"conflict": {}}}
+        return response
+
+    fake.list_tools = list_tools
+    with pytest.raises(MCPContractError, match="Conflicting"):
+        wait(adapter.discover())
+    assert fake.calls == []
