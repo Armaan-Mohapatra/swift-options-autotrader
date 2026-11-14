@@ -118,7 +118,9 @@ def create_package(source: Path, output: Path, *, expected_commit: str | None = 
             except (OSError, subprocess.SubprocessError) as exc:
                 raise RuntimeError("Cannot verify committed release blob") from exc
             if payload != committed:
-                raise RuntimeError(f"Release source bytes differ from committed Git blob: {relative}")
+                raise RuntimeError(
+                    f"Release source bytes differ from committed Git blob: {relative}"
+                )
     version = tomllib.loads(sources["pyproject.toml"].decode("utf-8"))["project"]["version"]
     if not isinstance(version, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", version):
         raise RuntimeError("Unsupported release package version")
@@ -171,7 +173,10 @@ def verify_package(path: Path) -> dict[str, object]:
             if hashlib.sha256(bundle.read(name)).hexdigest() != expected:
                 raise RuntimeError("Package file hash mismatch")
         try:
-            version = tomllib.loads(bundle.read("pyproject.toml").decode("utf-8"))["project"]["version"]
+            version = (
+                tomllib.loads(bundle.read("pyproject.toml").decode("utf-8"))
+                ["project"]["version"]
+            )
         except (ValueError, KeyError, UnicodeDecodeError) as exc:
             raise RuntimeError("Release has unreadable package version") from exc
         if manifest.get("package_version") != version:

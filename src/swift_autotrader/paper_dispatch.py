@@ -215,8 +215,10 @@ class PaperDispatcher:
                 "WHERE r.channel_id=? AND r.eligible_for_future_processing=1 "
                 "AND p.status='RECORDED' AND p.intent='ENTRY' "
                 "AND NOT EXISTS(SELECT 1 FROM order_intents o WHERE o.signal_id=s.signal_id) "
-                "AND NOT EXISTS(SELECT 1 FROM paper_engine_decisions d WHERE d.signal_id=s.signal_id) "
-                "AND NOT EXISTS(SELECT 1 FROM signal_close_requests c WHERE c.signal_id=s.signal_id) "
+                "AND NOT EXISTS(SELECT 1 FROM paper_engine_decisions d "
+                "WHERE d.signal_id=s.signal_id) "
+                "AND NOT EXISTS(SELECT 1 FROM signal_close_requests c "
+                "WHERE c.signal_id=s.signal_id) "
                 "ORDER BY m.first_revision_id DESC LIMIT 48",
                 (str(self.channel_id),),
             ).fetchall()
@@ -421,8 +423,9 @@ class PaperDispatcher:
             quotes=exit_quotes, allow_entries=bool(verified_signal_ids),
             allowed_signal_ids=frozenset(verified_signal_ids),
         )
-        status = "PAPER_ONLY" if verified_signal_ids or (not failed and snapshots) or decisions else (
-            "PAUSED_DATA_UNAVAILABLE" if failed else "PAPER_ONLY"
+        status = (
+            "PAPER_ONLY" if verified_signal_ids or (not failed and snapshots) or decisions
+            else ("PAUSED_DATA_UNAVAILABLE" if failed else "PAPER_ONLY")
         )
         return DispatchResult(status, len(decisions), cycle.entry_submissions,
                               cycle.close_submissions, fill_count,

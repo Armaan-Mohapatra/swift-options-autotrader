@@ -80,7 +80,10 @@ def extract_approved_package(
                 or hashlib.sha256(bundle.read(info.filename)).hexdigest() != expected):
                 raise RuntimeError("Release file integrity verification failed")
         try:
-            version = tomllib.loads(bundle.read("pyproject.toml").decode("utf-8"))["project"]["version"]
+            version = (
+                tomllib.loads(bundle.read("pyproject.toml").decode("utf-8"))
+                ["project"]["version"]
+            )
         except (KeyError, UnicodeDecodeError, ValueError) as exc:
             raise RuntimeError("Release package version is unreadable") from exc
         if manifest.get("package_version") != version:

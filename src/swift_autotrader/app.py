@@ -49,7 +49,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "mcp-diagnostics", help="Robinhood MCP diagnostics; offline unless --connect"
     )
     diagnostics.add_argument("--connect", action="store_true", help="Local manual OAuth only")
-    service = commands.add_parser("paper-dispatch-service", help="Opt-in Windows PAPER read-only data worker")
+    service = commands.add_parser(
+        "paper-dispatch-service", help="Opt-in Windows PAPER read-only data worker"
+    )
     service.add_argument("--root", required=True)
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")

@@ -412,7 +412,10 @@ class RobinhoodMCPBroker:
     @staticmethod
     def order_arguments(account: MCPAccount, instrument: MCPInstrument,
                         intent: OrderIntent) -> dict[str, Any]:
-        if not account.eligible or not instrument.tradable or intent.contract != instrument.contract:
+        if (
+            not account.eligible or not instrument.tradable
+            or intent.contract != instrument.contract
+        ):
             raise MCPContractError("Unverified account or option contract")
         side = "buy" if intent.side is OrderSide.BUY_TO_OPEN else "sell"
         effect = "open" if intent.side is OrderSide.BUY_TO_OPEN else "close"

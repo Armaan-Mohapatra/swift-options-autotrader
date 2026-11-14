@@ -84,7 +84,9 @@ def verify() -> list[str]:
                     issues.append("Real adapter not unconditionally denied: " + method)
         except (SyntaxError, ValueError) as exc:
             issues.append("Unable to audit real broker guard: " + type(exc).__name__)
-        if not re.search(r"if name not in READ_TOOLS\s*:\s*\n\s*raise BrokerWritesDisabledError", text):
+        if not re.search(
+            r"if name not in READ_TOOLS\s*:\s*\n\s*raise BrokerWritesDisabledError", text
+        ):
             issues.append("MCP tool allowlist deny-by-default guard is missing")
     engine = ROOT / "src/swift_autotrader/orders/engine.py"
     if engine.is_file():
