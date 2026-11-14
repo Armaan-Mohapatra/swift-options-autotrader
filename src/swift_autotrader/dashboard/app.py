@@ -12,12 +12,14 @@ from swift_autotrader.analytics.metrics import CostModel, PaperAnalytics
 
 # No inline scripts or third-party remote assets. The browser fetches only localhost.
 HTML = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Swift Paper Console</title><style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;
 background:#0c1220;color:#e5ebfa}body{margin:0;max-width:1250px;padding:30px 28px 75px}
 h1{font-size:26px;letter-spacing:-.035em;margin:0}p,small{color:#a0b0d0}
-nav{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #29374f;padding-bottom:20px}
+nav{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #29374f;
+padding-bottom:20px}
 #mode{color:#9bf1d2;font-size:12px;font-weight:700;letter-spacing:.1em}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:23px 0}
 .card,section{background:#152037;border:1px solid #2a3852;border-radius:14px;padding:18px}
@@ -29,11 +31,14 @@ th{color:#a0b0d0;font-weight:500}td{color:#e4e8f6}
 .flag{color:#f0b57b}.ok{color:#98e6c2}.missing{color:#a0b0d0}
 #status{font-size:12px;color:#a0b0d0}
 </style></head><body>
-<nav><div><h1>Swift / Paper Console</h1><small>Local only · simulated fills · no broker orders</small></div><div id="mode">PAPER ONLY</div></nav>
+<nav><div><h1>Swift / Paper Console</h1>
+<small>Local only · simulated fills · no broker orders</small></div>
+<div id="mode">PAPER ONLY</div></nav>
 <p id="status">Connecting to local read-only status …</p><div class="cards" id="cards"></div>
 <section><h2>Pending orders &amp; deadlines</h2><div id="orders"></div></section>
 <section><h2>Option positions and fill basis</h2><div id="positions"></div></section>
-<section><h2>Recent alert classifications (private text hidden)</h2><div id="messages"></div></section>
+<section><h2>Recent alert classifications (private text hidden)</h2>
+<div id="messages"></div></section>
 <section><h2>Service health and notifications</h2><div id="alerts"></div></section>
 <script src="/static/dashboard.js" defer></script></body></html>"""
 
@@ -42,7 +47,9 @@ const byId = id => document.getElementById(id);
 const safe = x => x === null || x === undefined ? 'Unavailable' : String(x);
 function table(id, headers, rows) {
   const host = byId(id); host.replaceChildren();
-  if (!rows.length) {const p=document.createElement('p');p.textContent='No records';host.append(p);return;}
+  if (!rows.length) {
+    const p=document.createElement('p');p.textContent='No records';host.append(p);return;
+  }
   const t=document.createElement('table');t.className='table';
   const h=document.createElement('tr');for (const title of headers) {
     const th=document.createElement('th');th.textContent=title;h.append(th);
@@ -61,13 +68,17 @@ const result = await fetch('/api/status',{cache:'no-store'});
 if (!result.ok) throw new Error('Unavailable'); const x=await result.json();
 if (x.mode!=='PAPER_ONLY'||x.real_broker_writes_enabled!==false) throw new Error('Unsafe status');
 const c=byId('cards');c.replaceChildren(
-card('Realized gross (sim USD)',x.realized_gross_usd),card('Realized net (sim USD)',x.realized_net_usd),
-card('Unrealized gross (sim USD)',x.unrealized_gross_usd),card('Completed trades',x.completed_positions),
+card('Realized gross (sim USD)',x.realized_gross_usd),
+card('Realized net (sim USD)',x.realized_net_usd),
+card('Unrealized gross (sim USD)',x.unrealized_gross_usd),
+card('Completed trades',x.completed_positions),
 card('Win rate',x.win_rate),card('Closed-fill drawdown',x.realized_max_drawdown_usd),
 card('Emergency stop',x.emergency_stop?'ON':'OFF'),card('Telegram',x.telegram.status));
 table('orders',['Order','Side','State','Limit','Open qty','Seconds left'],
-x.pending_orders.map(o=>[o.logical_order_id,o.side,o.state,o.limit_price,o.remaining_contracts,o.countdown_seconds]));
-table('positions',['Contract','Swift avg','Fill avg','Open','Entry limit','Realized gross','Unrealized gross','Mark'],
+x.pending_orders.map(o=>[o.logical_order_id,o.side,o.state,o.limit_price,
+o.remaining_contracts,o.countdown_seconds]));
+table('positions',['Contract','Swift avg','Fill avg','Open','Entry limit',
+'Realized gross','Unrealized gross','Mark'],
 x.positions.map(p=>[p.contract,p.swift_reported_average,p.actual_average_fill,p.open_contracts,
 p.source_limit,p.realized_gross_usd,p.unrealized_gross_usd,p.mark_status]));
 table('messages',['Message','Intent','Status','Reason','Received'],
@@ -77,7 +88,8 @@ table('alerts',['Category','Code','Severity','UTC'],
 ...x.alerts.map(a=>['PAPER_ORDER',a.code,'ERROR',a.recorded_at_utc]),
 ...(x.telegram.status==='DEGRADED'||x.telegram.status==='DISCONNECTED' ?
 [['TELEGRAM_SERVICE','TELEGRAM_'+x.telegram.status,'ERROR',x.as_of_utc]] : [])]);
-byId('status').textContent='Updated '+x.as_of_utc+' · Fees: '+safe(x.costs_assumed.fee_per_contract_side_usd)+
+byId('status').textContent='Updated '+x.as_of_utc+' · Fees: '+
+safe(x.costs_assumed.fee_per_contract_side_usd)+
 ' · All figures simulated; missing quotes are unavailable.';
 } catch (_) {byId('status').textContent='Local status unavailable. No data has been inferred.';}}
 refresh();setInterval(refresh,15000);"""
