@@ -369,3 +369,57 @@ def test_get_option_orders_extracts_documented_next_url():
     fake.responses["get_option_orders"] = results
     assert wait(adapter.orders(ACCOUNT)) == []
     assert len(called) == 2 and called[-1]["cursor"] == "page2"
+
+
+def test_observed_robinhood_contract_and_nested_quote_shape():
+    """Sanitized public read-only option response schema, no account access."""
+    fake, adapter = setup()
+    fake.responses["get_option_chains"]["chains"][0] = {
+        "id": "synthetic-chain", "symbol": "SPY",
+        "expiration_dates": [CONTRACT.expiration.isoformat()],
+        "trade_value_multiplier": "100.0000",
+        "min_ticks": {"above_tick": "0.01", "below_tick": "0.01", "cutoff_price": "0.00"},
+    }
+    fake.responses["get_option_instruments"] = {"instruments": [{
+        "id": "synthetic-option-id", "chain_id": "synthetic-chain",
+        "chain_symbol": "SPY", "expiration_date": "2026-11-20",
+        "strike_price": "680.0000", "type": "call", "state": "active",
+        "tradability": "tradable", "trade_value_multiplier": "100.0000",
+        "min_ticks": {"above_tick": "0.01", "below_tick": "0.01", "cutoff_price": "0.00"},
+    }]}
+    fake.responses["get_option_quotes"] = {"results": [{"quote": {
+        "instrument_id": "synthetic-option-id", "bid_price": "1.12",
+        "ask_price": "1.25", "bid_size": 12, "ask_size": 21,
+        "updated_at": "2026-11-12T18:05:00.000000000Z",
+    }, "close": {"price": "1.20"}}]}
+    instrument = wait(adapter.resolve_instrument(CONTRACT))
+    assert instrument.minimum_tick == Decimal("0.01")
+    assert instrument.multiplier == 100
+    quote = wait(adapter.quote(instrument, now=datetime(2026, 11, 12, 18, 5, 10, tzinfo=UTC)))
+    assert quote.bid == Decimal("1.12") and quote.ask == Decimal("1.25")
+    assert quote.bid_size == 12 and quote.ask_size == 21
+    assert not any(name in WRITE_TOOLS for name, _ in fake.calls)
+
+
+def test_robinhood_fields_fail_closed_if_unknown_or_conflicting():
+    fake, adapter = setup()
+    item = fake.responses["get_option_instruments"]["instruments"][0]
+    item["trade_value_multiplier"] = "99.5"
+    with pytest.raises(MCPContractError):
+        wait(adapter.resolve_instrument(CONTRACT))
+    item["trade_value_multiplier"] = "100.0000"
+    item["min_ticks"] = {"above_tick": "0.05", "below_tick": "0.01",
+                         "cutoff_price": "3.00"}
+    assert wait(adapter.resolve_instrument(CONTRACT)).minimum_tick is None
+    item["min_ticks"]["below_tick"] = "0"
+    with pytest.raises(MCPContractError):
+        wait(adapter.resolve_instrument(CONTRACT))
+
+
+def test_opaque_option_pagination_cursor_is_accepted_without_url_following():
+    from swift_autotrader.broker.robinhood_mcp import _next_cursor
+
+    assert _next_cursor({"next": "cD03NjkuMDAwMA=="}) == "cD03NjkuMDAwMA=="
+    assert _next_cursor({"next": "https://api.example.test/?cursor=abc%3D%3D"}) == "abc=="
+    with pytest.raises(MCPContractError):
+        _next_cursor({"next": "./../../unsafe-path"})

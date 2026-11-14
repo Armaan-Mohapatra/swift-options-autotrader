@@ -7,6 +7,7 @@ transport is opened by construction, and no method calls place/cancel tools.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -134,12 +135,17 @@ def _next_cursor(response: Mapping[str, Any]) -> str | None:
         if not isinstance(next_url, str) or len(next_url) > 4096:
             raise MCPContractError("Malformed broker pagination URL")
         parsed = urlsplit(next_url)
-        # We only read a cursor; no URL is followed. Tool server owns pagination.
-        query = parse_qs(parsed.query)
-        cursors = query.get("cursor", [])
-        if len(cursors) != 1:
-            raise MCPContractError("Broker pagination cursor absent")
-        cursor = cursors[0]
+        # Robinhood tools may return an opaque cursor directly, not a next URL.
+        # Do not follow arbitrary URLs; return only a bounded cursor token.
+        if (not parsed.scheme and not parsed.netloc and not parsed.query and
+            re.fullmatch(r"[A-Za-z0-9_+/=-]{1,512}", next_url)):
+            cursor = next_url
+        else:
+            query = parse_qs(parsed.query)
+            cursors = query.get("cursor", [])
+            if len(cursors) != 1:
+                raise MCPContractError("Broker pagination cursor absent")
+            cursor = cursors[0]
     if cursor is not None and (
         not isinstance(cursor, str) or not 1 <= len(cursor) <= 512
     ):
@@ -366,14 +372,40 @@ class RobinhoodMCPBroker:
                 # Optional vendor-advertised instrument rules; never infer a tick or multiplier.
                 tick_raw = item.get("minimum_tick")
                 tick = _money(tick_raw, "minimum_tick") if tick_raw is not None else None
+                # Robinhood exposes a two-tier price-dependent tick schedule.
+                # Without the order premium here, only a constant schedule can
+                # safely be collapsed to a single minimum tick.
+                tiers = item.get("min_ticks")
+                if tiers is not None:
+                    if not isinstance(tiers, Mapping):
+                        raise MCPContractError("Malformed option tick schedule")
+                    above = _money(tiers.get("above_tick"), "above_tick")
+                    below = _money(tiers.get("below_tick"), "below_tick")
+                    _money(tiers.get("cutoff_price"), "cutoff_price")
+                    if above <= 0 or below <= 0:
+                        raise MCPContractError("Nonpositive option tick")
+                    if above == below:
+                        if tick is not None and tick != above:
+                            raise MCPContractError("Conflicting option ticks")
+                        tick = above
+                    else:
+                        # An order-price-dependent tick cannot be checked here.
+                        tick = None
                 if tick is not None and tick <= 0:
                     raise MCPContractError("Nonpositive option tick")
                 multiplier_raw = item.get("multiplier")
+                vendor_multiplier = item.get("trade_value_multiplier")
                 multiplier = None
-                if multiplier_raw is not None:
-                    if type(multiplier_raw) is not int or multiplier_raw < 1:
+                if multiplier_raw is not None or vendor_multiplier is not None:
+                    primary = _money(multiplier_raw if multiplier_raw is not None
+                                     else vendor_multiplier, "multiplier")
+                    if primary < 1 or primary != primary.to_integral_value():
                         raise MCPContractError("Unknown option multiplier")
-                    multiplier = multiplier_raw
+                    if vendor_multiplier is not None and multiplier_raw is not None and (
+                        _money(vendor_multiplier, "trade_value_multiplier") != primary
+                    ):
+                        raise MCPContractError("Conflicting option multipliers")
+                    multiplier = int(primary)
                 matches.append(MCPInstrument(_identifier(option_id), contract, tradable,
                                              chain_id, tick, multiplier))
         if len(matches) != 1 or not matches[0].tradable:
@@ -384,7 +416,10 @@ class RobinhoodMCPBroker:
                     now: datetime | None = None) -> MCPQuote:
         data = await self._call("get_option_quotes", {"instrument_ids": [instrument.option_id]})
         rows = _rows(data, "quotes", "results")
-        matches = [x for x in rows if x.get("instrument_id") == instrument.option_id]
+        # Official quote tool returns results[].quote plus an optional close;
+        # synthetic older transports return a flat quotes[] list.
+        quotes = [_obj(x["quote"]) if "quote" in x else x for x in rows]
+        matches = [x for x in quotes if x.get("instrument_id") == instrument.option_id]
         if len(matches) != 1:
             raise MCPContractError("Exact quote unavailable")
         bid = _money(matches[0].get("bid_price"), "bid")
