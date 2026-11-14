@@ -12,7 +12,7 @@ Review the permanent source specification for exact options contract matching, o
 - Pre-remediation: Python 3.11 **382 passed / 62 failed**; 3.13 **382 passed / 62 failed**; 53 Ruff errors.
 - With candidate MCP + tzdata dependencies and safe Ruff changes on an *isolated local working tree*: **396 passed / 48 failed per version**; 34 Ruff errors.
 - 44 replay tests failed on SQLite temporary-file close `WinError 32`, associated CLI failure, 2 LF/CRLF Git-fixture mismatches, 1 dispatcher status expectation mismatch.
-- Independently tested local reconstructed source after the remaining fixes: **444 passed, 1 expected duplicate ZIP warning** on Linux Python 3.13. This is NOT an exact HEAD Windows pass, official CI or field validation.
+- Independently tested local reconstructed source after the remaining fixes: **449 passed, 1 expected duplicate ZIP warning** (includes five adversarial lock-audit tests) on Linux Python 3.13. This is NOT an exact HEAD Windows pass, official CI or field validation.
 - GitHub Actions runner allocation blocked; do not claim CI green.
 
 ## PR #24 changes
@@ -21,6 +21,12 @@ Review the permanent source specification for exact options contract matching, o
 3. Cancellation regression expects PAPER_ONLY and no provider RPC once there are no active contracts, rather than falsely claiming an unavailable-data lookup occurred.
 4. Reviewed Ruff formatting/import/unused symbol fixes.
 5. Add paper-only read-only MCP market dependencies and timezone definitions to `pyproject.toml`; Windows setup selects the `paper-market` extra as well as Telegram.
+
+## Additional independent checks completed in the local reconstructed environment
+- `uv lock --check --offline --python 3.13`: PASS against byte-identical candidate pyproject/lock.
+- `scripts/audit_lock.py`: PASS for 50 approved package identities and 711 hashed artifacts.
+- `scripts/scan_secrets.py`: PASS (heuristic only); `scripts/phase7_verify.py`: PASS (offline paper invariants, not release certification).
+- Full Linux Python 3.13 pytest: 449 passed, one intentionally duplicate ZIP warning. These checks are NOT a native Windows retest nor a complete exact-GitHub-SHA runner matrix.
 
 ## REQUIRED before certification
 - **LOCKFILE TRANSFER COMPLETE:** PR #24 now includes the exact independently Windows-resolved candidate `uv.lock`, Git blob `6d2472dffc4e4213444c711fbe7237393e7d05fe`, together with matching `pyproject.toml`, Git blob `a14e0a5bdc3f80153302eb3e3952c806d3e3026c`. These bytes are verified, but a fresh `uv lock --check` and full exact-HEAD Windows/Linux suite remain REQUIRED; this is not proof of runtime compatibility.
