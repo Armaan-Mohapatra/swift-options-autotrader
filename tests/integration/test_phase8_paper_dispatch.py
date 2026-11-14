@@ -13,7 +13,10 @@ from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.database.repository import TelegramStore
 from swift_autotrader.orders.risk import Preflight, RiskCeilings
 from swift_autotrader.paper_dispatch import (
-    MarketEvidenceUnavailable, MarketSnapshot, PaperDispatcher, VerifiedQuote,
+    MarketEvidenceUnavailable,
+    MarketSnapshot,
+    PaperDispatcher,
+    VerifiedQuote,
 )
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 from swift_autotrader.telegram.events import TelegramMessage

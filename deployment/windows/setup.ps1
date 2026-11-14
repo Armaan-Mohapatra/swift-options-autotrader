@@ -203,7 +203,7 @@ if ($LASTEXITCODE -ne 0 -or $uvVersion -notmatch '^uv 0\.10\.0(\s|$)') {
 }
 if ($NoDependencyDownload) { $env:UV_OFFLINE = '1' }
 try {
-    & $uvexe sync --project $release --locked --no-dev --extra telegram --no-editable --no-managed-python --python 3.11
+    & $uvexe sync --project $release --locked --no-dev --extra telegram --extra paper-market --no-editable --no-managed-python --python 3.11
     if ($LASTEXITCODE -ne 0) { throw 'Locked dependency installation failed.' }
 } finally {
     Remove-Item Env:UV_OFFLINE -ErrorAction SilentlyContinue

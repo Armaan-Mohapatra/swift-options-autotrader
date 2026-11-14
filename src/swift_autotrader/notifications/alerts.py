@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,7 +53,7 @@ class NotificationCenter:
         if not source_key or len(source_key) > 512:
             raise ValueError("invalid notification source identity")
         fingerprint = self._fingerprint(category, source_key, code)
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             db.execute(
                 "INSERT OR IGNORE INTO local_notifications(" 
                 "fingerprint,category,severity,source_code,created_at_utc) "
@@ -64,7 +65,7 @@ class NotificationCenter:
     def scan(self, *, at: datetime | None = None) -> int:
         """Idempotently surface engine alerts and Telegram connection failures."""
         now = at or datetime.now(UTC)
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             paper = db.execute(
                 "SELECT alert_id,code FROM paper_engine_alerts WHERE resolved=0"
             ).fetchall()
@@ -90,7 +91,7 @@ class NotificationCenter:
     def pending(self, limit: int = 50) -> list[LocalNotification]:
         if not 1 <= limit <= 100:
             raise ValueError("invalid notification limit")
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             rows = db.execute(
                 "SELECT category,severity,source_code,fingerprint,created_at_utc "
                 "FROM local_notifications WHERE acknowledged=0 "

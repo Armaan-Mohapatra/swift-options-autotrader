@@ -47,10 +47,12 @@ def test_manifest_rejects_unmanaged_paths(install: Path, tmp_path: Path) -> None
 
 def test_nonblocking_single_instance(install: Path) -> None:
     lock = install / "state" / "service.lock"
-    with single_instance(lock):
-        with pytest.raises(RuntimeError, match="already running"):
-            with single_instance(lock):
-                pass
+    with (
+        single_instance(lock),
+        pytest.raises(RuntimeError, match="already running"),
+        single_instance(lock),
+    ):
+        pass
     with single_instance(lock):
         pass
 

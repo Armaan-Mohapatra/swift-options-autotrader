@@ -7,8 +7,8 @@ import importlib.util
 import json
 import sqlite3
 import sys
-from decimal import Decimal, InvalidOperation
 from collections.abc import Sequence
+from decimal import Decimal, InvalidOperation
 
 from swift_autotrader import __version__
 from swift_autotrader.config import ConfigurationError, Settings
@@ -49,7 +49,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "mcp-diagnostics", help="Robinhood MCP diagnostics; offline unless --connect"
     )
     diagnostics.add_argument("--connect", action="store_true", help="Local manual OAuth only")
-    service = commands.add_parser("paper-dispatch-service", help="Opt-in Windows PAPER read-only data worker")
+    service = commands.add_parser(
+        "paper-dispatch-service", help="Opt-in Windows PAPER read-only data worker"
+    )
     service.add_argument("--root", required=True)
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")
@@ -87,6 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
         elif args.command == "paper-dispatch-service":
             from pathlib import Path
+
             from swift_autotrader.paper_service import run_paper_service
             asyncio.run(run_paper_service(config, Path(args.root)))
             payload = {"status": "PAPER_DISPATCH_STOPPED", "real_broker_writes_enabled": False}

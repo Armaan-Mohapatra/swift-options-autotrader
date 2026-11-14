@@ -10,13 +10,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import closing
 from dataclasses import dataclass
-from datetime import UTC, datetime, date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from time import monotonic
-from typing import Callable, Protocol
+from typing import Protocol
 
 from swift_autotrader.broker.paper import PaperBroker, PaperMarketQuote, as_utc, iso
 from swift_autotrader.notifications.alerts import NotificationCenter
@@ -158,7 +159,7 @@ class PaperDispatcher:
         backlog from starving fresh exits and entries. Decisions are later
         committed in original revision order for replay/idempotency.
         """
-        with sqlite3.connect(self.db_path) as db:
+        with closing(sqlite3.connect(self.db_path)) as db, db:
             pending = db.execute(
                 "SELECT r.revision_id,e.body,r.eligible_for_future_processing,"
                 "r.telegram_sent_at_utc,r.reply_to_message_id "
@@ -202,7 +203,7 @@ class PaperDispatcher:
         No persisted parser decision alone grants permission to execute. Each
         recovered signal must receive a fresh independent contract/quote review.
         """
-        with sqlite3.connect(self.db_path) as db:
+        with closing(sqlite3.connect(self.db_path)) as db, db:
             rows = db.execute(
                 "SELECT s.signal_id,s.underlying,s.option_right,s.strike,"
                 "s.expiration_date,e.body,r.telegram_sent_at_utc "
@@ -214,8 +215,10 @@ class PaperDispatcher:
                 "WHERE r.channel_id=? AND r.eligible_for_future_processing=1 "
                 "AND p.status='RECORDED' AND p.intent='ENTRY' "
                 "AND NOT EXISTS(SELECT 1 FROM order_intents o WHERE o.signal_id=s.signal_id) "
-                "AND NOT EXISTS(SELECT 1 FROM paper_engine_decisions d WHERE d.signal_id=s.signal_id) "
-                "AND NOT EXISTS(SELECT 1 FROM signal_close_requests c WHERE c.signal_id=s.signal_id) "
+                "AND NOT EXISTS(SELECT 1 FROM paper_engine_decisions d "
+                "WHERE d.signal_id=s.signal_id) "
+                "AND NOT EXISTS(SELECT 1 FROM signal_close_requests c "
+                "WHERE c.signal_id=s.signal_id) "
                 "ORDER BY m.first_revision_id DESC LIMIT 48",
                 (str(self.channel_id),),
             ).fetchall()
@@ -235,7 +238,7 @@ class PaperDispatcher:
     def _record_quote(self, quote: VerifiedQuote) -> None:
         evidence_hash = hashlib.sha256(quote.evidence_reference.encode("utf-8")).hexdigest()
         provenance = "SYNTHETIC" if quote.source == "SYNTHETIC_TEST" else "EXTERNAL_UNVERIFIED"
-        with sqlite3.connect(self.db_path) as db:
+        with closing(sqlite3.connect(self.db_path)) as db, db:
             db.execute(
                 "INSERT OR IGNORE INTO paper_market_observations("
                 "quote_id,underlying,option_right,strike,expiration_date,bid,ask,"
@@ -263,7 +266,7 @@ class PaperDispatcher:
         matcher = SignalMatcher(self.db_path, self.channel_id)
         # A follow-up replying to an unprocessed BUY must wait for that BUY
         # to be verified first. An already linked position is actionable.
-        with sqlite3.connect(self.db_path) as db:
+        with closing(sqlite3.connect(self.db_path)) as db, db:
             unlinked = {
                 int(row[0]) for row in db.execute(
                     "SELECT r.message_id FROM telegram_message_revisions r "
@@ -420,8 +423,9 @@ class PaperDispatcher:
             quotes=exit_quotes, allow_entries=bool(verified_signal_ids),
             allowed_signal_ids=frozenset(verified_signal_ids),
         )
-        status = "PAPER_ONLY" if verified_signal_ids or (not failed and snapshots) or decisions else (
-            "PAUSED_DATA_UNAVAILABLE" if failed else "PAPER_ONLY"
+        status = (
+            "PAPER_ONLY" if verified_signal_ids or (not failed and snapshots) or decisions
+            else ("PAUSED_DATA_UNAVAILABLE" if failed else "PAPER_ONLY")
         )
         return DispatchResult(status, len(decisions), cycle.entry_submissions,
                               cycle.close_submissions, fill_count,

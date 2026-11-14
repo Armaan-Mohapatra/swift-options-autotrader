@@ -98,7 +98,8 @@ def test_package_rejects_change_to_manifested_file_even_after_outer_digest_recom
     with zipfile.ZipFile(z) as archive, zipfile.ZipFile(new,'w') as out:
         for name in archive.namelist():
             raw=archive.read(name)
-            if name=='pyproject.toml':raw=b'changed'
+            if name == 'pyproject.toml':
+                raw = b'changed'
             out.writestr(name,raw)
     digest=hashlib.sha256(new.read_bytes()).hexdigest()
     with pytest.raises(RuntimeError,match='integrity'):

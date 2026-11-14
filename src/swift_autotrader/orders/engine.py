@@ -645,7 +645,10 @@ class PaperOrderEngine:
             for signal in candidates:
                 # An unrelated verified alert may never mark this signal
                 # permanently BLOCKED while its own quote remains missing.
-                if allowed_signal_ids is not None and str(signal["signal_id"]) not in allowed_signal_ids:
+                if (
+                    allowed_signal_ids is not None
+                    and str(signal["signal_id"]) not in allowed_signal_ids
+                ):
                     continue
                 if self._open_entry(signal, now):
                     entry_submissions += 1

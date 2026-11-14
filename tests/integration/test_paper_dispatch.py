@@ -226,7 +226,11 @@ def test_unverifiable_pending_entry_does_not_block_unrelated_full_exit(rig):
     assert response.exit_orders == 1
     with sqlite3.connect(path) as con:
         assert con.execute("SELECT COUNT(*) FROM signal_close_requests").fetchone()[0] == 1
-        assert con.execute("SELECT COUNT(*) FROM signal_parser_decisions p JOIN telegram_message_revisions r ON p.revision_id=r.revision_id WHERE r.message_id=102").fetchone()[0] == 0
+        assert con.execute(
+            "SELECT COUNT(*) FROM signal_parser_decisions p "
+            "JOIN telegram_message_revisions r ON p.revision_id=r.revision_id "
+            "WHERE r.message_id=102"
+        ).fetchone()[0] == 0
 
 
 def test_canceled_zero_fill_not_in_active_quote_set(rig):
@@ -250,7 +254,9 @@ def test_stale_unverified_source_never_blocks_fresh_eligible_entry(rig):
     result = cycle(rig)
     assert result.entry_orders == 1
     with sqlite3.connect(path) as con:
-        assert con.execute("SELECT COUNT(*) FROM order_intents WHERE side='BUY_TO_OPEN'").fetchone()[0] == 1
+        assert con.execute(
+            "SELECT COUNT(*) FROM order_intents WHERE side='BUY_TO_OPEN'"
+        ).fetchone()[0] == 1
 
 
 def test_thirteen_pending_entries_do_not_hit_provider_cap_forever(rig):
@@ -281,7 +287,9 @@ def test_market_data_failure_preserves_checkpoint_without_duplicate_buy(rig):
     feed.down = False
     assert cycle(rig).entry_orders == 0
     with sqlite3.connect(path) as con:
-        assert con.execute("SELECT COUNT(*) FROM order_intents WHERE side='BUY_TO_OPEN'").fetchone()[0] == 1
+        assert con.execute(
+            "SELECT COUNT(*) FROM order_intents WHERE side='BUY_TO_OPEN'"
+        ).fetchone()[0] == 1
 
 
 def test_exit_without_quote_persists_unresolved_exposure_alert(rig):
@@ -297,8 +305,19 @@ def test_exit_without_quote_persists_unresolved_exposure_alert(rig):
     assert result.exit_orders == 0
     with sqlite3.connect(path) as con:
         assert con.execute("SELECT COUNT(*) FROM signal_close_requests").fetchone()[0] == 1
-        assert con.execute("SELECT COUNT(*) FROM paper_engine_alerts WHERE code='EXIT_QUOTE_MISSING' AND resolved=0").fetchone()[0] > 0 or con.execute("SELECT COUNT(*) FROM paper_engine_alerts WHERE code='EXIT_PRICE_UNKNOWN' AND resolved=0").fetchone()[0] > 0
-        assert con.execute("SELECT COUNT(*) FROM order_intents WHERE side='SELL_TO_CLOSE'").fetchone()[0] == 0
+        assert (
+            con.execute(
+                "SELECT COUNT(*) FROM paper_engine_alerts "
+                "WHERE code='EXIT_QUOTE_MISSING' AND resolved=0"
+            ).fetchone()[0] > 0
+            or con.execute(
+                "SELECT COUNT(*) FROM paper_engine_alerts "
+                "WHERE code='EXIT_PRICE_UNKNOWN' AND resolved=0"
+            ).fetchone()[0] > 0
+        )
+        assert con.execute(
+            "SELECT COUNT(*) FROM order_intents WHERE side='SELL_TO_CLOSE'"
+        ).fetchone()[0] == 0
 
 
 def test_large_burst_is_bounded_and_drains_over_multiple_cycles(rig):
@@ -343,9 +362,17 @@ def test_due_cancellation_occurs_before_network_provider_request(rig):
         assert status in {"CANCELED", "CANCEL_PENDING"}
         raise MarketEvidenceUnavailable("Intentionally offline after deadline")
 
-    feed.snapshot = check_cancel_before_data
+    calls = 0
+
+    async def check_no_unnecessary_network(*args):
+        nonlocal calls
+        calls += 1
+        return await check_cancel_before_data(*args)
+
+    feed.snapshot = check_no_unnecessary_network
     result = cycle(rig)
-    assert result.status == "PAUSED_DATA_UNAVAILABLE"
+    assert result.status == "PAPER_ONLY"
+    assert calls == 0, "No active contracts remain after cancellation"
 
 # Independent chat-audit regressions against the PR #22 paper dispatcher.
 def test_pre_network_watchdog_does_not_create_false_exit_quote_alert(rig):
@@ -356,12 +383,15 @@ def test_pre_network_watchdog_does_not_create_false_exit_quote_alert(rig):
     clock.now += timedelta(seconds=2)
     assert cycle(rig).simulated_fills == 2
     ingest(rig, "SPY ALL OUT", 1102, reply=1101)
-    SignalMatcher(path, CHANNEL, catalog=StaticInstrumentCatalog([CONTRACT])).process_pending()
+    SignalMatcher(
+        path, CHANNEL, catalog=StaticInstrumentCatalog([CONTRACT])
+    ).process_pending()
     feed.bid, feed.ask = Decimal("1.35"), Decimal("1.40")
     assert cycle(rig).exit_orders == 1
     with sqlite3.connect(path) as db:
         false_alerts = db.execute(
-            "SELECT COUNT(*) FROM paper_engine_alerts WHERE code='EXIT_QUOTE_MISSING' AND resolved=0"
+            "SELECT COUNT(*) FROM paper_engine_alerts "
+            "WHERE code='EXIT_QUOTE_MISSING' AND resolved=0"
         ).fetchone()[0]
     assert false_alerts == 0, "A verified fresh quote was available during the cycle"
 
@@ -370,7 +400,9 @@ def test_crash_after_persisted_parser_decision_recovers_paper_entry(rig):
     from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog
     path, _, _, _, _ = rig
     ingest(rig, "SPY 680C 11/13 @ 1.20", 1101)
-    decided = SignalMatcher(path, CHANNEL, catalog=StaticInstrumentCatalog([CONTRACT])).process_pending()
+    decided = SignalMatcher(
+        path, CHANNEL, catalog=StaticInstrumentCatalog([CONTRACT])
+    ).process_pending()
     assert len(decided) == 1 and decided[0].status == "RECORDED"
     first = cycle(rig)
     assert first.entry_orders == 1, "Durable source signals need fresh evidence and replay"

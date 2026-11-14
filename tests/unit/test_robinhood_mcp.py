@@ -369,3 +369,119 @@ def test_get_option_orders_extracts_documented_next_url():
     fake.responses["get_option_orders"] = results
     assert wait(adapter.orders(ACCOUNT)) == []
     assert len(called) == 2 and called[-1]["cursor"] == "page2"
+
+
+def test_observed_robinhood_contract_and_nested_quote_shape():
+    """Sanitized public read-only option response schema, no account access."""
+    fake, adapter = setup()
+    fake.responses["get_option_chains"]["chains"][0] = {
+        "id": "synthetic-chain", "symbol": "SPY",
+        "expiration_dates": [CONTRACT.expiration.isoformat()],
+        "trade_value_multiplier": "100.0000",
+        "min_ticks": {"above_tick": "0.01", "below_tick": "0.01", "cutoff_price": "0.00"},
+    }
+    fake.responses["get_option_instruments"] = {"instruments": [{
+        "id": "synthetic-option-id", "chain_id": "synthetic-chain",
+        "chain_symbol": "SPY", "expiration_date": "2026-11-20",
+        "strike_price": "680.0000", "type": "call", "state": "active",
+        "tradability": "tradable", "trade_value_multiplier": "100.0000",
+        "min_ticks": {"above_tick": "0.01", "below_tick": "0.01", "cutoff_price": "0.00"},
+    }]}
+    fake.responses["get_option_quotes"] = {"results": [{"quote": {
+        "instrument_id": "synthetic-option-id", "bid_price": "1.12",
+        "ask_price": "1.25", "bid_size": 12, "ask_size": 21,
+        "updated_at": "2026-11-12T18:05:00.000000000Z",
+    }, "close": {"price": "1.20"}}]}
+    instrument = wait(adapter.resolve_instrument(CONTRACT))
+    assert instrument.minimum_tick == Decimal("0.01")
+    assert instrument.multiplier == 100
+    quote = wait(adapter.quote(instrument, now=datetime(2026, 11, 12, 18, 5, 10, tzinfo=UTC)))
+    assert quote.bid == Decimal("1.12") and quote.ask == Decimal("1.25")
+    assert quote.bid_size == 12 and quote.ask_size == 21
+    assert not any(name in WRITE_TOOLS for name, _ in fake.calls)
+
+
+def test_robinhood_fields_fail_closed_if_unknown_or_conflicting():
+    fake, adapter = setup()
+    item = fake.responses["get_option_instruments"]["instruments"][0]
+    item["trade_value_multiplier"] = "99.5"
+    with pytest.raises(MCPContractError):
+        wait(adapter.resolve_instrument(CONTRACT))
+    item["trade_value_multiplier"] = "100.0000"
+    item["min_ticks"] = {"above_tick": "0.05", "below_tick": "0.01",
+                         "cutoff_price": "3.00"}
+    assert wait(adapter.resolve_instrument(CONTRACT)).minimum_tick is None
+    item["min_ticks"]["below_tick"] = "0"
+    with pytest.raises(MCPContractError):
+        wait(adapter.resolve_instrument(CONTRACT))
+
+
+def test_opaque_option_pagination_cursor_is_accepted_without_url_following():
+    from swift_autotrader.broker.robinhood_mcp import _next_cursor
+
+    assert _next_cursor({"next": "cD03NjkuMDAwMA=="}) == "cD03NjkuMDAwMA=="
+    assert _next_cursor({"next": "https://api.example.test/?cursor=abc%3D%3D"}) == "abc=="
+    with pytest.raises(MCPContractError):
+        _next_cursor({"next": "./../../unsafe-path"})
+
+
+def test_pinned_mcp_account_refuses_permission_transfer_or_ambiguity():
+    fake, _ = setup()
+    adapter = RobinhoodMCPBroker(fake, approved_account_number=ACCOUNT.account_number)
+    assert wait(adapter.external_account()) == ACCOUNT
+    records = fake.responses["get_accounts"]["accounts"]
+    records[1]["agentic_allowed"] = False
+    records[0]["agentic_allowed"] = True
+    with pytest.raises(MCPContractError, match="no fallback"):
+        wait(adapter.external_account())
+    records[1]["agentic_allowed"] = True
+    with pytest.raises(MCPContractError):
+        wait(adapter.external_account())
+
+
+def test_pinned_mcp_account_blocks_other_account_rpc_before_transport():
+    fake, _ = setup()
+    adapter = RobinhoodMCPBroker(fake, approved_account_number=ACCOUNT.account_number)
+    other = MCPAccount("unrelated-readonly", True, "option_level_2")
+    with pytest.raises(MCPContractError, match="differs"):
+        wait(adapter.buying_power(other))
+    with pytest.raises(MCPContractError, match="differs"):
+        wait(adapter.review_order(other, INSTRUMENT, intent()))
+    assert not fake.calls
+    assert wait(adapter.buying_power(ACCOUNT)) == Decimal("1000.00")
+    assert fake.calls[-1][1]["account_number"] == ACCOUNT.account_number
+
+
+def test_sdk_snake_case_schema_survives_discovery_and_account_scoped_reads():
+    fake, _ = setup()
+    original_list = fake.list_tools
+
+    async def list_tools():
+        response = await original_list()
+        for tool in response.tools:
+            tool["input_schema"] = tool.pop("inputSchema")
+        return response
+
+    fake.list_tools = list_tools
+    adapter = RobinhoodMCPBroker(fake, approved_account_number=ACCOUNT.account_number)
+    assert wait(adapter.discover()).status == "READ_ONLY_SCHEMA_OK"
+    account = wait(adapter.external_account())
+    assert wait(adapter.buying_power(account)) == Decimal("1000.00")
+    assert wait(adapter.orders(account)) == []
+    assert wait(adapter.positions(account)) == []
+    assert not any(name in WRITE_TOOLS for name, _ in fake.calls)
+
+
+def test_sdk_conflicting_schema_aliases_are_rejected_before_broker_read():
+    fake, adapter = setup()
+    original_list = fake.list_tools
+
+    async def list_tools():
+        response = await original_list()
+        response.tools[0]["input_schema"] = {"properties": {"conflict": {}}}
+        return response
+
+    fake.list_tools = list_tools
+    with pytest.raises(MCPContractError, match="Conflicting"):
+        wait(adapter.discover())
+    assert fake.calls == []

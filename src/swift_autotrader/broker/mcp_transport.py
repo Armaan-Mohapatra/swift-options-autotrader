@@ -101,6 +101,7 @@ async def authenticated_mcp_client(
         write=connect_timeout_seconds, pool=connect_timeout_seconds,
     )
     async with httpx2.AsyncClient(auth=provider, timeout=timeout, trust_env=False) as http:
-        async with streamable_http_client(url, http_client=http) as transport:
-            async with Client(transport) as client:
-                yield client
+        # SDK v2 expects the unentered transport context manager.
+        transport = streamable_http_client(url, http_client=http)
+        async with Client(transport) as client:
+            yield client

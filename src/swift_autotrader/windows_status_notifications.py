@@ -11,8 +11,8 @@ import os
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from swift_autotrader.notifications.alerts import NotificationCenter
 from swift_autotrader.windows_runtime import _atomic_json, validate_install_root
@@ -71,7 +71,7 @@ def deliver_status_notifications(
                 body = json.loads(response.read(1024))
                 if body.get("ok") is not True:
                     raise RuntimeError("Telegram status not acknowledged")
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (urllib.error.URLError, TimeoutError):
             # Do not log exception or request URL; it contains bot token.
             raise RuntimeError("Telegram status transport unavailable") from None
         seen[entry.fingerprint] = entry.created_at_utc

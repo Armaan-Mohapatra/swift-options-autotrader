@@ -10,15 +10,17 @@ import os
 from pathlib import Path
 
 from swift_autotrader.broker.mcp_local_auth import (
-    LocalAuthNotConfigured, WindowsDPAPITokenStorage,
+    LocalAuthNotConfigured,
+    WindowsDPAPITokenStorage,
+    load_pinned_agentic_account,
 )
 from swift_autotrader.broker.mcp_paper_data import ExchangeCalendarsSession, MCPReadOnlyOptionData
 from swift_autotrader.broker.mcp_transport import OAuthEnrollment, authenticated_mcp_client
 from swift_autotrader.broker.robinhood_mcp import RobinhoodMCPBroker
 from swift_autotrader.config import Settings
 from swift_autotrader.orders.risk import RiskCeilings
-from swift_autotrader.windows_runtime import validate_install_root
 from swift_autotrader.paper_dispatch import PaperDispatcher, supervise_dispatch
+from swift_autotrader.windows_runtime import validate_install_root
 
 
 async def _forbid_interactive_authorization(*_args, **_kwargs):
@@ -52,6 +54,7 @@ async def run_paper_service(config: Settings, root: Path) -> None:
     path = token_file(root)
     if not path.is_file():
         raise LocalAuthNotConfigured("Enroll Robinhood read-only OAuth locally before enabling")
+    approved_account = load_pinned_agentic_account(root)
     enrollment = OAuthEnrollment(
         WindowsDPAPITokenStorage(path),
         _forbid_interactive_authorization,
@@ -60,7 +63,8 @@ async def run_paper_service(config: Settings, root: Path) -> None:
     )
     async with authenticated_mcp_client(enrollment) as client:
         provider = MCPReadOnlyOptionData(
-            RobinhoodMCPBroker(client), calendar=ExchangeCalendarsSession(),
+            RobinhoodMCPBroker(client, approved_account_number=approved_account),
+            calendar=ExchangeCalendarsSession(),
             contracts_per_signal=RiskCeilings.from_environment().contracts_per_signal,
         )
         dispatcher = PaperDispatcher(

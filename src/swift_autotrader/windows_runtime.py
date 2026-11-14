@@ -17,12 +17,13 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 
 from swift_autotrader.config import Settings
 
@@ -134,9 +135,13 @@ def backup_database(root: Path, *, keep: int = 7, target: Path | None = None) ->
         raise RuntimeError("Backup target must be a new file in managed backup directory")
     partial = target.with_suffix(".partial")
     try:
-        with closing(sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True, timeout=10)) as source:
-            with closing(sqlite3.connect(partial, timeout=10)) as destination:
-                source.backup(destination, pages=128, sleep=0.01)
+        with (
+            closing(sqlite3.connect(
+                f"file:{db.as_posix()}?mode=ro", uri=True, timeout=10
+            )) as source,
+            closing(sqlite3.connect(partial, timeout=10)) as destination,
+        ):
+            source.backup(destination, pages=128, sleep=0.01)
         _integrity(partial)
         os.replace(partial, target)
         _atomic_json(target.with_suffix(".sha256.json"), {
@@ -180,9 +185,13 @@ def restore_database(root: Path, backup: Path, *, confirm_offline: bool = False)
             backup_database(root, keep=100)
         staged = db.with_suffix(".restore.tmp")
         try:
-            with closing(sqlite3.connect(f"file:{backup.as_posix()}?mode=ro", uri=True)) as source:
-                with closing(sqlite3.connect(staged)) as dest:
-                    source.backup(dest)
+            with (
+                closing(sqlite3.connect(
+                    f"file:{backup.as_posix()}?mode=ro", uri=True
+                )) as source,
+                closing(sqlite3.connect(staged)) as dest,
+            ):
+                source.backup(dest)
             _integrity(staged)
             os.replace(staged, db)
         finally:

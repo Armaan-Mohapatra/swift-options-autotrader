@@ -1,7 +1,6 @@
 """No network: verify metadata-only opt-in notifications and local dedupe."""
 from __future__ import annotations
 
-import io
 import json
 from pathlib import Path
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from collections.abc import Iterable, Sequence
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -130,7 +131,7 @@ class SignalMatcher:
         if not 1 <= limit <= 5000:
             raise ValueError("limit must be between 1 and 5000")
         if revision_ids is None:
-            with self._connect() as con:
+            with closing(self._connect()) as con, con:
                 revisions = [
                     int(row[0]) for row in con.execute(
                         "SELECT r.revision_id FROM telegram_message_revisions r "
@@ -147,7 +148,7 @@ class SignalMatcher:
                 raise ValueError("Invalid bounded revision selection")
         outcomes: list[Decision] = []
         for revision_id in revisions:
-            with self._connect() as con:
+            with closing(self._connect()) as con, con:
                 con.execute("BEGIN IMMEDIATE")
                 if con.execute(
                     "SELECT 1 FROM signal_parser_decisions WHERE revision_id=?",
@@ -418,7 +419,7 @@ class SignalMatcher:
         )
 
     def statistics(self) -> dict[str, int]:
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             rows = con.execute(
                 "SELECT status,COUNT(*) FROM signal_parser_decisions WHERE channel_id=? "
                 "GROUP BY status", (self.channel_id,),

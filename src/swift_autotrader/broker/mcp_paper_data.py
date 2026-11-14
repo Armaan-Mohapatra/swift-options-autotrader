@@ -7,21 +7,26 @@ exchange-calendar session. No undocumented fallback or fake depth is allowed.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Protocol, Sequence
+from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from swift_autotrader.broker.robinhood_mcp import (
-    MCPContractError, RobinhoodMCPBroker, _rows,
+    MCPContractError,
+    RobinhoodMCPBroker,
+    _rows,
 )
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.risk import Preflight
 from swift_autotrader.paper_dispatch import (
-    MarketEvidenceUnavailable, MarketSnapshot, VerifiedQuote,
+    MarketEvidenceUnavailable,
+    MarketSnapshot,
+    VerifiedQuote,
 )
 from swift_autotrader.parser.rules import ParsedAlert
-from swift_autotrader.signals.lineage import StaticInstrumentCatalog, resolve_entry
 from swift_autotrader.signals.identity import OptionContract
+from swift_autotrader.signals.lineage import StaticInstrumentCatalog, resolve_entry
 
 
 class SessionCalendar(Protocol):

@@ -69,7 +69,9 @@ class WindowsDPAPITokenStorage:
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         cipher = win32crypt.CryptProtectData(
             json.dumps(current).encode("utf-8"), None, None, None, None, 0,
-        )[1]
+        )
+        if not isinstance(cipher, bytes) or not cipher:
+            raise LocalAuthNotConfigured("Unexpected DPAPI encryption result")
         fd, tmp_name = tempfile.mkstemp(dir=self.path.parent, prefix="oauth-", suffix=".tmp")
         try:
             with os.fdopen(fd, "wb") as stream:
@@ -92,6 +94,28 @@ class WindowsDPAPITokenStorage:
 
     async def set_client_info(self, client_info) -> None:
         self._set("client_info", client_info)
+
+
+def load_pinned_agentic_account(root: Path) -> str:
+    """Read only the operator-confirmed MCP account from the local DPAPI store."""
+    if os.name != "nt":
+        raise LocalAuthNotConfigured("Windows DPAPI required for account binding")
+    import win32crypt  # type: ignore[import-not-found]
+
+    path = root / "secrets" / "agentic_account.dpapi"
+    if (path.is_symlink() or not path.is_file() or
+            path.resolve().parent != (root / "secrets").resolve()):
+        raise LocalAuthNotConfigured("Confirm the exclusive MCP account locally first")
+    try:
+        clear = win32crypt.CryptUnprotectData(path.read_bytes(), None, None, None, 0)[1]
+        record = json.loads(clear)
+        account = record["account_number"]
+        if (record.get("version") != 1 or not isinstance(account, str)
+                or not 4 <= len(account) <= 256):
+            raise ValueError("Invalid account binding")
+    except Exception as exc:
+        raise LocalAuthNotConfigured("Exclusive MCP account binding invalid") from exc
+    return account
 
 
 class LoopbackAuthorization:

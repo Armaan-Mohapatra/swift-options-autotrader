@@ -79,11 +79,10 @@ def test_private_telegram_body_is_not_in_json_status(tmp_path):
                    "intent,status,reason,processed_at_utc) VALUES(?,'-1001234567000',"
                    "1,'IGNORE_NON_OPTION','IGNORED','COMMENTARY','2026-11-12T15:00:01Z')",
                    (rid,))
-    with local_server(path) as url:
-        with urlopen(url + "/api/status") as response:
-            result = response.read().decode()
-            assert "SYNTHETIC_SECRET_PAYLOAD_HIDE_ME" not in result
-            assert "COMMENTARY" in result
+    with local_server(path) as url, urlopen(url + "/api/status") as response:
+        result = response.read().decode()
+        assert "SYNTHETIC_SECRET_PAYLOAD_HIDE_ME" not in result
+        assert "COMMENTARY" in result
     internal = PaperAnalytics(path).snapshot(as_of=datetime.now(UTC))
     assert "text" not in internal["recent_messages"][0]
 
