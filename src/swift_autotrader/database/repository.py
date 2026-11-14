@@ -5,10 +5,10 @@ No database operation triggers a parser, order, broker request or Telegram send.
 """
 from __future__ import annotations
 
-from contextlib import closing
 import hashlib
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path

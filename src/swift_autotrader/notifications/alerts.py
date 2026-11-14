@@ -5,9 +5,9 @@ Swift text, authorization material, raw exceptions and account IDs are excluded.
 """
 from __future__ import annotations
 
-from contextlib import closing
 import hashlib
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
