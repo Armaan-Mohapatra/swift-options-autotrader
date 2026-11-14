@@ -5,6 +5,7 @@ No database operation triggers a parser, order, broker request or Telegram send.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 import sqlite3
@@ -95,7 +96,7 @@ class TelegramStore:
                 sort_keys=True, ensure_ascii=False,
             ).encode("utf-8")
         ).hexdigest()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             self._ensure_schema(conn)
             conn.execute("BEGIN IMMEDIATE")
             seen = conn.execute(
@@ -205,7 +206,7 @@ class TelegramStore:
         if state not in {"CONNECTED", "DISCONNECTED", "DEGRADED", "STOPPED"}:
             raise ValueError("unsupported health state")
         now = _iso(at)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             self._ensure_schema(conn)
             conn.execute(
                 "INSERT INTO telegram_runtime_state("
@@ -227,7 +228,7 @@ class TelegramStore:
     def health(self) -> dict[str, object]:
         if not self.db_path.is_file():
             return {"status": "NOT_INITIALIZED", "messages": 0, "revisions": 0}
-        with self._connect(read_only=True) as conn:
+        with closing(self._connect(read_only=True)) as conn:
             self._ensure_schema(conn)
             row = conn.execute(
                 "SELECT state, max_observed_message_id, last_received_at_utc,"

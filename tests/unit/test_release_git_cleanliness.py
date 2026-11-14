@@ -42,11 +42,11 @@ def _fixture_repo(tmp_path: Path) -> tuple[Path, str]:
     for name in required:
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
+        # Use exact LF bytes; Windows text-mode writes would silently add CRLF.
+        target.write_bytes((
             '[project]\nversion = "0.1.0"\n'
-            if name == "pyproject.toml" else "reviewed code\n",
-            encoding="utf-8",
-        )
+            if name == "pyproject.toml" else "reviewed code\n"
+        ).encode("utf-8"))
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     _git(root, "config", "user.email", "audit@example.test")
     _git(root, "config", "user.name", "Independent Release Audit")

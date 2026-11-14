@@ -343,9 +343,17 @@ def test_due_cancellation_occurs_before_network_provider_request(rig):
         assert status in {"CANCELED", "CANCEL_PENDING"}
         raise MarketEvidenceUnavailable("Intentionally offline after deadline")
 
-    feed.snapshot = check_cancel_before_data
+    calls = 0
+
+    async def check_no_unnecessary_network(*args):
+        nonlocal calls
+        calls += 1
+        return await check_cancel_before_data(*args)
+
+    feed.snapshot = check_no_unnecessary_network
     result = cycle(rig)
-    assert result.status == "PAUSED_DATA_UNAVAILABLE"
+    assert result.status == "PAPER_ONLY"
+    assert calls == 0, "No active contracts remain after cancellation"
 
 # Independent chat-audit regressions against the PR #22 paper dispatcher.
 def test_pre_network_watchdog_does_not_create_false_exit_quote_alert(rig):

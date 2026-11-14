@@ -5,6 +5,7 @@ retains option-premium precision. Standard US equity option multiplier is explic
 """
 from __future__ import annotations
 
+from contextlib import closing
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -93,7 +94,7 @@ class PaperAnalytics:
         timeline: list[tuple[str, str, Decimal]] = []
         positions: list[dict[str, object]] = []
         pending: list[dict[str, object]] = []
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             signals = db.execute(
                 "SELECT * FROM option_signals ORDER BY created_at_utc,signal_id"
             ).fetchall()

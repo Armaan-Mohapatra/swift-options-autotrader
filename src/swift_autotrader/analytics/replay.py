@@ -7,6 +7,7 @@ for fills, and observed timestamps must never lie in the future.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 import sqlite3
@@ -241,7 +242,7 @@ class HistoricalReplay:
                         raise ValueError("invalid quote evidence reference")
                     evidence_hash = (hashlib.sha256(source_reference.encode()).hexdigest()
                                      if source_reference else None)
-                    with sqlite3.connect(db_path) as db:
+                    with closing(sqlite3.connect(db_path)) as db, db:
                         db.execute(
                             "INSERT INTO paper_market_observations(" 
                             "quote_id,underlying,option_right,strike,expiration_date,bid,ask,"
@@ -283,7 +284,7 @@ class HistoricalReplay:
             clock.current = self.end
             engine.run_cycle(quotes={})
             report = PaperAnalytics(db_path, costs=costs).snapshot(as_of=self.end)
-            with sqlite3.connect(db_path) as db:
+            with closing(sqlite3.connect(db_path)) as db, db:
                 db.row_factory = sqlite3.Row
                 entry_orders = db.execute(
                     "SELECT o.requested_quantity,o.filled_quantity,o.state,"

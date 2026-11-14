@@ -5,6 +5,7 @@ pending to simulate a fill racing with the cancellation acknowledgment.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import sqlite3
 from dataclasses import dataclass
@@ -60,7 +61,7 @@ class PaperBroker:
         self.cancel_pending = cancel_pending
         if not self.db_path.is_file():
             raise RuntimeError("run migrate before creating paper broker")
-        with self._db() as db:
+        with closing(self._db()) as db, db:
             if not db.execute(
                 "SELECT 1 FROM sqlite_master WHERE name='paper_broker_orders'"
             ).fetchone():
@@ -90,7 +91,7 @@ class PaperBroker:
 
     def submit_order(self, intent: OrderIntent) -> BrokerOrderStatus:
         now = iso(self.clock())
-        with self._db() as db:
+        with closing(self._db()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             existing = db.execute(
                 "SELECT * FROM paper_broker_orders "
@@ -115,7 +116,7 @@ class PaperBroker:
         return self.get_order(intent.logical_order_id)
 
     def get_order(self, logical_order_id: str) -> BrokerOrderStatus:
-        with self._db() as db:
+        with closing(self._db()) as db, db:
             row = db.execute(
                 "SELECT * FROM paper_broker_orders WHERE logical_order_id=?", (logical_order_id,)
             ).fetchone()
@@ -141,7 +142,7 @@ class PaperBroker:
             )
 
     def cancel_order(self, logical_order_id: str) -> BrokerOrderStatus:
-        with self._db() as db:
+        with closing(self._db()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT state FROM paper_broker_orders WHERE logical_order_id=?",
@@ -156,7 +157,7 @@ class PaperBroker:
 
     def confirm_cancel(self, logical_order_id: str) -> BrokerOrderStatus:
         """Simulate independent broker confirmation, possibly after a late fill."""
-        with self._db() as db:
+        with closing(self._db()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "UPDATE paper_broker_orders SET state='CANCELED' "
@@ -173,7 +174,7 @@ class PaperBroker:
         if not fill_id or quantity <= 0 or not price.is_finite() or price <= 0:
             raise ValueError("invalid simulated fill")
         when = as_utc(at or self.clock())
-        with self._db() as db:
+        with closing(self._db()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT * FROM paper_broker_orders WHERE logical_order_id=?",
@@ -245,7 +246,7 @@ class PaperBroker:
             f"{quote.ask_size}|{iso(when)}"
         ).encode()).hexdigest()
         count = 0
-        with self._db() as db:
+        with closing(self._db()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             previous = db.execute(
                 "SELECT quote_fingerprint FROM paper_quote_observations WHERE quote_id=?",
@@ -310,7 +311,7 @@ class PaperBroker:
 
     def force_reject(self, logical_order_id: str, *, reason: str = "PAPER_REJECTION") -> None:
         """Explicit test-only rejection, before fills; never fabricate success."""
-        with self._db() as db:
+        with closing(self._db()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT state FROM paper_broker_orders WHERE logical_order_id=?",
@@ -325,7 +326,7 @@ class PaperBroker:
 
     def close_session(self) -> int:
         """Simulate exchange GFD cancellation before hour expiry; no resubmission."""
-        with self._db() as db:
+        with closing(self._db()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "UPDATE paper_broker_orders SET state='CANCELED' "
