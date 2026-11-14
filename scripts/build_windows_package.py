@@ -64,7 +64,7 @@ def _commit(source: Path) -> str:
             ["git", "-C", str(source), "rev-parse", "HEAD"],
             capture_output=True, text=True, check=True, timeout=10,
         ).stdout.strip()
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError):
         raise RuntimeError("Source is not a verified Git checkout") from None
     if not re.fullmatch(r"[0-9a-f]{40}", result):
         raise RuntimeError("Cannot verify full Git source commit")

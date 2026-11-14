@@ -7,12 +7,12 @@ for fills, and observed timestamps must never lie in the future.
 """
 from __future__ import annotations
 
-from contextlib import closing
 import hashlib
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tempfile import TemporaryDirectory

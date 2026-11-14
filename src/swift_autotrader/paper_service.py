@@ -10,15 +10,16 @@ import os
 from pathlib import Path
 
 from swift_autotrader.broker.mcp_local_auth import (
-    LocalAuthNotConfigured, WindowsDPAPITokenStorage,
+    LocalAuthNotConfigured,
+    WindowsDPAPITokenStorage,
 )
 from swift_autotrader.broker.mcp_paper_data import ExchangeCalendarsSession, MCPReadOnlyOptionData
 from swift_autotrader.broker.mcp_transport import OAuthEnrollment, authenticated_mcp_client
 from swift_autotrader.broker.robinhood_mcp import RobinhoodMCPBroker
 from swift_autotrader.config import Settings
 from swift_autotrader.orders.risk import RiskCeilings
-from swift_autotrader.windows_runtime import validate_install_root
 from swift_autotrader.paper_dispatch import PaperDispatcher, supervise_dispatch
+from swift_autotrader.windows_runtime import validate_install_root
 
 
 async def _forbid_interactive_authorization(*_args, **_kwargs):

@@ -17,12 +17,13 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 
 from swift_autotrader.config import Settings
 

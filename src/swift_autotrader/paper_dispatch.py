@@ -7,17 +7,17 @@ No real brokerage order/cancel interface is ever imported by this module.
 """
 from __future__ import annotations
 
-from contextlib import closing
 import asyncio
 import hashlib
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import closing
 from dataclasses import dataclass
-from datetime import UTC, datetime, date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from time import monotonic
-from typing import Callable, Protocol
+from typing import Protocol
 
 from swift_autotrader.broker.paper import PaperBroker, PaperMarketQuote, as_utc, iso
 from swift_autotrader.notifications.alerts import NotificationCenter

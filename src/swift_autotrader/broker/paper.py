@@ -5,14 +5,14 @@ pending to simulate a fill racing with the cancellation acknowledgment.
 """
 from __future__ import annotations
 
-from contextlib import closing
 import hashlib
 import sqlite3
+from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Callable
 
 from swift_autotrader.broker.base import BrokerFill, BrokerOrderState, BrokerOrderStatus
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
