@@ -23,7 +23,7 @@ Review the permanent source specification for exact options contract matching, o
 5. Add paper-only read-only MCP market dependencies and timezone definitions to `pyproject.toml`; Windows setup selects the `paper-market` extra as well as Telegram.
 
 ## REQUIRED before certification
-- **LOCKFILE BLOCKER:** First reviewer iteration of PR #24 has NOT incorporated the candidate updated `uv.lock`; old lock is inconsistent with `pyproject.toml`. The owner has the successful candidate from their isolated Windows test folder. Commit or regenerate exact `uv.lock` with independent `uv lock --check` verification; do not represent the current state as fully installable.
+- **LOCKFILE TRANSFER COMPLETE:** PR #24 now includes the exact independently Windows-resolved candidate `uv.lock`, Git blob `6d2472dffc4e4213444c711fbe7237393e7d05fe`, together with matching `pyproject.toml`, Git blob `a14e0a5bdc3f80153302eb3e3952c806d3e3026c`. These bytes are verified, but a fresh `uv lock --check` and full exact-HEAD Windows/Linux suite remain REQUIRED; this is not proof of runtime compatibility.
 - Re-run exact HEAD clean Windows Python 3.11/3.13: `uv sync --locked --extra dev --extra telegram --extra paper-market`, pytest, Ruff, compile, paper guard, lock audit and secret scan. Log zero failures without hiding skipped checks.
 - Run native disposable Windows `-NoSchedule` installer, package Git blob / SHA256 verifier, backup/restore/rollback/uninstall. No production environment.
 - Linux Python 3.11 and 3.13 exact HEAD matrix.
