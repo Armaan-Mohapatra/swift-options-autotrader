@@ -1,42 +1,52 @@
-# PR #24 — Independent AI review handoff
+# Swift AutoTrader — independent release-readiness review (2026-11-14)
 
-**Private repo:** `Armaan-Mohapatra/swift-options-autotrader`
-**Target:** DRAFT PR #24 on `audit/windows-certification-remediation-20261113`, based on DRAFT PR #23. Always resolve the CURRENT full PR head SHA; `main` is only a stub and earlier phases are unmerged.
+**Private repository:** `Armaan-Mohapatra/swift-options-autotrader`  
+**Current draft PR:** #24, `audit/windows-certification-remediation-20261113`  
+**Runtime source independently certified on Windows:** `8249d1fcd0864bf4283eef209998d862493c9f79`  
+**Follow-up CI-only commit:** `983d9c28e83902aec2dda6bdff5d2c43935b1179`  
+**Source-code difference between those two commits:** none. Only `.github/workflows/ci.yml` changed. Resolve latest PR head afresh during the independent review. `main` is an early stub and the development PRs are stacked/unmerged.
 
-## Safety restrictions
-Read-only code review first. Do not merge, tag, release, install, connect personal Telegram/Robinhood credentials, launch a worker, modify Phoenix/Kalshi, or submit/cancel real orders. Preserve `PAPER_ONLY=true`, `LIVE_ENABLED=false`, `ALLOW_BROKER_WRITES=false`.
+## Safety and scope
 
-Review the permanent source specification for exact options contract matching, original Swift entry limit, normal LOTTO eligibility, no ADD buys, NEW AVG metadata only, broker acceptance +3600-second unfilled cancellation, and 100% of matching filled quantity closed on explicit trim/sell signals.
+Read-only code review first. No merge, GitHub release, production installation, scheduled job, Telegram account authorization, real Robinhood order, broker cancellation, or changes to Phoenix/Kalshi without separate owner approval. Keep `PAPER_ONLY=true`, `LIVE_ENABLED=false`, `ALLOW_BROKER_WRITES=false`. Never upload or expose paid Telegram messages, session data, OAuth tokens or private account identifiers.
 
-## Owner's independent Windows baseline
-- Pre-remediation: Python 3.11 **382 passed / 62 failed**; 3.13 **382 passed / 62 failed**; 53 Ruff errors.
-- With candidate MCP + tzdata dependencies and safe Ruff changes on an *isolated local working tree*: **396 passed / 48 failed per version**; 34 Ruff errors.
-- 44 replay tests failed on SQLite temporary-file close `WinError 32`, associated CLI failure, 2 LF/CRLF Git-fixture mismatches, 1 dispatcher status expectation mismatch.
-- Independently tested local reconstructed source after the remaining fixes: **449 passed, 1 expected duplicate ZIP warning** (includes five adversarial lock-audit tests) on Linux Python 3.13. This is NOT an exact HEAD Windows pass, official CI or field validation.
-- GitHub Actions runner allocation blocked; do not claim CI green.
+Review `docs/PROJECT_SPEC.md` and `docs/SOURCE_SPRINT_PLAN.md` for exact option identity, Swift's original limit price, LOTTO support, no ADD purchases, NEW AVG as metadata only, broker-acceptance +3600-second entry timeout, and closing the user's entire actually filled position when any explicit trim/sell alert is received.
 
-## PR #24 changes
-1. Use explicit SQLite connection closing, preserving transaction commit and rollback, across simulated broker, Telegram store, signal matcher, replay, analytics, notifications, dispatcher.
-2. Git fixture writes exact LF bytes; strict Git source-blob/ZIP verifier remains unchanged.
-3. Cancellation regression expects PAPER_ONLY and no provider RPC once there are no active contracts, rather than falsely claiming an unavailable-data lookup occurred.
-4. Reviewed Ruff formatting/import/unused symbol fixes.
-5. Add paper-only read-only MCP market dependencies and timezone definitions to `pyproject.toml`; Windows setup selects the `paper-market` extra as well as Telegram.
+## Verified by owner-executed native Windows certification on exact runtime SHA
 
-## Additional independent checks completed in the local reconstructed environment
-- `uv lock --check --offline --python 3.13`: PASS against byte-identical candidate pyproject/lock.
-- `scripts/audit_lock.py`: PASS for 50 approved package identities and 711 hashed artifacts.
-- `scripts/scan_secrets.py`: PASS (heuristic only); `scripts/phase7_verify.py`: PASS (offline paper invariants, not release certification).
-- Full Linux Python 3.13 pytest: 449 passed, one intentionally duplicate ZIP warning. These checks are NOT a native Windows retest nor a complete exact-GitHub-SHA runner matrix.
+- **Windows Python 3.11.9:** 449 pytest passed, 0 failed; Ruff, compile, Phase 7 paper invariants, pinned dependency audit, secret heuristic, Telethon import, market-SDK import and CLI smoke passed.
+- **Windows Python 3.13.17:** 449 pytest passed, 0 failed; same associated checks passed.
+- `uv lock --check`, pinned dependency installation and package identity passed. Local package build and independent ZIP hash/manifest/source-commit verification passed.
+- An isolated, SHA-verified `-NoSchedule` installation using Python 3.11 succeeded. It installed 42 runtime packages, applied five database migrations, verified PAPER_ONLY configuration, and returned successful application smoke/health.
+- An online SQLite backup was created and its SHA-256 matched evidence. WAL checkpoint returned `(0,0,0)`; restoration returned `RESTORED`; SQLite `integrity_check` returned `ok`; application remained NOT_STARTED.
+- Protected data purge without explicit dual authorization was refused. Data-preserving uninstall succeeded, kept the database byte-identical, and left no scheduled task.
+- No live trading, real Telegram authentication, or real broker account operations occurred in these tests.
 
-## REQUIRED before certification
-- **LOCKFILE TRANSFER COMPLETE:** PR #24 now includes the exact independently Windows-resolved candidate `uv.lock`, Git blob `6d2472dffc4e4213444c711fbe7237393e7d05fe`, together with matching `pyproject.toml`, Git blob `a14e0a5bdc3f80153302eb3e3952c806d3e3026c`. These bytes are verified, but a fresh `uv lock --check` and full exact-HEAD Windows/Linux suite remain REQUIRED; this is not proof of runtime compatibility.
-- Re-run exact HEAD clean Windows Python 3.11/3.13: `uv sync --locked --extra dev --extra telegram --extra paper-market`, pytest, Ruff, compile, paper guard, lock audit and secret scan. Log zero failures without hiding skipped checks.
-- Run native disposable Windows `-NoSchedule` installer, package Git blob / SHA256 verifier, backup/restore/rollback/uninstall. No production environment.
-- Linux Python 3.11 and 3.13 exact HEAD matrix.
-- Audit ordering, idempotency and cancellation/fill race, data freshness and fail-closed behavior. Verify actual official MCP SDK response fields and legitimate Telegram authorization only in a separately approved local field test; synthetic mocks and successful import checks do not prove API compatibility.
-- Review third-party package license/security for any new dependency.
+These are console/log results executed on the owner's Windows laptop, not independently recreated by the reviewing AI. No complete official GitHub Actions CI results are claimed.
 
-## Return an evidence-based independent verdict
-Latest full PR head SHA; precise files/lines; critical/high/medium/low findings; executed commands and test counts by OS/Python; ZIP hashes; blockers; `GO` or `NO-GO`. Default remains **NO-GO** until every release gate is verified.
+## Additional independent Linux review on exact Windows runtime source SHA
 
-This project is private. Another AI may read it only through the owner's authorized GitHub connection or a sanitized, directly shared review bundle. Never publish paid Swift source, broker credentials, local sessions, private channel IDs or personal data.
+- Linux CPython 3.13.5: **449 pytest passed, 0 failed**, 1 warning using locally available Python dependencies (not the full pinned environment).
+- Source compilation passed; lock inventory verified **50 packages and 711 hashed artifacts**; heuristic secret scan and offline paper-only invariant script passed.
+- `uv lock --check --offline --python 3.13` passed.
+- The full pinned `uv sync --offline --extra dev --extra telegram --extra paper-market` was **blocked** because a locked tzdata wheel is not available in the offline dependency cache. This is a test-environment limitation, NOT a passing full Linux dependency matrix.
+- No Linux Python 3.11 full test run has been completed here.
+
+## CI workflow correction
+
+The PR workflow previously omitted `--extra paper-market`, unlike the Windows certification. CI-only commit `983d9c28e83902aec2dda6bdff5d2c43935b1179` corrected all nine uv commands and added fail-closed env variables for broker writes, live mode, paper dispatch and Telegram. This change has **not** produced a green GitHub Actions run. Existing runner-allocation/billing restrictions should be checked by the owner before triggering hosted jobs.
+
+## Highest-priority independent review requests
+
+1. **Actual MCP contract and read-only OAuth feasibility (blocking pilot):** Verify official Robinhood MCP endpoint/tool names, response schema and permissions. The paper data provider expects exact year-resolved options, 100x multiplier, tick size, bid/ask/depth, option quote timestamps, external account permissions, buying power, and read-only order review. Public overview may not guarantee all fields. A syntactically imported SDK does not prove this works. Do not bypass missing evidence or use undocumented fallback.
+2. **Security/code review (blocking release):** inspect broker-write guards, fail-closed data freshness, dispatch watchdog, REST timeouts, event/order deduplication, cancel/fill race, SQLite transaction handling, replay lookahead, local secrets/DPAPI, log redaction and package ZIP integrity. Report exact file/line findings with reproducible tests.
+3. **Linux Python 3.11 and 3.13 exact-source matrix:** run pinned locked dependencies, Ruff, compilation, all 449 tests, lock audit, paper-only invariants and secret checks. Report exact OS/Python, package hashes, test counts and skips. Do not conflate global-dependency Linux passes with fully pinned Linux certification.
+4. **Owner-authorized read-only Telegram field test:** on the owner's Windows user account only, verify legitimate Swift channel access, exact signed peer identity, new/edit/reply/reconnect/restart and parser coverage, and no outgoing Telegram/source-channel messages.
+5. **Operational pilot on a separate approved installation:** monitor paper-only behavior during real market sessions, including missed/stale quotes, watch-dog cancellations, opportunity coverage, data-provider throttling, CPU/RAM/disk use and data integrity. Do not claim simulated P&L is live-executable P&L.
+6. **Code-only rollback across two compatible installed versions:** pending a second safe release; a first-ever installation cannot exercise previous-release rollback. Also test data recovery with synthetic sentinel rows to prove logical preservation beyond SQLite integrity.
+
+## Release decision
+
+**NO-GO for unattended broker-connected paper execution or a production release.** Local Windows implementation and basic recovery gates passed, but official read-only provider schema, authorized field data, Linux locked-dependency matrix, independent security review, and forward paper validation remain unresolved. Keep PR draft, do not merge, and do not infer profitability.
+
+For any second-AI audit, provide authorized private GitHub access or a sanitized archive from this exact PR, and require a separate evidence-backed GO/NO-GO report.
