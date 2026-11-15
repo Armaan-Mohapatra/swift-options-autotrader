@@ -1,0 +1,309 @@
+--- a/src/swift_autotrader/app.py
++++ b/src/swift_autotrader/app.py
+@@ -23,6 +23,7 @@
+     parser = argparse.ArgumentParser(prog="swift-autotrader")
+     commands = parser.add_subparsers(dest="command", required=True)
+     commands.add_parser("smoke", help="Side-effect-free health check")
++    commands.add_parser("mvp-review", help="Offline MVP status; never starts workers or contacts broker")
+     commands.add_parser("config-check", help="Validate fail-closed settings")
+     commands.add_parser("dry-run", help="Paper-only diagnostics; never place orders")
+     commands.add_parser("migrate", help="Explicitly initialize/migrate local SQLite DB")
+@@ -66,6 +67,10 @@
+     supervisor_cmd.add_argument("--root", default=None, help="Managed install root directory")
+     supervisor_cmd.add_argument("--once", action="store_true", help="Run a single worker check cycle and exit")
+     args = parser.parse_args(argv)
++    if args.command == "mvp-review":
++        from swift_autotrader.mvp_review import review_status
++        print(json.dumps(review_status(frozenset(commands.choices)), sort_keys=True))
++        return 0
+     try:
+         config = Settings.from_env()
+         if args.command == "smoke":
+--- /dev/null
++++ b/src/swift_autotrader/mvp_review.py
+@@ -0,0 +1,33 @@
++"""Offline evidence inventory; no network, local account data, or activation."""
++from __future__ import annotations
++
++
++def review_status(commands: frozenset[str]) -> dict[str, object]:
++    return {
++        "status": "REVIEW_ONLY_NOT_LIVE_CERTIFIED",
++        "owner_policy": {
++            "standing_intent_for_eligible_swift_alerts": True,
++            "broker_approval_independently_required": True,
++            "default_contracts": 1,
++            "lotto_eligible": True,
++            "average_down": False,
++            "partial_exit_means_full_owned_exit": True,
++            "slippage_tolerance_pct": "10",
++            "daily_loss_basis": "netted_realized_price_pnl",
++            "broker_fees_in_current_loss_measure": False,
++            "current_repository_loss_default_usd": "500",
++            "proposed_aggregate_ceiling_usd": "10000",
++            "live_limits_activated": False,
++            "mobile_bot_required_for_mvp": False,
++            "advanced_automatic_restart_required_for_mvp": False,
++        },
++        "cli": {"live_dispatch_registered": "live-dispatch" in commands,
++                "paper_dispatch_registered": "paper-dispatch-service" in commands},
++        "unverified": ["broker_approval_and_lifecycle", "production_launcher",
++                       "production_installation", "native_windows_acceptance",
++                       "live_journal_identity_and_restart_reconciliation"],
++        "broker_contacted": False,
++        "workers_started": False,
++        "real_order_submission": False,
++        "live_certified": False,
++    }
+--- a/src/swift_autotrader/orders/slippage.py
++++ b/src/swift_autotrader/orders/slippage.py
+@@ -1,9 +1,9 @@
+ """Intelligent slippage and limit price resolution for live option entries.
+ 
+ When a live alert arrives from SwiftTrades:
+-- If the current Ask <= Alert Limit: We submit at Alert Limit (or Ask) for immediate fill.
++- If the current Ask <= Alert Limit: We submit at Alert Limit (or Ask) as a limit; a fill is not guaranteed.
+ - If Alert Limit < current Ask <= Alert Limit * (1 + tolerance): Price moved slightly;
+-  we submit at the Ask to ensure the entry actually fills instead of getting starved.
++  the limit can be adjusted within the ceiling; fills are not guaranteed.
+ - If current Ask > Alert Limit * (1 + tolerance): Price ran away; reject with SLIPPAGE_EXCEEDED.
+ """
+ from __future__ import annotations
+@@ -35,6 +35,9 @@
+     Raises:
+         SlippageExceededError if current ask exceeds alert_limit + max_slippage_pct.
+     """
++    if not all(isinstance(v, Decimal) and v.is_finite() for v in
++               (alert_limit, current_ask, tick, max_slippage_pct)):
++        raise ValueError("Prices and tick must be positive and finite; tolerance must be finite")
+     if alert_limit <= 0 or current_ask <= 0 or tick <= 0:
+         raise ValueError("Prices and tick must be positive and finite")
+ 
+@@ -47,16 +50,14 @@
+         )
+ 
+     # If current ask is at or below alert limit, resting limit at alert_limit is safe and fills
+-    if current_ask <= alert_limit:
+-        target = alert_limit
+-    else:
+-        # Round current ask up to the nearest valid tick
+-        ticks = (current_ask / tick).to_integral_value(rounding=ROUND_UP)
+-        target = ticks * tick
++    # Always enforce the tick grid, including when the quote is below the alert.
++    target = (max(alert_limit, current_ask) / tick).to_integral_value(rounding=ROUND_UP) * tick
+ 
+     # Ensure the tick-rounded target doesn't breach the max allowed
+     if target > max_allowed_price:
+         # Fall back to highest tick at or below max_allowed_price
+         target = (max_allowed_price // tick) * tick
+ 
++    if target <= 0 or target > max_allowed_price or target % tick != 0:
++        raise SlippageExceededError("No positive valid tick within slippage ceiling")
+     return target
+--- a/src/swift_autotrader/orders/risk.py
++++ b/src/swift_autotrader/orders/risk.py
+@@ -85,7 +85,15 @@
+     preflight: Preflight, *, outstanding_usd: Decimal, active_signals: int,
+     cumulative_realized_loss_usd: Decimal = Decimal("0"),
+ ) -> str | None:
+-    """Never inspect current option price; exact Swift price survives unchanged."""
++    """Check supplied candidate limit and evidence without submitting any order."""
++    if (not isinstance(limit, Decimal) or not limit.is_finite() or limit <= 0
++            or type(quantity) is not int or quantity < 1):
++        return "INVALID_ORDER_INPUT"
++    if (not isinstance(outstanding_usd, Decimal) or not outstanding_usd.is_finite()
++            or outstanding_usd < 0 or type(active_signals) is not int or active_signals < 0
++            or not isinstance(cumulative_realized_loss_usd, Decimal)
++            or not cumulative_realized_loss_usd.is_finite() or cumulative_realized_loss_usd < 0):
++        return "INVALID_RISK_EVIDENCE"
+     if not preflight.instrument_verified or preflight.contract != contract:
+         return "INSTRUMENT_NOT_VERIFIED"
+     if not preflight.options_permission:
+--- a/src/swift_autotrader/supervisor.py
++++ b/src/swift_autotrader/supervisor.py
+@@ -125,6 +125,9 @@
+         cfg = config
+         is_live = cfg.is_live if cfg is not None else (self.env.get("LIVE_ENABLED", "").lower() == "true")
+ 
++        if is_live:
++            raise RuntimeError("Live supervisor entry point not integrated or certified")
++
+         # 1. Dashboard worker
+         self.spawn("dashboard", [python_bin, "-m", "swift_autotrader", "paper-dashboard"])
+ 
+@@ -132,16 +135,15 @@
+         self.spawn("telegram", [python_bin, "-m", "swift_autotrader", "telegram-listen"])
+ 
+         # 3. Execution dispatcher worker (live vs paper)
+-        if is_live:
+-            self.spawn("live-dispatch", [python_bin, "-m", "swift_autotrader", "live-dispatch"])
+-        else:
+-            self.spawn(
+-                "paper-dispatch",
+-                [python_bin, "-m", "swift_autotrader", "paper-dispatch-service", "--root", str(self.root)],
+-            )
+-
+-        # 4. Mobile emergency kill switch worker
+-        self.spawn("kill-switch", [python_bin, "-m", "swift_autotrader", "kill-switch-listener"])
++        self.spawn(
++            "paper-dispatch",
++            [python_bin, "-m", "swift_autotrader", "paper-dispatch-service", "--root", str(self.root)],
++        )
++
++        # Mobile service is optional for MVP; require a configured paper-mode bot.
++        if (cfg is not None and cfg.kill_switch_enabled
++                and cfg.kill_switch_telegram_bot_token and cfg.kill_switch_telegram_chat_id):
++            self.spawn("kill-switch", [python_bin, "-m", "swift_autotrader", "kill-switch-listener"])
+ 
+         return list(self.workers.keys())
+ 
+@@ -191,8 +193,11 @@
+ 
+     def write_health_heartbeat(self, state: str = "HEALTHY", as_of_utc: str | None = None) -> None:
+         """Atomically write health heartbeat JSON document."""
+-        health_file = self.root / "state" / "health.json"
++        # Do not overwrite the installed receiver's authoritative health file.
++        health_file = self.root / "state" / "supervisor-health.json"
+         health_file.parent.mkdir(parents=True, exist_ok=True)
++        if state == "HEALTHY" and (not self.workers or any(p.poll() is not None for p in self.workers.values())):
++            state = "DEGRADED"
+         doc = {
+             "status": state,
+             "as_of_utc": as_of_utc or datetime.now(UTC).isoformat(),
+@@ -251,9 +256,11 @@
+             pass
+ 
+         if once:
+-            supervisor.check_workers()
+-            supervisor.write_health_heartbeat(state="HEALTHY")
+-            supervisor.stop_all()
++            try:
++                supervisor.check_workers()
++            finally:
++                supervisor.stop_all()
++                supervisor.write_health_heartbeat(state="STOPPED")
+             return
+ 
+         supervisor.running = True
+--- a/tests/unit/test_supervisor.py
++++ b/tests/unit/test_supervisor.py
+@@ -124,7 +124,7 @@
+     manager.spawn("live-dispatch", ["disp"])
+ 
+     manager.write_health_heartbeat(state="HEALTHY", as_of_utc="2026-11-16T14:30:00Z")
+-    health_file = managed_root / "state" / "health.json"
++    health_file = managed_root / "state" / "supervisor-health.json"
+     assert health_file.is_file()
+ 
+     data = json.loads(health_file.read_text(encoding="utf-8"))
+@@ -240,13 +240,14 @@
+     manager_paper = make_supervisor(managed_root)
+     manager_paper.env["LIVE_ENABLED"] = "false"
+     workers_paper = manager_paper.setup_default_workers()
+-    assert set(workers_paper) == {"dashboard", "telegram", "paper-dispatch", "kill-switch"}
++    assert set(workers_paper) == {"dashboard", "telegram", "paper-dispatch"}
+ 
+     # Live mode
+     manager_live = make_supervisor(managed_root)
+     manager_live.env["LIVE_ENABLED"] = "true"
+-    workers_live = manager_live.setup_default_workers()
+-    assert set(workers_live) == {"dashboard", "telegram", "live-dispatch", "kill-switch"}
++    with pytest.raises(RuntimeError, match="not integrated or certified"):
++        manager_live.setup_default_workers()
++    assert not manager_live.workers
+ 
+ 
+ def test_heartbeat_contains_restart_counts(managed_root: Path) -> None:
+@@ -256,7 +257,7 @@
+     manager.failures["w1"] = 2
+     manager.write_health_heartbeat(state="HEALTHY")
+ 
+-    health_file = managed_root / "state" / "health.json"
++    health_file = managed_root / "state" / "supervisor-health.json"
+     data = json.loads(health_file.read_text(encoding="utf-8"))
+     assert data["restart_counts"]["w1"] == 2
+ 
+@@ -269,8 +270,8 @@
+         return make_supervisor(root)
+ 
+     run_supervisor(managed_root, once=True, supervisor_factory=mock_factory)
+-    health_file = managed_root / "state" / "health.json"
++    health_file = managed_root / "state" / "supervisor-health.json"
+     assert health_file.is_file()
+     data = json.loads(health_file.read_text(encoding="utf-8"))
+-    assert data["status"] == "HEALTHY"
+-
++    assert data["status"] == "STOPPED"
++
+--- a/tests/integration/test_live_e2e_scenarios.py
++++ b/tests/integration/test_live_e2e_scenarios.py
+@@ -618,7 +618,7 @@
+ 
+     # 2. Write initial healthy state
+     pm.write_health_heartbeat(state="HEALTHY")
+-    health_file = tmp_path / "state" / "health.json"
++    health_file = tmp_path / "state" / "supervisor-health.json"
+     data = json.loads(health_file.read_text(encoding="utf-8"))
+     assert data["status"] == "HEALTHY"
+     assert all(data["workers"].values())
+--- a/tests/unit/test_order_engine_live.py
++++ b/tests/unit/test_order_engine_live.py
+@@ -391,3 +391,11 @@
+     simulate_closed_trade(db_path, broker, 501, CONTRACT, Decimal("1.00"), Decimal("2.50"), now)
+ 
+     assert engine.cumulative_realized_daily_loss(now) == Decimal("0")
++
++
++def test_mvp_net_realized_loss_offsets_winners(engine_rig):
++    db_path, clock, broker, engine, _, _ = engine_rig
++    now = clock()
++    for mid, buy, sell in ((601,"1","5"),(602,"4","0.50"),(603,"4","0.50")):
++        simulate_closed_trade(db_path, broker, mid, CONTRACT, Decimal(buy), Decimal(sell), now)
++    assert engine.cumulative_realized_daily_loss(now) == Decimal("300")
+--- /dev/null
++++ b/tests/unit/test_mvp_review.py
+@@ -0,0 +1,44 @@
++from decimal import Decimal as D
++import json
++import pytest
++from swift_autotrader.app import main
++from swift_autotrader.orders.slippage import resolve_live_entry_limit, SlippageExceededError
++from tests.unit.test_live_risk import CONTRACT, make_ceilings, make_preflight
++from swift_autotrader.orders.risk import rejection_reason
++from tests.unit.test_supervisor import make_supervisor
++
++@pytest.mark.parametrize('index,value',[(0,'NaN'),(1,'Infinity'),(2,'0'),(3,'NaN'),(3,'Infinity')])
++def test_invalid_slippage_values(index,value):
++    args=list(map(D,['1.20','1.15','0.05','10']));args[index]=D(value)
++    with pytest.raises(ValueError):resolve_live_entry_limit(*args)
++
++def test_tick_grid_below_alert():
++    assert resolve_live_entry_limit(D('1.22'),D('1.20'),D('0.05'))==D('1.25')
++
++def test_no_valid_positive_tick():
++    with pytest.raises(SlippageExceededError):resolve_live_entry_limit(D('.01'),D('.01'),D('.05'))
++
++@pytest.mark.parametrize('limit,qty',[(D('NaN'),1),(D('0'),1),(D('1'),0),(D('1'),True),(D('-1'),1)])
++def test_invalid_candidate_order(limit,qty):
++    assert rejection_reason(CONTRACT,limit,qty,make_ceilings(),make_preflight(),outstanding_usd=D('0'),active_signals=0)=='INVALID_ORDER_INPUT'
++
++@pytest.mark.parametrize('change',[{'outstanding_usd':D('NaN')},{'outstanding_usd':D('-1')},{'active_signals':-1},{'active_signals':True},{'cumulative_realized_loss_usd':D('Infinity')}])
++def test_invalid_risk_evidence(change):
++    args={'outstanding_usd':D('0'),'active_signals':0,'cumulative_realized_loss_usd':D('0'),**change}
++    assert rejection_reason(CONTRACT,D('1'),1,make_ceilings(),make_preflight(),**args)=='INVALID_RISK_EVIDENCE'
++
++def test_review_is_offline_and_does_not_read_configuration(monkeypatch,capsys):
++    from swift_autotrader.config import Settings
++    def fail(*a,**k):raise AssertionError('must not load local credentials')
++    monkeypatch.setattr(Settings,'from_env',fail)
++    assert main(['mvp-review'])==0
++    report=json.loads(capsys.readouterr().out)
++    assert report['status']=='REVIEW_ONLY_NOT_LIVE_CERTIFIED' and report['real_order_submission'] is False
++    assert report['cli']['live_dispatch_registered'] is False
++
++def test_supervisor_cannot_claim_healthy_or_overwrite_receiver(tmp_path):
++    state=tmp_path/'state';state.mkdir();rx=state/'health.json';rx.write_text('receiver evidence')
++    sup=make_supervisor(tmp_path);proc=sup.spawn('worker',['mock']);proc.crash(1)
++    sup.write_health_heartbeat()
++    assert rx.read_text()=='receiver evidence'
++    assert json.loads((state/'supervisor-health.json').read_text())['status']=='DEGRADED'
