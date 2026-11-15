@@ -1,0 +1,7 @@
+TRUSTED_TEST_RUNNER_INITIALIZED
+NETWORK_GUARD_SELF_TEST_PASS
+EXTERNAL_EXECUTION_GUARD_SELF_TEST_PASS
+SQLITE_GUARD_SELF_TEST_PASS
+.................................                                        [100%]
+33 passed, 1 warning in 1.67s
+
