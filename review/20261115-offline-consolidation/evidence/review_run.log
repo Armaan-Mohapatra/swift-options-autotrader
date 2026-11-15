@@ -1,0 +1,20 @@
+fixture_adaptation []
+TRUSTED_TEST_RUNNER_INITIALIZED
+NETWORK_GUARD_SELF_TEST_PASS
+EXTERNAL_EXECUTION_GUARD_SELF_TEST_PASS
+SQLITE_GUARD_SELF_TEST_PASS
+........................................................................ [ 38%]
+........................................................................ [ 76%]
+............................................                             [100%]
+188 passed, 1 warning in 2.06s
+
+{
+  "status": "REVIEW_ONLY_TESTS_PASSED",
+  "test_count": 188,
+  "platform": "linux",
+  "manifest_sha256": "53ffa50b463c490e899ac67190bb3fbc3a0afeb984e3d308ad0fa3d74667e27e",
+  "production_modified": false,
+  "live_certified": false,
+  "real_order_submission": false,
+  "receipt": "/tmp/swift-review-only-zu9k8_ex/REVIEW-RECEIPT.json"
+}
