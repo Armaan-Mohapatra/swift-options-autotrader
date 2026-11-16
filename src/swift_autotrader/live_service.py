@@ -36,6 +36,7 @@ from swift_autotrader.broker.robinhood_mcp import (
 from swift_autotrader.config import ConfigurationError, Settings
 from swift_autotrader.live_dispatch import LiveDispatcher, LiveDispatchResult
 from swift_autotrader.orders.risk import RiskCeilings
+from swift_autotrader.orders.exposure_state import has_active_exposure
 
 log = logging.getLogger("swift_autotrader.live_service")
 
@@ -99,19 +100,7 @@ def write_stop_marker_durable(root: Path, reason: str = "STOP", filename: str = 
 
 def _has_active_orders_or_positions(db_path: Path) -> bool:
     """Check if there are any non-terminal orders or open positions in the database."""
-    import sqlite3
-    from contextlib import closing
-    with closing(sqlite3.connect(str(db_path))) as con:
-        pending_orders = con.execute(
-            "SELECT count(*) FROM order_intents WHERE state NOT IN ('FILLED', 'CANCELED', 'REJECTED')"
-        ).fetchone()[0]
-        open_positions = con.execute(
-            "SELECT count(*) FROM option_signals s "
-            "JOIN order_intents o ON o.signal_id=s.signal_id "
-            "WHERE o.side='BUY_TO_OPEN' AND o.state IN ('ACCEPTED','PARTIALLY_FILLED','FILLED') "
-            "AND s.state NOT IN ('CLOSED','REJECTED','CANCELED')"
-        ).fetchone()[0]
-        return bool(pending_orders > 0 or open_positions > 0)
+    return has_active_exposure(db_path)
 
 
 def write_live_health(
