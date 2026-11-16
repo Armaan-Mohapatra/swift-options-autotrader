@@ -273,6 +273,8 @@ class PaperOrderEngine:
             raise ReconciliationError("broker logical order mismatch")
         if status.state is BrokerOrderState.UNKNOWN:
             self._alert(signal_id, order_id, "UNKNOWN_BROKER_ORDER", now)
+            if self.live_mode:
+                raise ReconciliationError("Unresolved live order; reconcile before continuing")
             return
         if (status.contract != self._contract(row) or
             status.side is not OrderSide(row["side"]) or
@@ -358,11 +360,13 @@ class PaperOrderEngine:
                  iso(accepted) if accepted else None, expiry, order_id),
             )
             if status.broker_order_id:
-                db.execute(
+                cursor = db.execute(
                     "UPDATE order_intents SET broker_order_id=? WHERE logical_order_id=? "
                     "AND (broker_order_id IS NULL OR broker_order_id=?)",
                     (status.broker_order_id, order_id, status.broker_order_id),
                 )
+                if cursor.rowcount != 1:
+                    raise ReconciliationError("Conflicting durable broker order identity")
             if status.state.value != fresh["state"]:
                 db.execute(
                     "INSERT INTO order_state_events(logical_order_id,state,"
@@ -568,7 +572,8 @@ class PaperOrderEngine:
             pending_rows = db.execute(
                 "SELECT signal_id, requested_quantity, filled_quantity, limit_price "
                 "FROM order_intents WHERE side='BUY_TO_OPEN' "
-                "AND state IN ('INTENT_RECORDED', 'SUBMITTED', 'ACCEPTED', 'CANCEL_PENDING')"
+                "AND state IN ('INTENT_RECORDED', 'SUBMITTED', 'ACCEPTED', "
+                "'PARTIALLY_FILLED', 'CANCEL_PENDING', 'UNKNOWN', 'ALERT_REQUIRED')"
             ).fetchall()
             pending_total = Decimal("0")
             for row in pending_rows:
@@ -671,15 +676,16 @@ class PaperOrderEngine:
             self._block(sid, "EXPIRED_OPTION", now)
             return False
         with self._db() as db:
-            dup_contract = db.execute(
-                "SELECT 1 FROM option_signals s JOIN order_intents o ON o.signal_id=s.signal_id "
-                "WHERE s.underlying=? AND s.option_right=? AND s.strike=? AND s.expiration_date=? "
+            possible_duplicates = db.execute(
+                "SELECT s.strike FROM option_signals s JOIN order_intents o ON o.signal_id=s.signal_id "
+                "WHERE s.underlying=? AND s.option_right=? AND s.expiration_date=? "
                 "AND s.signal_id != ? AND s.state NOT IN ('CLOSED','REJECTED') "
-                "AND o.side='BUY_TO_OPEN' AND o.state NOT IN ('REJECTED','CANCELED')",
-                (contract.underlying, contract.right.value, str(contract.strike),
+                "AND o.side='BUY_TO_OPEN' "
+                "AND (o.state NOT IN ('REJECTED','CANCELED') OR o.filled_quantity > 0)",
+                (contract.underlying, contract.right.value,
                  contract.expiration.isoformat(), sid),
-            ).fetchone()
-        if dup_contract:
+            ).fetchall()
+        if any(Decimal(row["strike"]) == contract.strike for row in possible_duplicates):
             self._block(sid, "DUPLICATE_CONTRACT_POSITION", now)
             return False
         price = Decimal(signal["original_limit"])
