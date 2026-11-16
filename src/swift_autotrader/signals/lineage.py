@@ -217,6 +217,7 @@ class SignalMatcher:
         if not bool(row["eligible_for_future_processing"]):
             if alert.intent != SignalIntent.CLOSE_100_PERCENT:
                 return self._result(row, alert, "SKIPPED", "NON_ACTIONABLE_TELEGRAM_HISTORY")
+            from swift_autotrader.orders.exposure_state import has_owned_or_pending_entry
             # Delayed exit instructions (CLOSE_100_PERCENT) are permitted ONLY if a matching
             # active Swift position is held, preventing freshness rules from stranding positions.
             sid_check, _ = self._find_signal(con, row, alert)
@@ -224,12 +225,7 @@ class SignalMatcher:
                 return self._result(row, alert, "SKIPPED", "NON_ACTIONABLE_TELEGRAM_HISTORY")
             has_open_position = False
             try:
-                open_buy = con.execute(
-                    "SELECT 1 FROM order_intents WHERE signal_id=? AND side='BUY_TO_OPEN' "
-                    "AND state IN ('ACCEPTED', 'PARTIALLY_FILLED', 'FILLED')",
-                    (sid_check,),
-                ).fetchone()
-                if open_buy is not None:
+                if has_owned_or_pending_entry(con, sid_check):
                     already_closed = con.execute(
                         "SELECT 1 FROM signal_close_requests WHERE signal_id=?",
                         (sid_check,),
