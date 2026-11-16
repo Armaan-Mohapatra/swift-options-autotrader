@@ -22,6 +22,7 @@ from swift_autotrader.broker.base import (
     BrokerOrderState,
     BrokerOrderStatus,
 )
+from swift_autotrader.broker.review_validation import exact_contract_quantity, reconciled_processed_quantity
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.risk import Preflight
 from swift_autotrader.signals.identity import OptionContract
@@ -542,6 +543,11 @@ class RobinhoodMCPBroker:
         """Submit a real option order to Robinhood via Agentic MCP."""
         if not self.allow_live_writes:
             raise BrokerWritesDisabledError("Live order placement is not authorized")
+        # A local write flag is not proof of provider permission. An absent,
+        # ambiguous, approval-required or warned review must not reach placement.
+        review = await self.review_order(account, instrument, intent)
+        if not review.unblocked:
+            raise MCPContractError("Provider review did not permit unattended submission")
         payload = self.future_order_payload(account, instrument, intent)
         return await self._call("place_option_order", payload)
 
@@ -632,6 +638,8 @@ class RobinhoodMCPBroker:
         if expected_broker_order_id and broker_id != expected_broker_order_id:
             raise MCPContractError("Order broker ID does not match persisted intent")
         ref = order.get("ref_id")
+        if ref is None and not expected_broker_order_id:
+            raise MCPContractError("Broker order identity is unverified")
         if ref is not None:
             expected_ref = RobinhoodMCPBroker.future_order_payload(
                 MCPAccount("unused", True, "option_level_2"),
@@ -654,39 +662,35 @@ class RobinhoodMCPBroker:
         }
         if order.get("state") not in status_map:
             raise MCPContractError("Unknown option order state")
-        raw_filled = order.get("filled_quantity")
-        if raw_filled is None:
-            raw_filled = order.get("processed_quantity", 0)
-        if isinstance(raw_filled, bool):
-            raise MCPContractError("Missing filled quantity")
         try:
-            d_filled = Decimal(str(raw_filled))
-            if not d_filled.is_finite() or d_filled < 0:
-                raise MCPContractError("Filled quantity must be finite nonnegative")
-            quantity = int(d_filled)
-        except (InvalidOperation, ValueError) as exc:
-            raise MCPContractError("Missing or malformed filled quantity") from exc
+            quantity = reconciled_processed_quantity(order)
+            if "quantity" in order:
+                if exact_contract_quantity(order["quantity"], minimum=1) != intent.quantity:
+                    raise MCPContractError("Broker requested quantity mismatch")
+            elif ref is None:
+                raise MCPContractError("Broker-ID-only response lacks requested quantity")
+            if "price" in order:
+                if _money(order["price"], "order limit") != intent.limit_price:
+                    raise MCPContractError("Broker order limit mismatch")
+            elif ref is None:
+                raise MCPContractError("Broker-ID-only response lacks limit price")
+        except ValueError as exc:
+            raise MCPContractError("Missing, fractional or conflicting broker quantity") from exc
         if quantity > intent.quantity:
             raise MCPContractError("Unexpected overfill")
         raw_fills = order.get("fills") or order.get("executions") or []
+        if not isinstance(raw_fills, list):
+            raise MCPContractError("Broker fills must be a collection")
         fills: list[BrokerFill] = []
         accepted = order.get("accepted_at") or order.get("created_at") or order.get("updated_at")
         for item in raw_fills:
             f = _obj(item)
-            f_qty_raw = f.get("quantity")
-            if isinstance(f_qty_raw, bool):
-                raise MCPContractError("Invalid broker fill quantity")
             try:
-                f_qty_d = Decimal(str(f_qty_raw))
-                if not f_qty_d.is_finite() or f_qty_d < 1:
-                    raise MCPContractError("Invalid broker fill quantity")
-                f_qty = int(f_qty_d)
-            except (InvalidOperation, ValueError) as exc:
+                f_qty = exact_contract_quantity(f.get("quantity"), minimum=1)
+            except ValueError as exc:
                 raise MCPContractError("Invalid broker fill quantity") from exc
-            f_time = (
-                f.get("timestamp") or f.get("executed_at") or f.get("created_at")
-                or order.get("last_transaction_at") or accepted
-            )
+            # An order-level timestamp is not proof of when an individual fill occurred.
+            f_time = f.get("timestamp") or f.get("executed_at") or f.get("created_at")
             fills.append(BrokerFill(
                 _identifier(f.get("id")), f_qty,
                 _money(f.get("price"), "fill_price"),
@@ -787,7 +791,9 @@ class RobinhoodLiveBroker:
         self._broker_id_map: dict[str, str] = {}  # logical_order_id -> broker_order_id
         self._last_status: dict[str, BrokerOrderStatus] = {}
         self._resolved_instruments: dict[OptionContract, MCPInstrument] = {}
-        if self.db_path and self.db_path.is_file():
+        if self.db_path is not None:
+            if not self.db_path.is_file():
+                raise MCPContractError("Durable order journal is missing")
             self._load_broker_id_map()
 
     def _load_broker_id_map(self) -> None:
@@ -800,22 +806,27 @@ class RobinhoodLiveBroker:
                 ).fetchall():
                     if row[0] and row[1]:
                         self._broker_id_map[str(row[0])] = str(row[1])
-        except Exception:
-            pass
+        except Exception as exc:
+            raise MCPContractError("Unable to load durable broker order identities") from exc
 
     def _persist_broker_id(self, logical_order_id: str, broker_order_id: str) -> None:
-        if not self.db_path or not self.db_path.is_file():
+        if self.db_path is None:
+            # Legacy in-memory test callers only: the managed service supplies a journal.
             return
+        if not self.db_path.is_file():
+            raise MCPContractError("Durable order journal is missing")
         import sqlite3
         from contextlib import closing
         try:
             with closing(sqlite3.connect(str(self.db_path))) as db, db:
-                db.execute(
+                cursor = db.execute(
                     "UPDATE order_intents SET broker_order_id=? WHERE logical_order_id=? AND (broker_order_id IS NULL OR broker_order_id=?)",
                     (broker_order_id, logical_order_id, broker_order_id),
                 )
-        except Exception:
-            pass
+                if cursor.rowcount != 1:
+                    raise MCPContractError("Durable order identity missing or conflicting")
+        except sqlite3.Error as exc:
+            raise MCPContractError("Unable to persist durable broker order identity") from exc
 
     def _load_intent_from_db(self, logical_order_id: str) -> OrderIntent | None:
         if not self.db_path or not self.db_path.is_file():
@@ -841,8 +852,8 @@ class RobinhoodLiveBroker:
                     return OrderIntent(
                         row[0], row[1], contract, OrderSide(row[2]), int(row[3]), Decimal(str(row[4]))
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            raise MCPContractError("Unable to reconstruct durable order intent") from exc
         return None
 
     def _run(self, coro):
@@ -916,8 +927,10 @@ class RobinhoodLiveBroker:
                 matches = [row for row in rows if row.get("ref_id") == expected_ref]
                 if len(matches) == 1 and matches[0].get("id"):
                     broker_id = str(matches[0]["id"])
+                    status = self.mcp.normalize_order(matches[0], intent, expected_broker_order_id=broker_id)
                     self._broker_id_map[logical_order_id] = broker_id
-                    return self.mcp.normalize_order(matches[0], intent, expected_broker_order_id=broker_id)
+                    self._persist_broker_id(logical_order_id, broker_id)
+                    return status
             return await self.mcp.reconcile_order(
                 self.account, intent, broker_order_id=broker_id
             )
