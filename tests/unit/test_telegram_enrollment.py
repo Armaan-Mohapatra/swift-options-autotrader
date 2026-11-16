@@ -40,7 +40,7 @@ def test_interactive_enrollment_happy_path(tmp_path: Path) -> None:
     assert success is True
     assert client.authorized is True
     assert session_path.is_file()
-    if hasattr(os, "chmod"):
+    if os.name == "posix":
         mode = stat.S_IMODE(session_path.stat().st_mode)
         assert mode == 0o600
 
