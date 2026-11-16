@@ -118,6 +118,7 @@ async def run_live_service(
     root: Path,
     *,
     once: bool = False,
+    single_entry: bool = False,
     interval_seconds: float = 5.0,
     stop_event: asyncio.Event | None = None,
     client_override=None,
@@ -217,6 +218,7 @@ async def run_live_service(
             provider,
             config,
             clock=clock,
+            single_entry=single_entry,
         )
 
         write_live_health(managed_root, "STARTING", simulated=client_override is not None)
@@ -241,6 +243,15 @@ async def run_live_service(
                 last_result = await dispatcher.run_once()
                 write_live_health(managed_root, "RUNNING", result=last_result,
                                   simulated=client_override is not None)
+
+                if single_entry and last_result.entry_orders_submitted >= 1:
+                    log.info("Supervised single-entry placed (%s); stopping live service", last_result.entry_orders_submitted)
+                    stop_marker = managed_root / "state" / "stop.request"
+                    try:
+                        stop_marker.write_text("STOP", encoding="ascii")
+                    except OSError:
+                        pass
+                    break
 
                 if once:
                     break

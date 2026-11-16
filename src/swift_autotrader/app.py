@@ -61,6 +61,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     live_cmd.add_argument("--root", required=True, help="Managed install root directory")
     live_cmd.add_argument("--once", action="store_true", help="Run a single live cycle and exit")
+    live_cmd.add_argument(
+        "--single-entry",
+        action="store_true",
+        help="Supervised single-trade acceptance: place at most 1 entry order, write stop marker, and halt",
+    )
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")
     enroll = commands.add_parser("telegram-enroll", help="Interactive Telegram MTProto session enrollment")
@@ -73,6 +78,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     supervisor_cmd = commands.add_parser("supervisor", help="Cross-platform daemon supervisor")
     supervisor_cmd.add_argument("--root", default=None, help="Managed install root directory")
     supervisor_cmd.add_argument("--once", action="store_true", help="Run a single worker check cycle and exit")
+    supervisor_cmd.add_argument(
+        "--single-entry",
+        action="store_true",
+        help="Run live supervisor in supervised single-entry mode",
+    )
     pin_cmd = commands.add_parser("pin-account", help="Pin confirmed Robinhood MCP account locally using Windows DPAPI")
     pin_cmd.add_argument("--root", required=True, help="Managed install root directory")
     pin_cmd.add_argument("--account-number", required=True, help="Confirmed Robinhood account number")
@@ -124,7 +134,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = {"status": "PAPER_DISPATCH_STOPPED", "real_broker_writes_enabled": False}
         elif args.command == "live-dispatch":
             from swift_autotrader.live_service import run_live_service
-            asyncio.run(run_live_service(config, Path(args.root), once=args.once))
+
+            asyncio.run(
+                run_live_service(
+                    config,
+                    Path(args.root),
+                    once=args.once,
+                    single_entry=getattr(args, "single_entry", False),
+                )
+            )
             payload = {"status": "LIVE_DISPATCH_STOPPED", "real_broker_writes_enabled": config.allow_broker_writes}
         elif args.command == "paper-replay":
             from swift_autotrader.analytics.replay import replay_from_file
@@ -248,7 +266,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             from swift_autotrader.supervisor import run_supervisor
 
             root_path = Path(args.root) if args.root else Path.cwd()
-            run_supervisor(root_path, config=config, once=args.once)
+            run_supervisor(
+                root_path,
+                config=config,
+                once=args.once,
+                single_entry=getattr(args, "single_entry", False),
+            )
             payload = {"status": "SUPERVISOR_STOPPED"}
         elif args.command == "pin-account":
             from swift_autotrader.broker.mcp_local_auth import pin_agentic_account

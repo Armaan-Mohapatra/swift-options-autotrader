@@ -69,6 +69,7 @@ class LiveDispatcher:
         *,
         clock: Callable[[], datetime] | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
+        single_entry: bool = False,
     ):
         if not mcp_broker.allow_live_writes:
             raise PermissionError("LiveDispatcher requires mcp_broker.allow_live_writes=True")
@@ -79,6 +80,7 @@ class LiveDispatcher:
         self.provider = provider
         self.settings = settings
         self.clock = clock or (lambda: datetime.now(UTC))
+        self.single_entry = single_entry
 
         # Risk limits derived from settings
         self.limits = RiskCeilings(
@@ -133,6 +135,8 @@ class LiveDispatcher:
             # 2. Get pending Telegram updates and active positions
             matcher = SignalMatcher(self.db_path, self.channel_id)
             entries, active = self._get_pending_and_active(now)
+            if self.single_entry and entries:
+                entries = entries[:1]
 
             # 3. Fetch live market data snapshot from Robinhood MCP
             snapshot = None
@@ -167,7 +171,8 @@ class LiveDispatcher:
                 self.preflight.instruments.update(snapshot.instruments)
                 catalog = StaticInstrumentCatalog(snapshot.instruments.keys())
                 matcher.catalog = catalog
-                decisions = matcher.process_pending(limit=200)
+                limit = 1 if self.single_entry else 200
+                decisions = matcher.process_pending(limit=limit)
 
                 for contract, quote in snapshot.quotes.items():
                     inst_check = snapshot.instruments.get(contract)
@@ -177,12 +182,19 @@ class LiveDispatcher:
                         )
 
             # 5. Run the live execution cycle off-thread
+            allowed_signal_ids = None
+            if self.single_entry and decisions:
+                valid_sids = [d.signal_id for d in decisions if d.signal_id and d.status == "RECORDED"]
+                if valid_sids:
+                    allowed_signal_ids = frozenset([valid_sids[0]])
+
             cycle = await asyncio.to_thread(
                 self.engine.run_cycle,
                 quotes=exit_quotes,
                 entry_quotes=snapshot.quotes if snapshot else None,
                 allow_entries=True,
                 process_closes=True,
+                allowed_signal_ids=allowed_signal_ids,
             )
 
             # Dynamically calculate realized daily loss today

@@ -129,15 +129,24 @@ switch ($Action) {
         }
     }
     'Migrate' {
+        $python = Get-SwiftPython $root
         if ($Mode -eq 'Live') {
-            Set-SwiftEnvironment -InstallRoot $root -Mode 'LIVE'
+            $liveDb = Join-Path $root 'data\live.sqlite3'
+            $origDb = $env:DB_PATH
+            try {
+                $env:DB_PATH = $liveDb
+                & $python -m swift_autotrader migrate
+                if ($LASTEXITCODE -ne 0) { throw 'Production database migration failed.' }
+            } finally {
+                $env:DB_PATH = $origDb
+            }
+            [ordered]@{ status = 'MIGRATED'; mode = 'Live'; db = $liveDb } | ConvertTo-Json
         } else {
             Set-SwiftEnvironment -InstallRoot $root -Mode 'PAPER_ONLY'
+            & $python -m swift_autotrader migrate
+            if ($LASTEXITCODE -ne 0) { throw 'Paper database migration failed.' }
+            [ordered]@{ status = 'MIGRATED'; mode = 'Paper'; db = $env:DB_PATH } | ConvertTo-Json
         }
-        $python = Get-SwiftPython $root
-        & $python -m swift_autotrader migrate
-        if ($LASTEXITCODE -ne 0) { throw 'Database migration failed.' }
-        [ordered]@{ status = 'MIGRATED'; mode = $Mode; db = $env:DB_PATH } | ConvertTo-Json
     }
     'Backup' {
         if ($PSCmdlet.ShouldProcess($root, 'Write SQLite online backup')) {

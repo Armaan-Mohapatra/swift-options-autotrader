@@ -236,6 +236,63 @@ def test_live_dispatch_operational_cycle(managed_live_env) -> None:
         assert conn.execute("SELECT count(*) FROM order_intents").fetchone()[0] == 0
 
 
+def test_live_dispatch_single_entry_bounded_acceptance(managed_live_env) -> None:
+    """Verify single_entry mode strictly places at most 1 order and halts when multiple alerts exist."""
+    root, settings, _, live_db = managed_live_env
+
+    # Ingest TWO separate entry alerts
+    store = TelegramStore(live_db, settings.telegram_channel_id)
+    now = datetime(2026, 11, 16, 15, 0, 0, tzinfo=UTC)
+    for mid, body in [(301, "BTO SPY 680C 11/20 @ 1.20"), (302, "BTO QQQ 500C 11/20 @ 2.00")]:
+        msg = TelegramMessage(
+            channel_id=settings.telegram_channel_id,
+            message_id=mid,
+            sent_at_utc=now,
+            received_at_utc=now,
+            body=body,
+            kind=EventKind.NEW,
+            origin=EventOrigin.LIVE,
+        )
+        store.ingest(msg, session_started_at_utc=now - timedelta(minutes=5))
+
+    clock = FakeClock(now)
+    fake_mcp = StatefulFakeMCP(
+        account_number=settings.robinhood_mcp_account,
+        buying_power=Decimal("10000.00"),
+        clock=clock,
+    )
+
+    @asynccontextmanager
+    async def mock_client_ctx():
+        yield fake_mcp
+
+    # Execute with single_entry=True
+    asyncio.run(
+        run_live_service(
+            settings,
+            root,
+            once=True,
+            single_entry=True,
+            client_override=mock_client_ctx(),
+            clock=clock,
+            calendar=OpenMarketCalendar(),
+        )
+    )
+
+    # CRITICAL: Verify EXACTLY 1 order submitted despite 2 eligible candidates
+    assert len(fake_mcp.orders) == 1
+    assert next(iter(fake_mcp.orders.values()))["quantity"] == "1"
+
+    # Verify stop marker was automatically written to latch the service closed
+    stop_file = root / "state" / "stop.request"
+    assert stop_file.is_file()
+    assert stop_file.read_text(encoding="ascii") == "STOP"
+
+    # Verify recorded in live.sqlite3: exactly 1 order intent
+    with sqlite3.connect(live_db) as conn:
+        assert conn.execute("SELECT count(*) FROM order_intents").fetchone()[0] == 1
+
+
 # ============================================================================
 # Rehearsal 3: Dashboard Availability & Reporting in LIVE Mode
 # ============================================================================

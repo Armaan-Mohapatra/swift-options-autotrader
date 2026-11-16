@@ -78,6 +78,7 @@ class ServiceSupervisor:
         spawn_fn: Callable[..., Any] | None = None,
         max_restarts: int = MAX_RESTARTS,
         restart_window_seconds: float = RESTART_WINDOW_SECONDS,
+        single_entry: bool = False,
     ) -> None:
         self.root = Path(root)
         self.env = dict(os.environ if env is None else env)
@@ -86,6 +87,7 @@ class ServiceSupervisor:
         self.spawn_fn = spawn_fn
         self.max_restarts = max_restarts
         self.restart_window_seconds = restart_window_seconds
+        self.single_entry = single_entry
 
         self.workers: dict[str, Any] = {}
         self.crash_times: dict[str, list[float]] = {}
@@ -149,10 +151,10 @@ class ServiceSupervisor:
             # 2. Telegram listener worker
             self.spawn("telegram", [python_bin, "-m", "swift_autotrader", "telegram-listen"])
             # 3. Live dispatch worker
-            self.spawn(
-                "live-dispatch",
-                [python_bin, "-m", "swift_autotrader", "live-dispatch", "--root", str(self.root)],
-            )
+            dispatch_cmd = [python_bin, "-m", "swift_autotrader", "live-dispatch", "--root", str(self.root)]
+            if self.single_entry:
+                dispatch_cmd.append("--single-entry")
+            self.spawn("live-dispatch", dispatch_cmd)
         else:
             # 1. Dashboard worker
             self.spawn("dashboard", [python_bin, "-m", "swift_autotrader", "paper-dashboard"])
@@ -269,6 +271,7 @@ def run_supervisor(
     config: Settings | None = None,
     *,
     once: bool = False,
+    single_entry: bool = False,
     poll_interval: float = 1.0,
     supervisor_factory: Callable[..., ServiceSupervisor] | None = None,
 ) -> None:
@@ -281,7 +284,7 @@ def run_supervisor(
         if supervisor_factory is not None:
             supervisor = supervisor_factory(target_root)
         else:
-            supervisor = ServiceSupervisor(target_root)
+            supervisor = ServiceSupervisor(target_root, single_entry=single_entry)
 
         # Keep a persistent local stop independent of the optional mobile bot.
         if any(os.path.lexists(target_root / "state" / marker)
