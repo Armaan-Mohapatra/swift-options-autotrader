@@ -45,7 +45,7 @@ from swift_autotrader.live_service import (
     run_live_service,
     write_stop_marker_durable,
 )
-from swift_autotrader.orders.engine import PaperOrderEngine
+from swift_autotrader.orders.engine import PaperOrderEngine, ReconciliationError
 from swift_autotrader.orders.risk import PaperPreflight, RiskCeilings
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 from swift_autotrader.signals.lineage import SignalMatcher
@@ -703,7 +703,8 @@ def test_competing_service_mutual_exclusion(managed_live_env) -> None:
             supervisor.run(max_cycles=1)
 
 
-def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_env) -> None:
+@pytest.mark.parametrize("echo_ref", [True, False])
+def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_env, echo_ref) -> None:
     """Verify uncertain brokerage outcomes do not cause duplicates and reconcile cleanly on restart."""
     _, settings, _, live_db = managed_live_env
     store = TelegramStore(live_db, settings.telegram_channel_id)
@@ -774,17 +775,39 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
         "fills": [],
         "executions": [],
     }
+    if not echo_ref:
+        # Real provider evidence may omit ref_id. Without a persisted broker ID,
+        # there is no safe identity match; never guess from symbol or price.
+        broker_order.pop("ref_id")
     fake_mcp.orders["rh_ord_recovered_980"] = broker_order
-    # Wire the broker_order_id into dispatcher live broker map
-    dispatcher.live_broker._broker_id_map[order_id] = "rh_ord_recovered_980"
-    dispatcher.live_broker._persist_broker_id(order_id, "rh_ord_recovered_980")
 
-    # 3. Next cycle (restart / reconciliation): reconciles without duplicate intent
-    res2 = asyncio.run(dispatcher.run_once())
-    assert res2.entry_orders_submitted == 0  # No new order submitted!
+    # Reconstruct ALL application-side objects from the durable database.
+    # Only the synthetic exchange survives; no broker ID injection.
+    del dispatcher, provider, mcp_broker
+    restarted_mcp = RobinhoodMCPBroker(
+        fake_mcp, approved_account_number=settings.robinhood_mcp_account,
+        allow_live_writes=True,
+    )
+    restarted = LiveDispatcher(
+        live_db, settings.telegram_channel_id, restarted_mcp, account,
+        MCPReadOnlyOptionData(restarted_mcp, calendar=OpenMarketCalendar()),
+        settings, clock=clock, single_entry=True,
+    )
+    if echo_ref:
+        assert asyncio.run(restarted.run_once()).entry_orders_submitted == 0
+    else:
+        with pytest.raises(ReconciliationError, match="Unresolved live order"):
+            asyncio.run(restarted.run_once())
 
+    assert sum(name == "place_option_order" for name, _args in fake_mcp.calls) == 1
     with sqlite3.connect(live_db) as conn:
-        all_intents = conn.execute("SELECT logical_order_id, state FROM order_intents").fetchall()
-        assert len(all_intents) == 1  # Still exactly 1 intent in DB
-        assert all_intents[0][1] == "ACCEPTED"  # Reconciled to ACCEPTED!
+        all_intents = conn.execute(
+            "SELECT logical_order_id,state,broker_order_id FROM order_intents"
+        ).fetchall()
+        assert len(all_intents) == 1
+        assert all_intents[0][0] == order_id
+        if echo_ref:
+            assert all_intents[0][1:] == ("ACCEPTED", "rh_ord_recovered_980")
+        else:
+            assert all_intents[0][1:] == ("INTENT_RECORDED", None)
 
