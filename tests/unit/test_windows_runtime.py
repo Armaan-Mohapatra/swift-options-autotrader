@@ -235,3 +235,77 @@ def test_backup_integrity_rejects_file_not_database(install: Path) -> None:
     first.write_bytes(b"not an sqlite database")
     with pytest.raises(RuntimeError, match="hash"):
         restore_database(install, first, confirm_offline=True)
+
+
+def test_notification_scan_works_without_telegram_secrets(install: Path, monkeypatch) -> None:
+    from swift_autotrader.config import Settings
+    from swift_autotrader import windows_runtime
+
+    session = install / "secrets/telegram.session"
+    session.write_bytes(b"synthetic")
+    env = {
+        "SWIFT_INSTALL_ROOT": str(install), "DB_PATH": str(install / "data/swift.sqlite3"),
+        "TELEGRAM_ENABLED": "true", "SWIFT_TELEGRAM_CHANNEL_ID": "-1001234567890",
+        "TELEGRAM_API_ID": "123", "TELEGRAM_API_HASH": "a" * 32,
+        "TELEGRAM_SESSION_PATH": str(session), "TELEGRAM_STATUS_BOT_TOKEN": "synthetic",
+        "KILL_SWITCH_TELEGRAM_BOT_TOKEN": "synthetic", "ROBINHOOD_MCP_ACCOUNT": "synthetic",
+    }
+    monkeypatch.chdir(install)
+    observed = []
+
+    def fake_run(argv, **kwargs):
+        scanned = kwargs["env"]
+        assert Settings.from_env(scanned).paper_only
+        assert not Settings.from_env(scanned).telegram_enabled
+        for key in ("TELEGRAM_API_HASH", "TELEGRAM_SESSION_PATH", "TELEGRAM_API_ID",
+                    "TELEGRAM_STATUS_BOT_TOKEN", "KILL_SWITCH_TELEGRAM_BOT_TOKEN",
+                    "ROBINHOOD_MCP_ACCOUNT"):
+            assert key not in scanned
+        observed.append(argv[-1])
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(windows_runtime.subprocess, "run", fake_run)
+    PaperSupervisor(install, env=env)._notify_scan()
+    assert observed == ["paper-notify-scan"]
+
+
+def test_paper_supervisor_rejects_fully_live_settings(install: Path, tmp_path: Path) -> None:
+    session = tmp_path / "synthetic.session"
+    session.write_bytes(b"synthetic")
+    env = {
+        "PAPER_ONLY": "false", "LIVE_ENABLED": "true", "ALLOW_BROKER_WRITES": "true",
+        "BROKER_BACKEND": "robinhood_mcp", "ROBINHOOD_MCP_ACCOUNT": "synthetic",
+        "DB_PATH": str(install / "data/swift.sqlite3"),
+        "TELEGRAM_ENABLED": "true", "SWIFT_TELEGRAM_CHANNEL_ID": "-1001234567890",
+        "TELEGRAM_API_ID": "123", "TELEGRAM_API_HASH": "a" * 32,
+        "TELEGRAM_SESSION_PATH": str(session),
+    }
+    with pytest.raises(PermissionError, match="PAPER supervisor"):
+        PaperSupervisor(install, env=env)
+
+
+def test_dead_worker_heartbeat_is_degraded(install: Path) -> None:
+    supervisor = PaperSupervisor(install, env={"DB_PATH": str(install / "data/swift.sqlite3")})
+    supervisor._heartbeat("RUNNING")
+    result = service_status(install)
+    assert result["status"] == "DEGRADED"
+    assert result["health_scope"] == "PROCESS_LIVENESS_ONLY"
+    assert result["live_startup_ready"] is False
+    assert result["workers"] == {"dashboard": False}
+
+
+@pytest.mark.parametrize("workers", [{}, {"dashboard": False}, {"dashboard": "true"}, None])
+def test_fresh_running_record_does_not_hide_missing_worker_evidence(install: Path, workers) -> None:
+    now = datetime.now(UTC)
+    (install / "state/health.json").write_text(json.dumps({
+        "status": "RUNNING", "as_of_utc": now.isoformat(), "workers": workers,
+    }), encoding="utf-8")
+    assert service_status(install, now=now)["status"] == "DEGRADED"
+
+
+def test_degraded_heartbeat_also_expires(install: Path) -> None:
+    old = datetime.now(UTC) - timedelta(minutes=3)
+    (install / "state/health.json").write_text(json.dumps({
+        "status": "DEGRADED", "as_of_utc": old.isoformat(),
+    }), encoding="utf-8")
+    assert service_status(install)["status"] == "STALE"
