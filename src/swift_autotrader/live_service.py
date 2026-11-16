@@ -33,10 +33,11 @@ from swift_autotrader.broker.robinhood_mcp import (
     RobinhoodLiveBroker,
     RobinhoodMCPBroker,
 )
-from swift_autotrader.config import ConfigurationError, Settings
+from swift_autotrader.config import ConfigurationError, Settings, validate_private_path
 from swift_autotrader.live_dispatch import LiveDispatcher, LiveDispatchResult
 from swift_autotrader.orders.risk import RiskCeilings
 from swift_autotrader.orders.exposure_state import has_active_exposure
+from swift_autotrader.orders.acceptance_scope import AcceptanceScope, load_acceptance_scope
 
 log = logging.getLogger("swift_autotrader.live_service")
 
@@ -159,6 +160,7 @@ async def run_live_service(
     client_override=None,
     clock=None,
     calendar: SessionCalendar | None = None,
+    acceptance_scope: AcceptanceScope | None = None,
 ) -> None:
     """Run production live execution dispatcher loop with complete safety validation."""
     config.validate()
@@ -200,6 +202,19 @@ async def run_live_service(
         if approved_account != pinned_account:
             write_live_health(managed_root, "FAILED")
             raise LocalAuthNotConfigured("Configured account differs from local account binding")
+        if single_entry:
+            # Exact local operator receipt required; symbol-only CLI flags
+            # do not authorize any real transaction. Never load from checkout.
+            if once:
+                raise LocalAuthNotConfigured("Single-entry lifecycle service cannot run with --once")
+            receipt = validate_private_path(
+                managed_root / "secrets" / "supervised-authorization.json",
+                install_root=managed_root, managed_name="supervised-authorization.json",
+                allowed_modes=("LIVE",),
+            )
+            acceptance_scope = load_acceptance_scope(receipt, account=pinned_account)
+    if acceptance_scope is not None and not single_entry:
+        raise ConfigurationError("Acceptance scope requires single-entry mode")
 
     write_live_health(managed_root, "STARTING", simulated=client_override is not None)
 
@@ -256,6 +271,7 @@ async def run_live_service(
             single_entry=single_entry,
             authorized_symbol=authorized_symbol,
             target_message_id=target_message_id,
+            acceptance_scope=acceptance_scope,
         )
 
         write_live_health(managed_root, "STARTING", simulated=client_override is not None)
