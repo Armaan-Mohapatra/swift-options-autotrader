@@ -254,6 +254,41 @@ class PaperOrderEngine:
             )
         return intent, True
 
+    def _record_preplacement_refusal(self, intent: OrderIntent, now: datetime) -> None:
+        """Commit a definite unsent refusal and all incident evidence atomically."""
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT signal_id,side,state,broker_order_id,accepted_at_utc,filled_quantity "
+                "FROM order_intents WHERE logical_order_id=?", (intent.logical_order_id,),
+            ).fetchone()
+            if (row is None or row["side"] != intent.side.value
+                    or row["state"] != "INTENT_RECORDED" or row["broker_order_id"] is not None
+                    or row["accepted_at_utc"] is not None or row["filled_quantity"] != 0
+                    or db.execute("SELECT 1 FROM order_fills WHERE logical_order_id=? LIMIT 1",
+                                  (intent.logical_order_id,)).fetchone()):
+                raise ReconciliationError("Cannot prove unsent refusal against durable journal")
+            sid = str(row["signal_id"])
+            stamp = iso(now)
+            db.execute("UPDATE order_intents SET state='REJECTED' WHERE logical_order_id=?",
+                       (intent.logical_order_id,))
+            db.execute(
+                "INSERT INTO order_state_events(logical_order_id,state,recorded_at_utc,detail) "
+                "VALUES(?,'REJECTED',?,'NOT_SUBMITTED_AUTHORIZATION_OR_REVIEW')",
+                (intent.logical_order_id, stamp),
+            )
+            codes = ["SUBMISSION_REFUSED_PRE_PLACEMENT"]
+            if intent.side is OrderSide.SELL_TO_CLOSE:
+                codes.append("UNFILLED_EXIT")
+                db.execute("UPDATE option_signals SET state='ALERT_REQUIRED' "
+                           "WHERE signal_id=? AND state!='CLOSED'", (sid,))
+            for code in codes:
+                db.execute(
+                    "INSERT OR IGNORE INTO paper_engine_alerts("
+                    "signal_id,logical_order_id,code,recorded_at_utc) VALUES(?,?,?,?)",
+                    (sid, intent.logical_order_id, code, stamp),
+                )
+
     def _submit_existing(self, intent: OrderIntent, now: datetime) -> None:
         """Safe in paper mode: same durable key maps to exactly one broker order."""
         try:
@@ -261,13 +296,7 @@ class PaperOrderEngine:
         except PrePlacementRefusal:
             # Classify only adapter-proven pre-placement refusal, not an exception
             # raised after a placement or during reconciliation.
-            self._state(intent.logical_order_id, "REJECTED", now,
-                        detail="NOT_SUBMITTED_AUTHORIZATION_OR_REVIEW")
-            sid = intent.logical_order_id.split(":")[0]
-            self._alert(sid, intent.logical_order_id, "SUBMISSION_REFUSED_PRE_PLACEMENT", now)
-            if intent.side is OrderSide.SELL_TO_CLOSE:
-                self._signal_state(sid, "ALERT_REQUIRED")
-                self._alert(sid, intent.logical_order_id, "UNFILLED_EXIT", now)
+            self._record_preplacement_refusal(intent, as_utc(self.clock()))
             raise
         except Exception:
             self._alert(intent.logical_order_id.split(":")[0],
@@ -275,9 +304,11 @@ class PaperOrderEngine:
             raise
         try:
             self._reconcile_one(intent.logical_order_id, now, snapshot=snapshot)
-        except Exception:
+        except Exception as exc:
             self._alert(intent.logical_order_id.split(":")[0],
                         intent.logical_order_id, "SUBMISSION_UNCERTAIN", now)
+            if isinstance(exc, PrePlacementRefusal):
+                raise ReconciliationError("Refusal reported after submission; reconcile") from exc
             raise
 
     def _reconcile_one(
