@@ -58,7 +58,7 @@ switch ($Action) {
             Set-SwiftEnvironment -InstallRoot $root -Mode 'LIVE'
             try {
                 $python = Get-SwiftPython $root
-                & $python -m swift_autotrader live-dispatch --root $root
+                & $python -m swift_autotrader supervisor --root $root
                 exit $LASTEXITCODE
             } finally {
                 Remove-Item Env:TELEGRAM_API_HASH -ErrorAction SilentlyContinue

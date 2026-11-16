@@ -267,9 +267,20 @@ class PaperAnalytics:
             equity += delta
             peak = max(peak, equity)
             max_dd = max(max_dd, peak - equity)
+        is_live = False
+        try:
+            from swift_autotrader.config import Settings
+            cfg = Settings.from_env()
+            is_live = cfg.is_live
+        except Exception:
+            pass
+        if not is_live and self.db_path.name == "live.sqlite3":
+            is_live = True
+        mode = "LIVE" if is_live else "PAPER_ONLY"
+        real_broker_writes = is_live
         return {
-            "mode": "PAPER_ONLY", "real_broker_writes_enabled": False,
-            "as_of_utc": iso(now), "data_quality": "SYNTHETIC_OR_UNVERIFIED_PAPER",
+            "mode": mode, "real_broker_writes_enabled": real_broker_writes,
+            "as_of_utc": iso(now), "data_quality": "LIVE_PORTFOLIO" if is_live else "SYNTHETIC_OR_UNVERIFIED_PAPER",
             "costs_assumed": {"fee_per_contract_side_usd": amount(fee),
                               "slippage_per_contract_premium": str(
                                   self.costs.slippage_per_contract_premium),

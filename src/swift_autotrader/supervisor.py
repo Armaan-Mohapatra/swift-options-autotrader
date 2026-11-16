@@ -253,6 +253,11 @@ def run_supervisor(
                for marker in ("stop.request", "SWIFT_REVIEWED_STOP")):
             raise RuntimeError("Persistent local stop is active")
         try:
+            if config is None:
+                try:
+                    config = Settings.from_env()
+                except Exception:
+                    config = None
             supervisor.setup_default_workers(config=config)
             supervisor.write_health_heartbeat(state="STARTING")
         except Exception:

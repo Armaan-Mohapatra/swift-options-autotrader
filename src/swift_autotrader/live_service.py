@@ -21,7 +21,11 @@ from swift_autotrader.broker.mcp_local_auth import (
     WindowsDPAPITokenStorage,
     load_pinned_agentic_account,
 )
-from swift_autotrader.broker.mcp_paper_data import ExchangeCalendarsSession, MCPReadOnlyOptionData
+from swift_autotrader.broker.mcp_paper_data import (
+    ExchangeCalendarsSession,
+    MCPReadOnlyOptionData,
+    SessionCalendar,
+)
 from swift_autotrader.broker.mcp_transport import OAuthEnrollment, authenticated_mcp_client
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
@@ -118,6 +122,7 @@ async def run_live_service(
     stop_event: asyncio.Event | None = None,
     client_override=None,
     clock=None,
+    calendar: SessionCalendar | None = None,
 ) -> None:
     """Run production live execution dispatcher loop with complete safety validation."""
     config.validate()
@@ -200,7 +205,7 @@ async def run_live_service(
         # 2. Build live market data provider and dispatcher
         provider = MCPReadOnlyOptionData(
             mcp_broker,
-            calendar=ExchangeCalendarsSession(),
+            calendar=calendar or ExchangeCalendarsSession(),
             contracts_per_signal=config.max_contracts_per_signal,
         )
 

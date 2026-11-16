@@ -151,7 +151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 config.db_path, host=args.host, port=args.port,
                 costs=CostModel(fee_per_contract_side_usd=fee),
             )
-            payload = {"status": "DASHBOARD_STOPPED", "mode": "PAPER_ONLY"}
+            payload = {"status": "DASHBOARD_STOPPED", "mode": config.mode}
         elif args.command == "paper-notify-scan":
             from swift_autotrader.notifications.alerts import NotificationCenter
 
@@ -261,7 +261,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             configure_logging(config.log_level)
             start_listener(config)
-            payload = {"status": "LISTENER_STOPPED", "mode": "PAPER_ONLY"}
+            payload = {"status": "LISTENER_STOPPED", "mode": config.mode}
         print(json.dumps(payload, sort_keys=True))
         return 0
     except KeyboardInterrupt:

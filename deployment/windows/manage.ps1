@@ -4,7 +4,7 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start','Stop','Restart','Status','Health','Backup','Restore','Rollback','Uninstall','Logs','RegisterLiveTask','UnregisterLiveTask')]
+    [ValidateSet('Start','Stop','Restart','Status','Health','Backup','Restore','Rollback','Uninstall','Logs','RegisterLiveTask','UnregisterLiveTask','Migrate')]
     [string]$Action,
     [string]$InstallRoot = '',
     [ValidateSet('Paper', 'Live')][string]$Mode = 'Paper',
@@ -100,15 +100,44 @@ switch ($Action) {
         & (Join-Path $PSScriptRoot 'service.ps1') -Action UnregisterLiveTask -InstallRoot $root
     }
     'Health' {
-        Invoke-PythonRuntime -Arguments @('status', '--root', $root)
-        try {
-            $result = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/status' `
-                -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
-            if ($result.StatusCode -ne 200) { throw 'Local dashboard unavailable.' }
-            @{ local_dashboard = 'OK'; live_trading = $false } | ConvertTo-Json
-        } catch {
-            @{ local_dashboard = 'UNAVAILABLE'; live_trading = $false } | ConvertTo-Json
+        if ($Mode -eq 'Live') {
+            $liveHealth = Join-Path $root 'state\live-health.json'
+            $supHealth = Join-Path $root 'state\supervisor-health.json'
+            $res = [ordered]@{ mode = 'LIVE'; local_dashboard = 'UNAVAILABLE' }
+            if (Test-Path -LiteralPath $liveHealth -PathType Leaf) {
+                $res.live_health = Get-Content -LiteralPath $liveHealth -Raw -Encoding UTF8 | ConvertFrom-Json
+            }
+            if (Test-Path -LiteralPath $supHealth -PathType Leaf) {
+                $res.supervisor_health = Get-Content -LiteralPath $supHealth -Raw -Encoding UTF8 | ConvertFrom-Json
+            }
+            try {
+                $result = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/status' `
+                    -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+                if ($result.StatusCode -eq 200) { $res.local_dashboard = 'OK' }
+            } catch {}
+            $res | ConvertTo-Json -Depth 4
+        } else {
+            Invoke-PythonRuntime -Arguments @('status', '--root', $root)
+            try {
+                $result = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/status' `
+                    -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+                if ($result.StatusCode -ne 200) { throw 'Local dashboard unavailable.' }
+                @{ local_dashboard = 'OK'; live_trading = $false } | ConvertTo-Json
+            } catch {
+                @{ local_dashboard = 'UNAVAILABLE'; live_trading = $false } | ConvertTo-Json
+            }
         }
+    }
+    'Migrate' {
+        if ($Mode -eq 'Live') {
+            Set-SwiftEnvironment -InstallRoot $root -Mode 'LIVE'
+        } else {
+            Set-SwiftEnvironment -InstallRoot $root -Mode 'PAPER_ONLY'
+        }
+        $python = Get-SwiftPython $root
+        & $python -m swift_autotrader migrate
+        if ($LASTEXITCODE -ne 0) { throw 'Database migration failed.' }
+        [ordered]@{ status = 'MIGRATED'; mode = $Mode; db = $env:DB_PATH } | ConvertTo-Json
     }
     'Backup' {
         if ($PSCmdlet.ShouldProcess($root, 'Write SQLite online backup')) {

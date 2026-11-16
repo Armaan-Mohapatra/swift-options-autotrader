@@ -220,6 +220,16 @@ Set-SwiftEnvironment -InstallRoot $root
 if ($LASTEXITCODE -ne 0) { throw 'Fail-closed configuration validation failed.' }
 & $python -m swift_autotrader migrate
 if ($LASTEXITCODE -ne 0) { throw 'Database initialization failed.' }
+# Initialize isolated production journal with identical migrations
+$liveDb = Join-Path $root 'data\live.sqlite3'
+$origDb = $env:DB_PATH
+try {
+    $env:DB_PATH = $liveDb
+    & $python -m swift_autotrader migrate
+    if ($LASTEXITCODE -ne 0) { throw 'Production database initialization failed.' }
+} finally {
+    $env:DB_PATH = $origDb
+}
 & $python -m swift_autotrader smoke
 if ($LASTEXITCODE -ne 0) { throw 'Application smoke test failed.' }
 Remove-Item Env:TELEGRAM_API_HASH -ErrorAction SilentlyContinue
