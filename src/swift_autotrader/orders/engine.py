@@ -15,13 +15,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from swift_autotrader.broker.base import BrokerOrderState, BrokerOrderStatus
+from swift_autotrader.broker.base import Broker, BrokerOrderState, BrokerOrderStatus
 from swift_autotrader.broker.paper import PaperBroker, as_utc, dt, iso
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.exit_policy import ExitPolicy, ExitQuote
 from swift_autotrader.orders.policy import deadline_from_acceptance
 from swift_autotrader.orders.risk import PreflightProvider, RiskCeilings, rejection_reason
+from swift_autotrader.orders.slippage import SlippageExceededError, resolve_live_entry_limit
 from swift_autotrader.orders.state_machine import (
     ACTIVE,
     TERMINAL,
@@ -29,6 +31,9 @@ from swift_autotrader.orders.state_machine import (
 )
 from swift_autotrader.orders.watchdog import cancellation_due
 from swift_autotrader.signals.identity import OptionContract, OptionRight
+
+if TYPE_CHECKING:
+    from swift_autotrader.paper_dispatch import VerifiedQuote
 
 
 @contextmanager
@@ -91,15 +96,17 @@ class PaperOrderEngine:
     """
 
     def __init__(
-        self, db_path: Path, broker: PaperBroker, *,
+        self, db_path: Path, broker: Broker, *,
         preflight: PreflightProvider, limits: RiskCeilings | None = None,
         exit_policy: ExitPolicy | None = None,
         clock: Callable[[], datetime] | None = None,
+        live_mode: bool = False,
     ) -> None:
-        if type(broker) is not PaperBroker:
-            raise TypeError("Phase 3 engine accepts ONLY the concrete PaperBroker")
+        self.live_mode = live_mode
+        if not live_mode and type(broker) is not PaperBroker:
+            raise TypeError("Phase 3 engine accepts ONLY the concrete PaperBroker when live_mode=False")
         self.db_path = Path(db_path)
-        if broker.db_path.resolve() != self.db_path.resolve():
+        if hasattr(broker, "db_path") and broker.db_path.resolve() != self.db_path.resolve():
             raise ValueError("paper broker and order engine must share the same database")
         self.broker = broker
         self.preflight = preflight
@@ -234,7 +241,7 @@ class PaperOrderEngine:
             db.execute(
                 "INSERT INTO order_state_events(logical_order_id,state,"
                 "recorded_at_utc,detail) VALUES(?,'INTENT_RECORDED',?,?)",
-                (order_id, iso(now), "PAPER_ONLY"),
+                (order_id, iso(now), "LIVE" if self.live_mode else "PAPER_ONLY"),
             )
         return intent, True
 
@@ -426,6 +433,102 @@ class PaperOrderEngine:
                 (iso(self.clock()),),
             )
 
+    def cancel_pending_buys(self, now: datetime | None = None) -> int:
+        """Cancel all open or partially filled BUY_TO_OPEN order intents."""
+        now_dt = as_utc(self.clock() if now is None else now)
+        cancels = 0
+        with _cycle_lock(self.db_path):
+            with self._db() as db:
+                entries = db.execute(
+                    "SELECT logical_order_id, state FROM order_intents "
+                    "WHERE side='BUY_TO_OPEN' ORDER BY logical_order_id"
+                ).fetchall()
+            for row in entries:
+                if row["state"] in {"ACCEPTED", "PARTIALLY_FILLED"}:
+                    if self._attempt_cancel(str(row["logical_order_id"]), now_dt):
+                        cancels += 1
+        return cancels
+
+    def flatten_positions(self, now: datetime | None = None) -> list[OrderIntent]:
+        """Emergency liquidate all active long positions and cancel open buys.
+
+        Halts engine entry submissions, cancels outstanding entry orders via
+        emergency_stop, and submits SELL_TO_CLOSE liquidation orders for all
+        currently held open positions.
+        """
+        now_dt = as_utc(self.clock() if now is None else now)
+        self.emergency_stop(reason="EMERGENCY_FLATTEN")
+
+        submitted_intents: list[OrderIntent] = []
+        with _cycle_lock(self.db_path):
+            with self._db() as db:
+                signals = db.execute(
+                    "SELECT s.* FROM option_signals s "
+                    "WHERE s.state NOT IN ('CLOSED', 'REJECTED')"
+                ).fetchall()
+
+            for sig in signals:
+                sid = str(sig["signal_id"])
+                buys, sold = self._summary(sid)
+                if buys <= sold:
+                    continue
+
+                remaining = buys - sold
+                price = Decimal(sig["original_limit"])
+
+                with self._db() as db:
+                    existing_close = db.execute(
+                        "SELECT * FROM order_intents WHERE signal_id=? AND side='SELL_TO_CLOSE' "
+                        "ORDER BY rowid DESC LIMIT 1",
+                        (sid,),
+                    ).fetchone()
+
+                if existing_close is not None and existing_close["state"] in (
+                    "ACCEPTED", "PARTIALLY_FILLED", "PENDING", "INTENT_RECORDED"
+                ):
+                    continue
+
+                order_id = f"{sid}:close" if existing_close is None else f"{sid}:flatten"
+                intent = OrderIntent(
+                    order_id,
+                    f"{self._key(sid, OrderSide.SELL_TO_CLOSE)}:{order_id}",
+                    self._contract(sig),
+                    OrderSide.SELL_TO_CLOSE,
+                    remaining,
+                    price,
+                )
+
+                with self._db() as db:
+                    db.execute(
+                        "INSERT INTO order_intents("
+                        "logical_order_id,signal_id,idempotency_key,side,"
+                        "requested_quantity,filled_quantity,limit_price,state) "
+                        "VALUES(?,?,?,?,?,0,?,'INTENT_RECORDED')",
+                        (
+                            intent.logical_order_id,
+                            sid,
+                            intent.idempotency_key,
+                            intent.side.value,
+                            intent.quantity,
+                            str(intent.limit_price),
+                        ),
+                    )
+                    db.execute(
+                        "INSERT INTO order_state_events(logical_order_id,state,"
+                        "recorded_at_utc,detail) VALUES(?,'INTENT_RECORDED',?,?)",
+                        (
+                            intent.logical_order_id,
+                            iso(now_dt),
+                            "LIVE" if self.live_mode else "PAPER_ONLY",
+                        ),
+                    )
+
+                self._signal_state(sid, "CLOSE_SUBMITTED")
+                self._submit_existing(intent, now_dt)
+                submitted_intents.append(intent)
+
+        return submitted_intents
+
     def _summary(self, signal_id: str) -> tuple[int, int]:
         with self._db() as db:
             results = db.execute(
@@ -457,7 +560,59 @@ class PaperOrderEngine:
             )
         self._alert(signal_id, None, reason, now)
 
-    def _open_entry(self, signal: sqlite3.Row, now: datetime) -> bool:
+    def cumulative_realized_daily_loss(self, now: datetime | None = None) -> Decimal:
+        """Calculate the total realized loss in USD from closed positions today.
+
+        Uses FIFO matching of buy and sell fills. Returns a non-negative Decimal:
+        positive if net realized daily PnL is negative (a loss), or 0 if positive/flat.
+        """
+        now_dt = as_utc(now or self.clock())
+        today = now_dt.date()
+        daily_pnl = Decimal("0")
+        with self._db() as db:
+            signals = db.execute(
+                "SELECT DISTINCT signal_id FROM order_intents WHERE side='SELL_TO_CLOSE'"
+            ).fetchall()
+            for row in signals:
+                sid = str(row[0])
+                buys = db.execute(
+                    "SELECT f.filled_quantity AS qty, f.filled_price AS price, f.filled_at_utc AS at "
+                    "FROM order_fills f JOIN order_intents o ON o.logical_order_id=f.logical_order_id "
+                    "WHERE o.signal_id=? AND o.side='BUY_TO_OPEN' ORDER BY f.filled_at_utc, f.fill_id",
+                    (sid,),
+                ).fetchall()
+                sells = db.execute(
+                    "SELECT f.filled_quantity AS qty, f.filled_price AS price, f.filled_at_utc AS at "
+                    "FROM order_fills f JOIN order_intents o ON o.logical_order_id=f.logical_order_id "
+                    "WHERE o.signal_id=? AND o.side='SELL_TO_CLOSE' ORDER BY f.filled_at_utc, f.fill_id",
+                    (sid,),
+                ).fetchall()
+                fifo = [[int(f["qty"]), Decimal(f["price"])] for f in buys]
+                for sell in sells:
+                    qty = int(sell["qty"])
+                    sell_price = Decimal(sell["price"])
+                    sell_at = dt(sell["at"])
+                    sell_is_today = (sell_at is not None and sell_at.date() == today)
+                    while qty > 0:
+                        if not fifo or fifo[0][0] == 0:
+                            if fifo:
+                                fifo.pop(0)
+                                continue
+                            break
+                        portion = min(qty, fifo[0][0])
+                        if sell_is_today:
+                            gross = (sell_price - fifo[0][1]) * Decimal("100") * portion
+                            daily_pnl += gross
+                        fifo[0][0] -= portion
+                        qty -= portion
+        if daily_pnl < Decimal("0"):
+            return -daily_pnl
+        return Decimal("0")
+
+    def _open_entry(
+        self, signal: sqlite3.Row, now: datetime, *,
+        entry_quotes: Mapping[OptionContract, VerifiedQuote] | None = None,
+    ) -> bool:
         sid = str(signal["signal_id"])
         if self._control() != (False, False):
             return False
@@ -486,12 +641,37 @@ class PaperOrderEngine:
             self._block(sid, "EXPIRED_OPTION", now)
             return False
         price = Decimal(signal["original_limit"])
+        preflight = self.preflight.check(contract)
+
+        if entry_quotes and contract in entry_quotes:
+            entry_quote = entry_quotes[contract]
+            tick = (
+                preflight.premium_tick
+                if (preflight.premium_tick and preflight.premium_tick > 0)
+                else Decimal("0.01")
+            )
+            try:
+                price = resolve_live_entry_limit(
+                    alert_limit=price,
+                    current_ask=entry_quote.ask,
+                    tick=tick,
+                    max_slippage_pct=self.limits.slippage_tolerance_pct,
+                )
+            except SlippageExceededError:
+                self._block(sid, "SLIPPAGE_EXCEEDED", now)
+                return False
+            except (ValueError, ArithmeticError):
+                self._block(sid, "INVALID_ENTRY_QUOTE", now)
+                return False
+
         quantity = self.limits.contracts_per_signal
         outstanding, count = self._outstanding_risk()
+        cumulative_loss = self.cumulative_realized_daily_loss(now)
         reason = rejection_reason(
             contract, price, quantity, self.limits,
-            self.preflight.check(contract), outstanding_usd=outstanding,
+            preflight, outstanding_usd=outstanding,
             active_signals=count,
+            cumulative_realized_loss_usd=cumulative_loss,
         )
         if reason:
             self._block(sid, reason, now)
@@ -573,17 +753,19 @@ class PaperOrderEngine:
 
     def run_cycle(
         self, *, quotes: Mapping[OptionContract, ExitQuote] | None = None,
+        entry_quotes: Mapping[OptionContract, VerifiedQuote] | None = None,
         allow_entries: bool = True, process_closes: bool = True,
         allowed_signal_ids: frozenset[str] | None = None,
     ) -> CycleResult:
         with _cycle_lock(self.db_path):
             return self._run_cycle_locked(
-                quotes=quotes, allow_entries=allow_entries,
+                quotes=quotes, entry_quotes=entry_quotes, allow_entries=allow_entries,
                 process_closes=process_closes, allowed_signal_ids=allowed_signal_ids,
             )
 
     def _run_cycle_locked(
         self, *, quotes: Mapping[OptionContract, ExitQuote] | None = None,
+        entry_quotes: Mapping[OptionContract, VerifiedQuote] | None = None,
         allow_entries: bool = True, process_closes: bool = True,
         allowed_signal_ids: frozenset[str] | None = None,
     ) -> CycleResult:
@@ -650,7 +832,7 @@ class PaperOrderEngine:
                     and str(signal["signal_id"]) not in allowed_signal_ids
                 ):
                     continue
-                if self._open_entry(signal, now):
+                if self._open_entry(signal, now, entry_quotes=entry_quotes):
                     entry_submissions += 1
                 else:
                     with self._db() as db:
@@ -678,7 +860,8 @@ class PaperOrderEngine:
                 "WHERE resolved=0 GROUP BY code"
             ).fetchall()
         return {
-            "mode": "PAPER_ONLY", "broker_writes_enabled": False,
+            "mode": "LIVE" if self.live_mode else "PAPER_ONLY",
+            "broker_writes_enabled": self.live_mode,
             "paused": bool(controls[0]), "emergency_stop": bool(controls[1]),
             "orders_by_state": {str(x[0]): int(x[1]) for x in counts},
             "open_alerts": {str(x[0]): int(x[1]) for x in alerts},

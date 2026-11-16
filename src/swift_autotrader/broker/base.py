@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.signals.identity import OptionContract
@@ -44,6 +44,7 @@ class BrokerOrderStatus:
     idempotency_key: str | None = None
 
 
+@runtime_checkable
 class Broker(Protocol):
     def submit_order(self, intent: OrderIntent) -> BrokerOrderStatus: ...
 

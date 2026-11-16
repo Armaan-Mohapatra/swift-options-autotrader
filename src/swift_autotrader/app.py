@@ -23,6 +23,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="swift-autotrader")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("smoke", help="Side-effect-free health check")
+    commands.add_parser("mvp-review", help="Offline MVP status; never starts workers or contacts broker")
     commands.add_parser("config-check", help="Validate fail-closed settings")
     commands.add_parser("dry-run", help="Paper-only diagnostics; never place orders")
     commands.add_parser("migrate", help="Explicitly initialize/migrate local SQLite DB")
@@ -55,7 +56,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     service.add_argument("--root", required=True)
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")
+    enroll = commands.add_parser("telegram-enroll", help="Interactive Telegram MTProto session enrollment")
+    enroll.add_argument("--phone", default=None, help="Phone number with country code")
+    enroll.add_argument("--code", default=None, help="Verification login code")
+    enroll.add_argument("--password", default=None, help="2FA cloud password")
+    enroll.add_argument("--session-path", default=None, help="Destination session file path")
+    enroll.add_argument("--channel-id", type=int, default=None, help="Channel ID to pre-warm")
+    commands.add_parser("kill-switch-listener", help="Mobile emergency kill switch long-polling listener")
+    supervisor_cmd = commands.add_parser("supervisor", help="Cross-platform daemon supervisor")
+    supervisor_cmd.add_argument("--root", default=None, help="Managed install root directory")
+    supervisor_cmd.add_argument("--once", action="store_true", help="Run a single worker check cycle and exit")
     args = parser.parse_args(argv)
+    if args.command == "mvp-review":
+        from swift_autotrader.mvp_review import review_status
+        print(json.dumps(review_status(frozenset(commands.choices)), sort_keys=True))
+        return 0
     try:
         config = Settings.from_env()
         if args.command == "smoke":
@@ -193,6 +208,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             else:
                 payload = {"status": "PARSER_HEALTH", "decisions": matcher.statistics()}
+        elif args.command == "telegram-enroll":
+            from pathlib import Path
+            from swift_autotrader.telegram.enrollment import enroll_telegram_session
+
+            target_path = Path(args.session_path) if args.session_path else config.telegram_session_path
+            asyncio.run(
+                enroll_telegram_session(
+                    phone=args.phone,
+                    code=args.code,
+                    password=args.password,
+                    session_path=target_path,
+                    channel_id=args.channel_id or config.telegram_channel_id,
+                    settings=config,
+                )
+            )
+            payload = {"status": "SESSION_ENROLLED", "session_path": str(target_path)}
+        elif args.command == "kill-switch-listener":
+            from swift_autotrader.notifications.kill_switch import run_kill_switch_listener
+
+            run_kill_switch_listener(config)
+            payload = {"status": "KILL_SWITCH_STOPPED"}
+        elif args.command == "supervisor":
+            from pathlib import Path
+            from swift_autotrader.supervisor import run_supervisor
+
+            root_path = Path(args.root) if args.root else Path.cwd()
+            run_supervisor(root_path, config=config, once=args.once)
+            payload = {"status": "SUPERVISOR_STOPPED"}
         else:
             configure_logging(config.log_level)
             start_listener(config)

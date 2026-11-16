@@ -17,10 +17,13 @@ class RiskCeilings:
     total_exposure_usd: Decimal = Decimal("0")
     open_signal_count: int = 1
     entry_max_age_seconds: int = 120
+    max_daily_loss_usd: Decimal = Decimal("500")
+    max_concurrent_positions: int = 3
+    slippage_tolerance_pct: Decimal = Decimal("10")
 
     @classmethod
     def from_environment(cls, values: Mapping[str, str] | None = None) -> RiskCeilings:
-        """Strict optional paper-risk environment values; zero-dollar default blocks buys."""
+        """Strict optional risk environment values; zero-dollar default blocks buys."""
         env = os.environ if values is None else values
         try:
             return cls(
@@ -29,6 +32,9 @@ class RiskCeilings:
                 total_exposure_usd=Decimal(env.get("PAPER_MAX_TOTAL_EXPOSURE_USD", "0")),
                 open_signal_count=int(env.get("PAPER_MAX_OPEN_SIGNALS", "1")),
                 entry_max_age_seconds=int(env.get("PAPER_ENTRY_MAX_AGE_SECONDS", "120")),
+                max_daily_loss_usd=Decimal(env.get("MAX_DAILY_LOSS_USD", "500")),
+                max_concurrent_positions=int(env.get("MAX_CONCURRENT_POSITIONS", "3")),
+                slippage_tolerance_pct=Decimal(env.get("SLIPPAGE_TOLERANCE_PCT", "10")),
             )
         except (ValueError, ArithmeticError) as exc:
             raise ValueError("invalid paper risk environment") from exc
@@ -40,8 +46,12 @@ class RiskCeilings:
             raise ValueError("invalid active signal ceiling")
         if not 0 <= self.entry_max_age_seconds <= 600:
             raise ValueError("invalid entry freshness ceiling")
+        if not 1 <= self.max_concurrent_positions <= 50:
+            raise ValueError("invalid max concurrent positions ceiling")
+        if not Decimal("0") <= self.slippage_tolerance_pct <= Decimal("50"):
+            raise ValueError("invalid slippage tolerance ceiling")
         if any(not x.is_finite() or x < 0 for x in (
-            self.premium_per_signal_usd, self.total_exposure_usd,
+            self.premium_per_signal_usd, self.total_exposure_usd, self.max_daily_loss_usd,
         )):
             raise ValueError("invalid dollar ceilings")
 
@@ -73,8 +83,17 @@ class PaperPreflight:
 def rejection_reason(
     contract: OptionContract, limit: Decimal, quantity: int, ceilings: RiskCeilings,
     preflight: Preflight, *, outstanding_usd: Decimal, active_signals: int,
+    cumulative_realized_loss_usd: Decimal = Decimal("0"),
 ) -> str | None:
-    """Never inspect current option price; exact Swift price survives unchanged."""
+    """Check supplied candidate limit and evidence without submitting any order."""
+    if (not isinstance(limit, Decimal) or not limit.is_finite() or limit <= 0
+            or type(quantity) is not int or quantity < 1):
+        return "INVALID_ORDER_INPUT"
+    if (not isinstance(outstanding_usd, Decimal) or not outstanding_usd.is_finite()
+            or outstanding_usd < 0 or type(active_signals) is not int or active_signals < 0
+            or not isinstance(cumulative_realized_loss_usd, Decimal)
+            or not cumulative_realized_loss_usd.is_finite() or cumulative_realized_loss_usd < 0):
+        return "INVALID_RISK_EVIDENCE"
     if not preflight.instrument_verified or preflight.contract != contract:
         return "INSTRUMENT_NOT_VERIFIED"
     if not preflight.options_permission:
@@ -87,10 +106,12 @@ def rejection_reason(
         return "INVALID_PREMIUM_TICK"
     if quantity > ceilings.contracts_per_signal:
         return "QUANTITY_CAP_EXCEEDED"
+    if cumulative_realized_loss_usd >= ceilings.max_daily_loss_usd:
+        return "DAILY_LOSS_LIMIT_REACHED"
     notional = limit * Decimal(quantity) * 100
     if notional > ceilings.premium_per_signal_usd:
         return "SIGNAL_PREMIUM_CAP_EXCEEDED"
-    if active_signals >= ceilings.open_signal_count:
+    if active_signals >= ceilings.open_signal_count or active_signals >= ceilings.max_concurrent_positions:
         return "OPEN_SIGNAL_CAP_EXCEEDED"
     if outstanding_usd + notional > ceilings.total_exposure_usd:
         return "TOTAL_EXPOSURE_CAP_EXCEEDED"

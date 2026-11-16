@@ -1,0 +1,19 @@
+[Unit]
+Description=Swift Options AutoTrader Service Supervisor
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/swift-options-autotrader
+ExecStart=/usr/bin/python3 -m swift_autotrader supervisor
+Restart=on-failure
+RestartSec=5s
+KillMode=mixed
+TimeoutStopSec=30s
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/opt/swift-options-autotrader/logs/supervisor.log
+StandardError=append:/opt/swift-options-autotrader/logs/supervisor.err.log
+
+[Install]
+WantedBy=multi-user.target

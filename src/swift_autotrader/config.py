@@ -43,12 +43,48 @@ class Settings:
     telegram_queue_capacity: int = 512
     telegram_max_live_age_seconds: int = 120
     telegram_reconnect_attempts: int = 5
+    # Live execution and safety configuration
+    robinhood_mcp_account: str = field(default="", repr=False)
+    max_daily_loss_usd: Decimal = Decimal("500")
+    max_concurrent_positions: int = 3
+    slippage_tolerance_pct: Decimal = Decimal("10")
+    kill_switch_enabled: bool = True
+    kill_switch_telegram_bot_token: str = field(default="", repr=False)
+    kill_switch_telegram_chat_id: int | None = None
+
+    @property
+    def is_live(self) -> bool:
+        return self.live_enabled and self.allow_broker_writes and not self.paper_only
+
+    @property
+    def mode(self) -> str:
+        return "LIVE" if self.is_live else "PAPER_ONLY"
 
     def validate(self) -> Settings:
-        if not self.paper_only or self.live_enabled or self.allow_broker_writes:
-            raise ConfigurationError("Paper-only mode is mandatory; broker writes are forbidden")
-        if self.broker_backend != "paper":
-            raise ConfigurationError("Only the paper broker backend is permitted")
+        if self.is_live:
+            # LIVE MODE VALIDATION
+            if self.broker_backend != "robinhood_mcp":
+                raise ConfigurationError("Live mode requires broker_backend='robinhood_mcp'")
+            if not self.robinhood_mcp_account or len(self.robinhood_mcp_account.strip()) < 3:
+                raise ConfigurationError("Live mode requires a valid ROBINHOOD_MCP_ACCOUNT")
+            if not self.max_daily_loss_usd.is_finite() or self.max_daily_loss_usd <= 0:
+                raise ConfigurationError("MAX_DAILY_LOSS_USD must be positive and finite")
+            if self.max_daily_loss_usd > Decimal("10000"):
+                raise ConfigurationError("MAX_DAILY_LOSS_USD cannot exceed 10000 for safety")
+            if not 1 <= self.max_concurrent_positions <= 10:
+                raise ConfigurationError("MAX_CONCURRENT_POSITIONS must be between 1 and 10")
+            if not Decimal("0") <= self.slippage_tolerance_pct <= Decimal("25"):
+                raise ConfigurationError("SLIPPAGE_TOLERANCE_PCT must be between 0 and 25 percent")
+            if not self.kill_switch_enabled:
+                raise ConfigurationError("KILL_SWITCH_ENABLED is required in live mode for safety")
+            if not self.telegram_enabled:
+                raise ConfigurationError("Live mode requires TELEGRAM_ENABLED=true for signal source")
+        else:
+            # PAPER MODE VALIDATION (original safety invariant)
+            if not self.paper_only or self.live_enabled or self.allow_broker_writes:
+                raise ConfigurationError("Paper-only mode is mandatory unless explicitly configured for live")
+            if self.broker_backend != "paper":
+                raise ConfigurationError("Only the paper broker backend is permitted in paper mode")
         if not 1 <= self.max_contracts_per_signal <= 100:
             raise ConfigurationError("MAX_CONTRACTS_PER_SIGNAL must be between 1 and 100")
         if not self.max_premium_per_signal_usd.is_finite():
@@ -95,9 +131,15 @@ class Settings:
             capacity = int(data.get("TELEGRAM_QUEUE_CAPACITY", "512"))
             max_age = int(data.get("TELEGRAM_MAX_LIVE_AGE_SECONDS", "120"))
             reconnect = int(data.get("TELEGRAM_RECONNECT_ATTEMPTS", "5"))
+            daily_loss = Decimal(data.get("MAX_DAILY_LOSS_USD", "500"))
+            max_concurrent = int(data.get("MAX_CONCURRENT_POSITIONS", "3"))
+            slippage_pct = Decimal(data.get("SLIPPAGE_TOLERANCE_PCT", "10"))
+            kill_chat_id = _optional_int(data, "KILL_SWITCH_TELEGRAM_CHAT_ID")
         except (ValueError, InvalidOperation) as exc:
             raise ConfigurationError("Invalid numeric configuration") from exc
         session = data.get("TELEGRAM_SESSION_PATH", "").strip()
+        account = data.get("ROBINHOOD_MCP_ACCOUNT", "").strip()
+        kill_bot_token = data.get("KILL_SWITCH_TELEGRAM_BOT_TOKEN", "").strip()
         return cls(
             paper_only=_bool("PAPER_ONLY", data.get("PAPER_ONLY", "true")),
             live_enabled=_bool("LIVE_ENABLED", data.get("LIVE_ENABLED", "false")),
@@ -118,10 +160,18 @@ class Settings:
             telegram_queue_capacity=capacity,
             telegram_max_live_age_seconds=max_age,
             telegram_reconnect_attempts=reconnect,
+            robinhood_mcp_account=account,
+            max_daily_loss_usd=daily_loss,
+            max_concurrent_positions=max_concurrent,
+            slippage_tolerance_pct=slippage_pct,
+            kill_switch_enabled=_bool("KILL_SWITCH_ENABLED", data.get("KILL_SWITCH_ENABLED", "true")),
+            kill_switch_telegram_bot_token=kill_bot_token,
+            kill_switch_telegram_chat_id=kill_chat_id,
         ).validate()
 
     def public_summary(self) -> dict[str, str | int | bool]:
         return {
+            "mode": self.mode,
             "paper_only": self.paper_only,
             "live_enabled": self.live_enabled,
             "allow_broker_writes": self.allow_broker_writes,
@@ -131,5 +181,9 @@ class Settings:
             "telegram_max_live_age_seconds": self.telegram_max_live_age_seconds,
             "max_contracts_per_signal": self.max_contracts_per_signal,
             "max_premium_per_signal_usd": str(self.max_premium_per_signal_usd),
+            "max_daily_loss_usd": str(self.max_daily_loss_usd),
+            "max_concurrent_positions": self.max_concurrent_positions,
+            "slippage_tolerance_pct": str(self.slippage_tolerance_pct),
+            "kill_switch_enabled": self.kill_switch_enabled,
             "entry_timeout_seconds": self.entry_timeout_seconds,
         }

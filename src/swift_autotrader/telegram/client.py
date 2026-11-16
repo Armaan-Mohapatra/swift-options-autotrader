@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -20,7 +21,7 @@ from swift_autotrader.config import Settings
 from swift_autotrader.database.repository import TelegramStore
 from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMessage, utc
 from swift_autotrader.telegram.listener import TelegramListener
-from swift_autotrader.telegram.reconnect import with_reconnect
+from swift_autotrader.telegram.reconnect import is_fatal_auth_error, with_reconnect
 
 
 class LocalAuthorizationRequired(RuntimeError):
@@ -134,7 +135,17 @@ class TelethonSource:
             await client.disconnect()
 
 
-def start_listener(settings: Settings) -> None:
+def park_worker(alert_message: str = "Operator re-enrollment required") -> None:
+    """Park worker cleanly with logged actionable alert to avoid tight crash-looping."""
+    logging.getLogger("swift_autotrader.telegram").critical("%s", alert_message)
+    try:
+        while True:
+            time.sleep(3600)
+    except (KeyboardInterrupt, SystemExit):
+        return
+
+
+def start_listener(settings: Settings, *, park_on_auth_failure: bool = True) -> None:
     """Only local, explicitly enabled users can initiate a read-only connection."""
     if not settings.telegram_enabled or settings.telegram_channel_id is None:
         raise LocalAuthorizationRequired("Telegram listener has not been locally enabled")
@@ -156,6 +167,17 @@ def start_listener(settings: Settings) -> None:
         await with_reconnect(
             run_once,
             attempts=settings.telegram_reconnect_attempts,
+            jitter=True,
         )
 
-    asyncio.run(supervised())
+    try:
+        asyncio.run(supervised())
+    except Exception as exc:
+        if is_fatal_auth_error(exc):
+            logging.getLogger("swift_autotrader.telegram").critical(
+                "Operator re-enrollment required: %s", exc
+            )
+            if park_on_auth_failure:
+                park_worker(f"Operator re-enrollment required: {exc}")
+                return
+        raise
