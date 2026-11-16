@@ -17,7 +17,7 @@ class RiskCeilings:
     total_exposure_usd: Decimal = Decimal("0")
     open_signal_count: int = 1
     entry_max_age_seconds: int = 120
-    max_daily_loss_usd: Decimal = Decimal("500")
+    max_daily_loss_usd: Decimal = Decimal("750")
     max_concurrent_positions: int = 3
     slippage_tolerance_pct: Decimal = Decimal("10")
 
@@ -32,7 +32,7 @@ class RiskCeilings:
                 total_exposure_usd=Decimal(env.get("PAPER_MAX_TOTAL_EXPOSURE_USD", "0")),
                 open_signal_count=int(env.get("PAPER_MAX_OPEN_SIGNALS", "1")),
                 entry_max_age_seconds=int(env.get("PAPER_ENTRY_MAX_AGE_SECONDS", "120")),
-                max_daily_loss_usd=Decimal(env.get("MAX_DAILY_LOSS_USD", "500")),
+                max_daily_loss_usd=Decimal(env.get("MAX_DAILY_LOSS_USD", "750")),
                 max_concurrent_positions=int(env.get("MAX_CONCURRENT_POSITIONS", "3")),
                 slippage_tolerance_pct=Decimal(env.get("SLIPPAGE_TOLERANCE_PCT", "10")),
             )

@@ -198,6 +198,28 @@ class OrderReview:
         return self.checked and not self.alerts and not self.approval_required
 
 
+def normalize_read_only_review(result: Mapping[str, Any]) -> OrderReview:
+    """Normalize observed sanitized review shapes; never infer permission from missing data."""
+    if not isinstance(result, Mapping):
+        raise MCPContractError("Broker review is not an object")
+    checks = result.get("order_checks")
+    if isinstance(checks, Mapping) and not checks:
+        checks = []
+    if not isinstance(checks, list):
+        raise MCPContractError("Broker review checks missing or unsupported")
+    problems: list[str] = []
+    for check in checks:
+        record = _obj(check)
+        if record.get("severity") not in {"pass", "ok", "info"}:
+            problems.append(str(record.get("code") or "UNKNOWN_ALERT"))
+    keys = [k for k in ("customer_approval_required", "approval_required") if k in result]
+    if not keys or any(type(result[k]) is not bool for k in keys):
+        raise MCPContractError("Broker approval state not verified")
+    if len(keys) == 2 and result[keys[0]] != result[keys[1]]:
+        raise MCPContractError("Conflicting broker approval state")
+    return OrderReview(True, tuple(problems), result[keys[0]])
+
+
 @dataclass(frozen=True, slots=True)
 class PositionSnapshot:
     option_id: str
@@ -495,18 +517,7 @@ class RobinhoodMCPBroker:
         args = self.order_arguments(account, instrument, intent)
         args.update({"chain_symbol": instrument.contract.underlying, "underlying_type": "equity"})
         result = await self._call("review_option_order", args)
-        checks = result.get("order_checks")
-        if not isinstance(checks, list):
-            raise MCPContractError("Broker review checks missing")
-        problems: list[str] = []
-        for check in checks:
-            record = _obj(check)
-            if record.get("severity") not in {"pass", "ok", "info"}:
-                problems.append(str(record.get("code") or "UNKNOWN_ALERT"))
-        approval = result.get("approval_required")
-        if type(approval) is not bool:
-            raise MCPContractError("Broker approval state not verified")
-        return OrderReview(True, tuple(problems), approval)
+        return normalize_read_only_review(result)
 
     @staticmethod
     def future_order_payload(account: MCPAccount, instrument: MCPInstrument,

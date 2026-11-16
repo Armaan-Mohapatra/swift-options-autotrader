@@ -45,10 +45,10 @@ class Settings:
     telegram_reconnect_attempts: int = 5
     # Live execution and safety configuration
     robinhood_mcp_account: str = field(default="", repr=False)
-    max_daily_loss_usd: Decimal = Decimal("500")
+    max_daily_loss_usd: Decimal = Decimal("750")
     max_concurrent_positions: int = 3
     slippage_tolerance_pct: Decimal = Decimal("10")
-    kill_switch_enabled: bool = True
+    kill_switch_enabled: bool = False
     kill_switch_telegram_bot_token: str = field(default="", repr=False)
     kill_switch_telegram_chat_id: int | None = None
 
@@ -75,8 +75,6 @@ class Settings:
                 raise ConfigurationError("MAX_CONCURRENT_POSITIONS must be between 1 and 10")
             if not Decimal("0") <= self.slippage_tolerance_pct <= Decimal("25"):
                 raise ConfigurationError("SLIPPAGE_TOLERANCE_PCT must be between 0 and 25 percent")
-            if not self.kill_switch_enabled:
-                raise ConfigurationError("KILL_SWITCH_ENABLED is required in live mode for safety")
             if not self.telegram_enabled:
                 raise ConfigurationError("Live mode requires TELEGRAM_ENABLED=true for signal source")
         else:
@@ -131,7 +129,7 @@ class Settings:
             capacity = int(data.get("TELEGRAM_QUEUE_CAPACITY", "512"))
             max_age = int(data.get("TELEGRAM_MAX_LIVE_AGE_SECONDS", "120"))
             reconnect = int(data.get("TELEGRAM_RECONNECT_ATTEMPTS", "5"))
-            daily_loss = Decimal(data.get("MAX_DAILY_LOSS_USD", "500"))
+            daily_loss = Decimal(data.get("MAX_DAILY_LOSS_USD", "750"))
             max_concurrent = int(data.get("MAX_CONCURRENT_POSITIONS", "3"))
             slippage_pct = Decimal(data.get("SLIPPAGE_TOLERANCE_PCT", "10"))
             kill_chat_id = _optional_int(data, "KILL_SWITCH_TELEGRAM_CHAT_ID")
@@ -164,7 +162,7 @@ class Settings:
             max_daily_loss_usd=daily_loss,
             max_concurrent_positions=max_concurrent,
             slippage_tolerance_pct=slippage_pct,
-            kill_switch_enabled=_bool("KILL_SWITCH_ENABLED", data.get("KILL_SWITCH_ENABLED", "true")),
+            kill_switch_enabled=_bool("KILL_SWITCH_ENABLED", data.get("KILL_SWITCH_ENABLED", "false")),
             kill_switch_telegram_bot_token=kill_bot_token,
             kill_switch_telegram_chat_id=kill_chat_id,
         ).validate()

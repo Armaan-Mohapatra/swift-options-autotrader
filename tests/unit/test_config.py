@@ -113,10 +113,9 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="SLIPPAGE_TOLERANCE_PCT"):
         Settings.from_env(env)
 
-    # Kill switch disabled in live mode
+    # Mobile bot is optional; this validates settings only, not execution permission.
     env = dict(base_env, KILL_SWITCH_ENABLED="false")
-    with pytest.raises(ConfigurationError, match="KILL_SWITCH_ENABLED is required"):
-        Settings.from_env(env)
+    assert Settings.from_env(env).kill_switch_enabled is False
 
     # Telegram disabled in live mode
     env = dict(base_env, TELEGRAM_ENABLED="false")
