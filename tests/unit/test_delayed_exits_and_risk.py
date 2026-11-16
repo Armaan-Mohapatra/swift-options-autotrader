@@ -195,3 +195,50 @@ def test_outstanding_risk_accounts_for_partially_filled_canceled_order(db: Path)
     # 1 contract @ 2.00 * 100 = $200.00
     assert outstanding_usd == Decimal("200.00")
     assert active_count == 1
+
+
+@pytest.mark.parametrize("state,expected_exposure", [
+    ("PARTIALLY_FILLED", Decimal("600.00")),
+    ("CANCEL_PENDING", Decimal("600.00")),
+    ("CANCELED", Decimal("200.00")),
+])
+def test_pending_remainder_reserved_until_terminal_cancel(db, state, expected_exposure):
+    engine = PaperOrderEngine(db, PaperBroker(db), preflight=PaperPreflight(), live_mode=False)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,confirmed_avg_fill_price,created_at_utc,state) "
+            "VALUES('sig-risk', 1, 'SPY', 'CALL', '680', '2026-11-20', '2.00', '2.00', '2026-11-16T15:00:00Z', 'PARTIAL')"
+        )
+        conn.execute(
+            "INSERT INTO order_intents(logical_order_id,signal_id,idempotency_key,side,requested_quantity,filled_quantity,limit_price,state) "
+            "VALUES('ord-risk', 'sig-risk', 'idemp-risk', 'BUY_TO_OPEN', 3, 1, '2.00', ?)", (state,)
+        )
+        conn.execute(
+            "INSERT INTO order_fills(fill_id,logical_order_id,filled_quantity,filled_price,filled_at_utc) "
+            "VALUES('risk-fill', 'ord-risk', 1, '2.00', '2026-11-16T15:01:00Z')"
+        )
+    assert engine._outstanding_risk() == (expected_exposure, 1)
+
+
+def test_equivalent_strike_and_canceled_partial_fill_block_duplicate(db):
+    engine = PaperOrderEngine(db, PaperBroker(db), preflight=PaperPreflight(), live_mode=False)
+    now = datetime(2026, 11, 16, 15, 30, 0, tzinfo=UTC)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,created_at_utc,state) "
+            "VALUES('sig-prior', 1, 'SPY', 'CALL', '680.00', '2026-11-20', '1.20', '2026-11-16T15:29:00Z', 'PARTIAL')"
+        )
+        conn.execute(
+            "INSERT INTO order_intents(logical_order_id,signal_id,idempotency_key,side,requested_quantity,filled_quantity,limit_price,state) "
+            "VALUES('ord-prior', 'sig-prior', 'idemp-prior', 'BUY_TO_OPEN', 2, 1, '1.20', 'CANCELED')"
+        )
+        conn.execute(
+            "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,created_at_utc,state) "
+            "VALUES('sig-next', 2, 'SPY', 'CALL', '680', '2026-11-20', '1.25', '2026-11-16T15:29:30Z', 'SEEN')"
+        )
+        conn.row_factory = sqlite3.Row
+        candidate = conn.execute("SELECT * FROM option_signals WHERE signal_id='sig-next'").fetchone()
+    assert engine._open_entry(candidate, now) is False
+    with sqlite3.connect(db) as conn:
+        decision = conn.execute("SELECT reason FROM paper_engine_decisions WHERE signal_id='sig-next'").fetchone()
+    assert decision[0] == "DUPLICATE_CONTRACT_POSITION"

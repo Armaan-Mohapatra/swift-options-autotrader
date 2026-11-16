@@ -15,6 +15,7 @@ from swift_autotrader.broker.base import (
 )
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
+    MCPContractError,
     MCPInstrument,
     RobinhoodLiveBroker,
     RobinhoodMCPBroker,
@@ -62,6 +63,8 @@ class MockMCPClient:
         self.calls.append((name, arguments))
         if name == "get_option_orders":
             return {"structuredContent": {"data": {"orders": self.orders}}}
+        if name == "review_option_order":
+            return {"structuredContent": {"data": {"order_checks": [], "approval_required": False}}}
         if name == "place_option_order":
             order_data = {
                 "id": "rh-ord-999",
@@ -136,6 +139,7 @@ def test_normalize_order_cancelled_and_canceled_to_canceled():
             "state": state_name,
             "quantity": "1",
             "price": "1.10",
+            "processed_quantity": "0",
             "created_at": "2026-11-16T15:02:00Z",
         }
         status = RobinhoodMCPBroker.normalize_order(raw, ord_intent)
@@ -183,6 +187,7 @@ def test_normalize_order_fallback_timestamp_created_or_updated():
         "state": "confirmed",
         "quantity": "1",
         "price": "1.25",
+        "processed_quantity": "0",
         "updated_at": "2026-11-16T15:10:00Z",
     }
     status = RobinhoodMCPBroker.normalize_order(raw, ord_intent)
@@ -278,3 +283,76 @@ def test_durable_broker_id_persistence_and_recovery(tmp_path: Path):
 
     finally:
         loop.close()
+
+
+@pytest.mark.parametrize("mutations", [
+    {"processed_quantity": "0.5"},
+    {"processed_quantity": None},
+    {"processed_quantity": "0", "filled_quantity": "1"},
+    {"quantity": "2"},
+    {"price": "1.26"},
+])
+def test_order_normalization_rejects_conflicting_quantity_and_price(mutations):
+    order_intent = make_intent()
+    raw = {"id": "synthetic-id", "ref_id": get_expected_ref(order_intent),
+           "state": "confirmed", "quantity": "1", "price": "1.25",
+           "processed_quantity": "0", "created_at": "2026-11-16T15:00:00Z"}
+    raw.update(mutations)
+    with pytest.raises(MCPContractError):
+        RobinhoodMCPBroker.normalize_order(raw, order_intent)
+
+
+def test_missing_processed_quantity_and_unbound_identity_rejected():
+    order_intent = make_intent()
+    raw = {"id": "synthetic-id", "ref_id": get_expected_ref(order_intent),
+           "state": "confirmed", "quantity": "1", "price": "1.25",
+           "created_at": "2026-11-16T15:00:00Z"}
+    with pytest.raises(MCPContractError):
+        RobinhoodMCPBroker.normalize_order(raw, order_intent)
+    raw["processed_quantity"] = "0"
+    del raw["ref_id"]
+    with pytest.raises(MCPContractError):
+        RobinhoodMCPBroker.normalize_order(raw, order_intent)
+
+
+def test_fill_without_own_timestamp_is_not_inferred():
+    order_intent = make_intent()
+    raw = {"id": "synthetic-id", "ref_id": get_expected_ref(order_intent),
+           "state": "filled", "quantity": "1", "price": "1.25",
+           "processed_quantity": "1", "created_at": "2026-11-16T15:00:00Z",
+           "last_transaction_at": "2026-11-16T15:01:00Z",
+           "executions": [{"id": "synthetic-fill", "quantity": "1", "price": "1.25"}]}
+    with pytest.raises(MCPContractError):
+        RobinhoodMCPBroker.normalize_order(raw, order_intent)
+
+
+@pytest.mark.parametrize("review", [
+    {"order_checks": [], "approval_required": True},
+    {"order_checks": [{"severity": "warning", "code": "REVIEW"}], "approval_required": False},
+    {"order_checks": []},
+])
+def test_provider_review_blocks_placement(review, monkeypatch):
+    from swift_autotrader.broker.robinhood_mcp import normalize_read_only_review
+    adapter = RobinhoodMCPBroker(MockMCPClient(), allow_live_writes=True)
+    async def fake_review(*args):
+        return normalize_read_only_review(review)
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Order placement must not be called")
+    monkeypatch.setattr(adapter, "review_order", fake_review)
+    monkeypatch.setattr(adapter, "_call", forbidden)
+    with pytest.raises(MCPContractError):
+        asyncio.run(adapter.place_order(ACCOUNT, INSTRUMENT, make_intent()))
+
+
+def test_durable_identity_conflict_cannot_be_silently_ignored(tmp_path):
+    db = tmp_path / "journal.sqlite3"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE order_intents(logical_order_id TEXT PRIMARY KEY, broker_order_id TEXT)")
+        conn.execute("INSERT INTO order_intents VALUES ('logical-id', 'existing-broker-id')")
+    broker = RobinhoodLiveBroker(RobinhoodMCPBroker(MockMCPClient(), allow_live_writes=True), ACCOUNT, db_path=db)
+    with pytest.raises(MCPContractError, match="conflicting"):
+        broker._persist_broker_id("logical-id", "other-broker-id")
+    with pytest.raises(MCPContractError):
+        broker._persist_broker_id("unknown-id", "other-broker-id")
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT broker_order_id FROM order_intents").fetchone()[0] == "existing-broker-id"

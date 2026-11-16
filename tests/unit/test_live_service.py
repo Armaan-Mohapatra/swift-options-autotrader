@@ -72,9 +72,24 @@ def test_live_service_rejects_non_robinhood_mcp_backend(test_env):
         asyncio.run(run_live_service(bad_settings, root))
 
 
-def test_live_service_rejects_missing_token_file(test_env):
+def test_live_service_rejects_unapproved_managed_root(test_env):
     root, settings, _ = test_env
-    with pytest.raises(LocalAuthNotConfigured, match="Robinhood OAuth tokens not found"):
+    (root / "secrets" / "oauth.dpapi").write_bytes(b"synthetic")
+    with pytest.raises(LocalAuthNotConfigured, match="not approved for production"):
+        asyncio.run(run_live_service(settings, root))
+    health = json.loads((root / "state" / "live-health.json").read_text())
+    assert health["status"] == "FAILED"
+    assert health["broker_writes_enabled"] is False
+
+
+def test_real_service_rejects_shared_paper_journal(test_env):
+    root, settings, _ = test_env
+    (root / "deployment.json").write_text(json.dumps({
+        "product": "swift-options-autotrader", "mode": "LIVE",
+        "live_enabled": True, "broker_writes_enabled": True,
+    }), encoding="utf-8")
+    # Reject before attempting Windows DPAPI, OAuth or brokerage activity.
+    with pytest.raises(LocalAuthNotConfigured, match="distinct managed production journal"):
         asyncio.run(run_live_service(settings, root))
 
 
@@ -114,4 +129,29 @@ def test_live_service_happy_path_once(test_env):
     assert health_data["mode"] == "LIVE"
     assert health_data["status"] == "STOPPED"
     assert health_data["live_enabled"] is True
-    assert health_data["broker_writes_enabled"] is True
+    assert health_data["broker_writes_enabled"] is False
+    assert health_data["broker_writes_configured"] is True
+    assert health_data["simulation"] is True
+    assert health_data["live_certified"] is False
+
+
+def test_health_does_not_claim_running_before_a_cycle(test_env):
+    root, _, _ = test_env
+    write_live_health(root, "RUNNING", simulated=True)
+    health = json.loads((root / "state" / "live-health.json").read_text())
+    assert health["status"] == "STARTING"
+    assert health["live_certified"] is False
+
+
+def test_market_data_failure_is_degraded_not_running(test_env):
+    from swift_autotrader.live_dispatch import LiveDispatchResult
+    root, _, _ = test_env
+    result = LiveDispatchResult(
+        status="MARKET_DATA_UNAVAILABLE", parsed_events=0, entry_orders_submitted=0,
+        close_orders_submitted=0, cancellations=0, realized_daily_loss_usd=Decimal("0"),
+        open_positions_count=0)
+    write_live_health(root, "RUNNING", simulated=True, result=result)
+    health = json.loads((root / "state" / "live-health.json").read_text())
+    assert health["status"] == "DEGRADED"
+    assert health["last_dispatch_status"] == "MARKET_DATA_UNAVAILABLE"
+    assert health["broker_writes_enabled"] is False
