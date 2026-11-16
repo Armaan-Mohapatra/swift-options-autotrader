@@ -46,6 +46,7 @@ from swift_autotrader.live_service import (
     write_stop_marker_durable,
 )
 from swift_autotrader.orders.engine import PaperOrderEngine, ReconciliationError
+from swift_autotrader.orders.acceptance_scope import AcceptanceScope
 from swift_autotrader.orders.risk import PaperPreflight, RiskCeilings
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 from swift_autotrader.signals.lineage import SignalMatcher
@@ -510,7 +511,8 @@ def test_provider_required_approval_blocks_placement(managed_live_env) -> None:
         assert conn.execute("SELECT count(*) FROM order_intents").fetchone()[0] == 0
 
 
-def test_complete_supervised_order_lifecycle(managed_live_env) -> None:
+@pytest.mark.parametrize("exit_origin", [EventOrigin.LIVE, EventOrigin.RECOVERED])
+def test_complete_supervised_order_lifecycle(managed_live_env, exit_origin) -> None:
     """Demonstrate complete supervised lifecycle: ACCEPTED -> resting -> fill -> exit signal -> STC fill -> CLOSED."""
     root, settings, _, live_db = managed_live_env
     store = TelegramStore(live_db, settings.telegram_channel_id)
@@ -586,9 +588,10 @@ def test_complete_supervised_order_lifecycle(managed_live_env) -> None:
         received_at_utc=now,
         body="SPY ALL OUT",
         kind=EventKind.NEW,
-        origin=EventOrigin.LIVE,
+        origin=exit_origin,
     )
-    store.ingest(exit_msg, session_started_at_utc=now - timedelta(minutes=5))
+    exit_ingest = store.ingest(exit_msg, session_started_at_utc=now - timedelta(minutes=5))
+    assert exit_ingest.eligible_for_future_processing is (exit_origin is EventOrigin.LIVE)
 
     # Step D: Run cycle 3 -> exit policy submits SELL_TO_CLOSE order
     res3 = asyncio.run(dispatcher.run_once())
@@ -811,3 +814,61 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
         else:
             assert all_intents[0][1:] == ("INTENT_RECORDED", None)
 
+
+
+@pytest.mark.parametrize("mismatch", ["none", "strike", "expiry", "right", "limit", "expired"])
+def test_exact_supervised_receipt_enforced_before_broker_submission(managed_live_env, mismatch):
+    """Exercise the real engine authorization callback through a fake provider only."""
+    from datetime import date
+    from dataclasses import replace
+    _, settings, _, live_db = managed_live_env
+    now = datetime(2026, 11, 16, 15, 0, tzinfo=UTC)
+    store = TelegramStore(live_db, settings.telegram_channel_id)
+    store.ingest(
+        TelegramMessage(
+            channel_id=settings.telegram_channel_id, message_id=1001,
+            sent_at_utc=now, received_at_utc=now, body="BTO SPY 680C 11/20 @ 1.20",
+            kind=EventKind.NEW, origin=EventOrigin.LIVE,
+        ),
+        session_started_at_utc=now - timedelta(minutes=5),
+    )
+    with sqlite3.connect(live_db) as conn:
+        revision_id = conn.execute(
+            "SELECT revision_id FROM telegram_message_revisions WHERE message_id=1001"
+        ).fetchone()[0]
+    contract = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+    scope = AcceptanceScope(
+        settings.robinhood_mcp_account, settings.telegram_channel_id, 1001,
+        revision_id, contract, 1, Decimal("1.25"), now + timedelta(seconds=90),
+    )
+    if mismatch == "strike":
+        scope = replace(scope, contract=replace(contract, strike=Decimal("681")))
+    elif mismatch == "expiry":
+        scope = replace(scope, contract=replace(contract, expiration=date(2026, 11, 27)))
+    elif mismatch == "right":
+        scope = replace(scope, contract=replace(contract, right=OptionRight.PUT))
+    elif mismatch == "limit":
+        scope = replace(scope, maximum_limit=Decimal("1.00"))
+    elif mismatch == "expired":
+        scope = replace(scope, expires_at=now)
+
+    clock = FakeClock(now)
+    fake_mcp = StatefulFakeMCP(
+        account_number=settings.robinhood_mcp_account, buying_power=Decimal("10000"), clock=clock,
+    )
+    account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
+    mcp = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account, allow_live_writes=True)
+    dispatcher = LiveDispatcher(
+        live_db, settings.telegram_channel_id, mcp, account,
+        MCPReadOnlyOptionData(mcp, calendar=OpenMarketCalendar()), settings,
+        clock=clock, single_entry=True, acceptance_scope=scope,
+    )
+    if mismatch == "none":
+        assert asyncio.run(dispatcher.run_once()).entry_orders_submitted == 1
+        assert len(fake_mcp.orders) == 1
+    else:
+        with pytest.raises(PermissionError, match="outside supervised authorization"):
+            asyncio.run(dispatcher.run_once())
+        assert not any(name == "place_option_order" for name, _args in fake_mcp.calls)
+        with sqlite3.connect(live_db) as conn:
+            assert conn.execute("SELECT count(*) FROM order_intents").fetchone()[0] == 0
