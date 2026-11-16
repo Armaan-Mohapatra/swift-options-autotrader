@@ -1,6 +1,7 @@
 """Fail-closed paper-only settings. Secret fields excluded from representations."""
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Mapping
@@ -11,6 +12,45 @@ from pathlib import Path
 
 class ConfigurationError(ValueError):
     """Invalid or unsafe program configuration."""
+
+
+def validate_private_path(path: Path, *, install_root: Path | None = None,
+                          managed_name: str) -> Path:
+    """Keep credentials outside source checkouts; allow only the managed secret slot."""
+    if not path.is_absolute():
+        raise ConfigurationError("Credential path must be absolute")
+    target = path.resolve()
+    # Detect checkouts even when the process starts in another directory or a worktree.
+    if any((parent / ".git").exists() for parent in (target.parent, *target.parent.parents)):
+        raise ConfigurationError("Credential path cannot be inside the checkout")
+    # Reject symbolic links and Windows junctions/reparse points, including parents.
+    for part in (path, *path.parents):
+        try:
+            info = part.lstat()
+        except FileNotFoundError:
+            continue
+        if part.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ConfigurationError("Credential path cannot be redirected")
+    if install_root is not None:
+        root = install_root.resolve()
+        marker = root / "deployment.json"
+        expected = root / "secrets" / managed_name
+        try:
+            manifest = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ConfigurationError("Managed credential manifest is invalid") from exc
+        if (not install_root.is_absolute() or marker.is_symlink() or
+                not isinstance(manifest, dict) or
+                manifest.get("product") != "swift-options-autotrader" or
+                manifest.get("mode") != "PAPER_ONLY" or
+                manifest.get("live_enabled") is not False or
+                manifest.get("broker_writes_enabled") is not False or
+                target != expected or not expected.parent.is_dir()):
+            raise ConfigurationError("Credential path is not the managed private slot")
+        return target
+    if target.is_relative_to(Path.cwd().resolve()):
+        raise ConfigurationError("Credential path cannot be inside the checkout")
+    return target
 
 
 def _bool(name: str, value: str) -> bool:
@@ -51,6 +91,7 @@ class Settings:
     kill_switch_enabled: bool = False
     kill_switch_telegram_bot_token: str = field(default="", repr=False)
     kill_switch_telegram_chat_id: int | None = None
+    managed_install_root: Path | None = field(default=None, repr=False)
 
     @property
     def is_live(self) -> bool:
@@ -110,9 +151,10 @@ class Settings:
                 raise ConfigurationError("Telegram API hash is missing or malformed")
             if self.telegram_session_path is None or not self.telegram_session_path.is_absolute():
                 raise ConfigurationError("Session path must be an absolute local path")
-            path = self.telegram_session_path.resolve()
-            if path.is_relative_to(Path.cwd().resolve()):
-                raise ConfigurationError("Session path cannot be inside the checkout")
+            path = validate_private_path(
+                self.telegram_session_path, install_root=self.managed_install_root,
+                managed_name="telegram.session",
+            )
             if path.suffix != ".session" or not path.is_file():
                 raise ConfigurationError("A pre-authorized local .session file is required")
         return self
@@ -135,6 +177,7 @@ class Settings:
             kill_chat_id = _optional_int(data, "KILL_SWITCH_TELEGRAM_CHAT_ID")
         except (ValueError, InvalidOperation) as exc:
             raise ConfigurationError("Invalid numeric configuration") from exc
+        install_root = data.get("SWIFT_INSTALL_ROOT", "").strip()
         session = data.get("TELEGRAM_SESSION_PATH", "").strip()
         account = data.get("ROBINHOOD_MCP_ACCOUNT", "").strip()
         kill_bot_token = data.get("KILL_SWITCH_TELEGRAM_BOT_TOKEN", "").strip()
@@ -165,6 +208,7 @@ class Settings:
             kill_switch_enabled=_bool("KILL_SWITCH_ENABLED", data.get("KILL_SWITCH_ENABLED", "false")),
             kill_switch_telegram_bot_token=kill_bot_token,
             kill_switch_telegram_chat_id=kill_chat_id,
+            managed_install_root=Path(install_root) if install_root else None,
         ).validate()
 
     def public_summary(self) -> dict[str, str | int | bool]:
