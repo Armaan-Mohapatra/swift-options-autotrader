@@ -242,3 +242,21 @@ def test_equivalent_strike_and_canceled_partial_fill_block_duplicate(db):
     with sqlite3.connect(db) as conn:
         decision = conn.execute("SELECT reason FROM paper_engine_decisions WHERE signal_id='sig-next'").fetchone()
     assert decision[0] == "DUPLICATE_CONTRACT_POSITION"
+
+
+def test_exit_predating_entry_is_skipped(db: Path, catalog: StaticInstrumentCatalog):
+    """An exit message whose Telegram timestamp predates the entry signal is skipped."""
+    # Entry at 15:30:00
+    seed_msg(db, 100, "SPY 680C 11/20 @ 1.20", sent="2026-11-16T15:30:00.000000Z")
+    matcher = SignalMatcher(db, CHANNEL, catalog=catalog)
+    res_entry = matcher.process_pending()
+    assert len(res_entry) == 1
+    assert res_entry[0].status == "RECORDED"
+
+    # Exit with earlier timestamp at 15:25:00
+    seed_msg(db, 101, "SPY ALL OUT", sent="2026-11-16T15:25:00.000000Z")
+    res_exit = matcher.process_pending()
+    assert len(res_exit) == 1
+    assert res_exit[0].status == "SKIPPED"
+    assert res_exit[0].reason == "EXIT_PREDATES_ENTRY"
+

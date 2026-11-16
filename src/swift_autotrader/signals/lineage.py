@@ -425,6 +425,11 @@ class SignalMatcher:
             return self._result(row, alert, "RECORDED", "NO_ADD_METADATA_ONLY", sid)
         if alert.intent != SignalIntent.CLOSE_100_PERCENT:
             return self._result(row, alert, "REVIEW_REQUIRED", "UNEXPECTED_FOLLOWUP", sid)
+        sig_row = con.execute(
+            "SELECT created_at_utc FROM option_signals WHERE signal_id=?", (sid,)
+        ).fetchone()
+        if sig_row and row["telegram_sent_at_utc"] < sig_row[0]:
+            return self._result(row, alert, "SKIPPED", "EXIT_PREDATES_ENTRY", sid)
         con.execute(
             "INSERT OR IGNORE INTO signal_close_requests("
             "signal_id,first_revision_id,requested_at_utc) "

@@ -176,6 +176,7 @@ class MCPInstrument:
     chain_id: str | None
     minimum_tick: Decimal | None = None
     multiplier: int | None = None
+    underlying_type: str = "equity"
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,6 +386,13 @@ class RobinhoodMCPBroker:
         matches: list[MCPInstrument] = []
         for chain in matching_chains:
             chain_id = _identifier(chain.get("id"))
+            chain_type_val = chain.get("underlying_type")
+            if chain_type_val in {"equity", "index"}:
+                underlying_type = str(chain_type_val)
+            elif contract.underlying.upper() in {"SPX", "NDX", "RUT", "VIX", "XSP", "DJX", "MNX", "OEX"}:
+                underlying_type = "index"
+            else:
+                underlying_type = "equity"
             args = {
                 "chain_id": chain_id,
                 "expiration_dates": contract.expiration.isoformat(),
@@ -459,7 +467,7 @@ class RobinhoodMCPBroker:
                         raise MCPContractError("Conflicting option multipliers")
                     multiplier = int(primary)
                 matches.append(MCPInstrument(_identifier(option_id), contract, tradable,
-                                             chain_id, tick, multiplier))
+                                             chain_id, tick, multiplier, underlying_type=underlying_type))
         if len(matches) != 1 or not matches[0].tradable:
             raise MCPContractError("Exact, unique, tradable option instrument not verified")
         return matches[0]
@@ -517,7 +525,10 @@ class RobinhoodMCPBroker:
     async def review_order(self, account: MCPAccount, instrument: MCPInstrument,
                            intent: OrderIntent) -> OrderReview:
         args = self.order_arguments(account, instrument, intent)
-        args.update({"chain_symbol": instrument.contract.underlying, "underlying_type": "equity"})
+        underlying_type = getattr(instrument, "underlying_type", "equity")
+        if underlying_type not in {"equity", "index"}:
+            raise MCPContractError("Invalid or unrecognized underlying asset class")
+        args.update({"chain_symbol": instrument.contract.underlying, "underlying_type": underlying_type})
         result = await self._call("review_option_order", args)
         return normalize_read_only_review(result)
 

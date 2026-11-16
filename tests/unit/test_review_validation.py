@@ -23,3 +23,47 @@ def test_processed_quantity(order, expected):
 def test_bad_processed_quantity(order):
     with pytest.raises(ValueError):
         reconciled_processed_quantity(order)
+
+
+def test_review_order_underlying_type_mapping():
+    import asyncio
+    from datetime import date
+    from swift_autotrader.broker.robinhood_mcp import (
+        MCPAccount,
+        MCPContractError,
+        MCPInstrument,
+        RobinhoodMCPBroker,
+    )
+    from swift_autotrader.orders.commands import OrderIntent, OrderSide
+    from swift_autotrader.signals.identity import OptionContract, OptionRight
+    from tests.fixtures.live_mocks import StatefulFakeMCP
+
+    account = MCPAccount("test-acc", True, "option_level_2")
+    fake_mcp = StatefulFakeMCP(account_number="test-acc")
+    broker = RobinhoodMCPBroker(fake_mcp)
+
+    # 1. Equity contract (e.g. SPY)
+    contract_equity = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+    inst_equity = MCPInstrument("opt-1", contract_equity, True, "chain-1", underlying_type="equity")
+    intent_equity = OrderIntent("log-1", "idemp-1", contract_equity, OrderSide.BUY_TO_OPEN, 1, Decimal("1.25"))
+
+    asyncio.run(broker.review_order(account, inst_equity, intent_equity))
+    assert fake_mcp.calls[-1][0] == "review_option_order"
+    assert fake_mcp.calls[-1][1]["underlying_type"] == "equity"
+    assert fake_mcp.calls[-1][1]["chain_symbol"] == "SPY"
+
+    # 2. Index contract (e.g. SPX)
+    contract_index = OptionContract("SPX", OptionRight.CALL, Decimal("6000"), date(2026, 11, 20))
+    inst_index = MCPInstrument("opt-2", contract_index, True, "chain-2", underlying_type="index")
+    intent_index = OrderIntent("log-2", "idemp-2", contract_index, OrderSide.BUY_TO_OPEN, 1, Decimal("5.00"))
+
+    asyncio.run(broker.review_order(account, inst_index, intent_index))
+    assert fake_mcp.calls[-1][0] == "review_option_order"
+    assert fake_mcp.calls[-1][1]["underlying_type"] == "index"
+    assert fake_mcp.calls[-1][1]["chain_symbol"] == "SPX"
+
+    # 3. Invalid underlying_type
+    inst_invalid = MCPInstrument("opt-3", contract_equity, True, "chain-1", underlying_type="crypto")
+    with pytest.raises(MCPContractError, match="underlying asset class"):
+        asyncio.run(broker.review_order(account, inst_invalid, intent_equity))
+
