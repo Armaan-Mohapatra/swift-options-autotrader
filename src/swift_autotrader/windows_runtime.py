@@ -392,22 +392,26 @@ class PaperSupervisor:
                                        "KILL_SWITCH_TELEGRAM_CHAT_ID", "ROBINHOOD_MCP_ACCOUNT"}}
             # The notification scan only reads its local database. Do not require
             # authentication for a worker that deliberately has no credentials.
+            # Explicitly target the managed paper database file to prevent fallback mismatches.
+            db_file = (self.root / "data" / "swift.sqlite3").resolve()
             scan_env.update(TELEGRAM_ENABLED="false", KILL_SWITCH_ENABLED="false",
-                            PAPER_DISPATCH_ENABLED="false", PAPER_MARKET_DATA_SOURCE="none")
+                            PAPER_DISPATCH_ENABLED="false", PAPER_MARKET_DATA_SOURCE="none",
+                            DB_PATH=str(db_file), SWIFT_INSTALL_ROOT=str(self.root))
             result = subprocess.run(
                 [sys.executable, "-m", "swift_autotrader", "paper-notify-scan"],
                 cwd=self.root, env=scan_env, capture_output=True, timeout=10,
                 check=False,
             )
             if result.returncode != 0:
-                self.log.error("local_notification_scan_failed")
+                err_detail = result.stderr.decode("utf-8", errors="replace").strip()
+                self.log.error("local_notification_scan_failed (rc=%s): %s", result.returncode, err_detail)
             if self.env.get("ENABLE_TELEGRAM_STATUS_NOTIFICATIONS") == "true":
                 from swift_autotrader.windows_status_notifications import (
                     deliver_status_notifications,
                 )
                 deliver_status_notifications(self.root, env=self.env)
-        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError):
-            self.log.error("local_notification_scan_or_delivery_unavailable")
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
+            self.log.error("local_notification_scan_or_delivery_unavailable: %s", exc)
 
     def run(self, *, max_cycles: int | None = None) -> None:
         with single_instance(self.root / "state" / "service.lock"):

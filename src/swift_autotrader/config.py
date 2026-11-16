@@ -84,7 +84,7 @@ class Settings:
     allow_broker_writes: bool = False
     broker_backend: str = "paper"
     telegram_enabled: bool = False
-    db_path: Path = Path("data/swift_autotrader.sqlite3")
+    db_path: Path = Path("data/swift.sqlite3")
     max_contracts_per_signal: int = 1
     max_premium_per_signal_usd: Decimal = Decimal("0")
     entry_timeout_seconds: int = 3600
@@ -204,7 +204,7 @@ class Settings:
             ),
             broker_backend=data.get("BROKER_BACKEND", "paper").lower(),
             telegram_enabled=_bool("TELEGRAM_ENABLED", data.get("TELEGRAM_ENABLED", "false")),
-            db_path=Path(data.get("DB_PATH", "data/swift_autotrader.sqlite3")),
+            db_path=Path(data.get("DB_PATH", "data/swift.sqlite3")),
             max_contracts_per_signal=contracts,
             max_premium_per_signal_usd=premium,
             entry_timeout_seconds=timeout,
