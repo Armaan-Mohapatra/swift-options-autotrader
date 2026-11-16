@@ -56,7 +56,7 @@ async def run_paper_service(config: Settings, root: Path) -> None:
         raise LocalAuthNotConfigured("Enroll Robinhood read-only OAuth locally before enabling")
     approved_account = load_pinned_agentic_account(root)
     enrollment = OAuthEnrollment(
-        WindowsDPAPITokenStorage(path),
+        WindowsDPAPITokenStorage(path, install_root=root),
         _forbid_interactive_authorization,
         _forbid_interactive_authorization,
         redirect_uri="http://127.0.0.1:8766/callback",

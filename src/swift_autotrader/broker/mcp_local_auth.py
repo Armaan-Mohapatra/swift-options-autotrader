@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from swift_autotrader.broker.mcp_transport import OAuthEnrollment, authenticated_mcp_client
 from swift_autotrader.broker.robinhood_mcp import RobinhoodMCPBroker
+from swift_autotrader.config import ConfigurationError, validate_private_path
 
 
 class LocalAuthNotConfigured(RuntimeError):
@@ -28,12 +29,14 @@ class WindowsDPAPITokenStorage:
     an interactive Windows user account and reviewed local filesystem ACLs.
     """
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, install_root: Path | None = None):
         if os.name != "nt":
             raise LocalAuthNotConfigured("Windows DPAPI is required")
-        if not path.is_absolute() or path.resolve().is_relative_to(Path.cwd().resolve()):
-            raise LocalAuthNotConfigured("OAuth data must live outside project checkout")
-        self.path = path
+        try:
+            self.path = validate_private_path(path, install_root=install_root,
+                                              managed_name="oauth.dpapi")
+        except ConfigurationError as exc:
+            raise LocalAuthNotConfigured("OAuth data must live in a private, non-checkout location") from exc
 
     def _get(self, name: str):
         import win32crypt  # type: ignore[import-not-found]  # local Windows only
@@ -200,7 +203,7 @@ async def local_readonly_diagnostics() -> dict[str, object]:
     path = root / "secrets" / "oauth.dpapi"
     loopback = LoopbackAuthorization(port=8766)
     enrollment = OAuthEnrollment(
-        WindowsDPAPITokenStorage(path), loopback.redirect, loopback.callback,
+        WindowsDPAPITokenStorage(path, install_root=root), loopback.redirect, loopback.callback,
         redirect_uri="http://127.0.0.1:8766/callback",
     )
     async with authenticated_mcp_client(enrollment) as client:

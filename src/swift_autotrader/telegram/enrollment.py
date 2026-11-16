@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from swift_autotrader.config import ConfigurationError, Settings
+from swift_autotrader.config import ConfigurationError, Settings, validate_private_path
 
 logger = logging.getLogger("swift_autotrader.telegram.enrollment")
 
@@ -37,10 +37,10 @@ async def enroll_telegram_session(
         raise ConfigurationError("Session destination path must be provided or configured")
 
     # Guard: session path inside git checkout must be rejected
-    cwd = Path.cwd().resolve()
-    target = dest_path.resolve()
-    if cwd in target.parents or target == cwd:
-        raise ConfigurationError("Session path cannot be inside the checkout directory")
+    dest_path = validate_private_path(
+        dest_path, install_root=cfg.managed_install_root if cfg else None,
+        managed_name="telegram.session",
+    )
 
     managed_client = False
     if client is None:
@@ -112,7 +112,7 @@ async def enroll_telegram_session(
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         if not dest_path.exists():
             dest_path.write_bytes(b"TELETHON_ENROLLED_SESSION_KEY_DATA")
-        if hasattr(os, "chmod"):
+        if os.name == "posix":
             os.chmod(dest_path, 0o600)
 
         return True
