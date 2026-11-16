@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sqlite3
+import subprocess
+import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -11,6 +15,7 @@ import pytest
 
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.windows_runtime import (
+    Child,
     PaperSupervisor,
     backup_database,
     restore_database,
@@ -231,6 +236,59 @@ def test_worker_crash_restarts_with_bound_and_without_new_orders(install: Path) 
             supervisor._check_workers()
 
 
+def test_windows_runtime_drains_output_and_bounds_worker_logs(install: Path) -> None:
+    source_root = Path(__file__).resolve().parents[2] / "src"
+    code = (
+        "import logging,sys; from swift_autotrader.logging_config import configure_logging; "
+        "configure_logging(); log=logging.getLogger('swift_autotrader.test'); "
+        "[log.info('private alert %s', 'x'*100) for _ in range(40000)]; "
+        "sys.stdout.write('z'*2000000+'\\n'); sys.stdout.flush()"
+    )
+    env = {
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", r"C:\Windows"),
+        "PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(source_root),
+        "PAPER_ONLY": "true", "LIVE_ENABLED": "false",
+        "ALLOW_BROKER_WRITES": "false", "BROKER_BACKEND": "paper",
+        "DB_PATH": str(install / "data" / "swift.sqlite3"),
+    }
+
+    def spawn(_argv, **kwargs):
+        return subprocess.Popen([sys.executable, "-c", code], **kwargs)
+
+    supervisor = PaperSupervisor(install, env=env, spawn=spawn)
+    child = Child("noisy", ("test",))
+    supervisor._start(child)
+    assert child.process is not None
+    assert child.process.wait(timeout=10) == 0
+    for thread in supervisor._threads:
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+    files = list((install / "logs").glob("worker-noisy.jsonl*"))
+    assert files and len(files) <= 4
+    assert sum(path.stat().st_size for path in files) <= 8 * 1024 * 1024
+    assert all("private alert" not in path.read_text(encoding="utf-8") for path in files)
+
+
+def test_windows_runtime_terminates_real_worker_process(install: Path) -> None:
+    env = {
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", r"C:\Windows"),
+        "PATH": os.environ.get("PATH", ""), "PAPER_ONLY": "true",
+        "LIVE_ENABLED": "false", "ALLOW_BROKER_WRITES": "false",
+        "BROKER_BACKEND": "paper", "DB_PATH": str(install / "data" / "swift.sqlite3"),
+    }
+
+    def spawn(_argv, **kwargs):
+        return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], **kwargs)
+
+    supervisor = PaperSupervisor(install, env=env, spawn=spawn)
+    child = Child("sleeper", ("test",))
+    supervisor._start(child)
+    assert child.process is not None
+    time.sleep(0.2)
+    supervisor._stop_child(child)
+    assert child.process.poll() is not None
+
+
 def test_stop_marker_stops_service_and_prevents_new_worker(install: Path) -> None:
     pids = []
 
@@ -262,8 +320,8 @@ def test_backup_integrity_rejects_file_not_database(install: Path) -> None:
 
 
 def test_notification_scan_works_without_telegram_secrets(install: Path, monkeypatch) -> None:
-    from swift_autotrader.config import Settings
     from swift_autotrader import windows_runtime
+    from swift_autotrader.config import Settings
 
     session = install / "secrets/telegram.session"
     session.write_bytes(b"synthetic")

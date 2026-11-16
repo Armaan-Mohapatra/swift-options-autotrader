@@ -304,6 +304,10 @@ class PaperSupervisor:
                 child_env.pop("SWIFT_TELEGRAM_CHANNEL_ID", None)
                 child_env.pop("PAPER_DISPATCH_ENABLED", None)
                 child_env.pop("PAPER_MARKET_DATA_SOURCE", None)
+        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in child.name)
+        child_env["SWIFT_WORKER_LOG"] = str(
+            self.root / "logs" / f"worker-{safe_name}.jsonl"
+        )
         child.process = self.spawn(
             [sys.executable, "-m", "swift_autotrader", *child.args],
             env=child_env, cwd=str(self.root), stdout=subprocess.PIPE,
