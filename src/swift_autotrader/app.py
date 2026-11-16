@@ -24,6 +24,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("smoke", help="Side-effect-free health check")
     commands.add_parser("mvp-review", help="Offline MVP status; never starts workers or contacts broker")
+    commands.add_parser("mvp-startup-check", help="Offline entrypoint and import check; never starts workers")
     commands.add_parser("config-check", help="Validate fail-closed settings")
     commands.add_parser("dry-run", help="Paper-only diagnostics; never place orders")
     commands.add_parser("migrate", help="Explicitly initialize/migrate local SQLite DB")
@@ -67,6 +68,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     supervisor_cmd.add_argument("--root", default=None, help="Managed install root directory")
     supervisor_cmd.add_argument("--once", action="store_true", help="Run a single worker check cycle and exit")
     args = parser.parse_args(argv)
+    if args.command == "mvp-startup-check":
+        from swift_autotrader.mvp_review import startup_check
+        report = startup_check(frozenset(commands.choices))
+        print(json.dumps(report, sort_keys=True))
+        return 0 if report["offline_check_passed"] else 2
     if args.command == "mvp-review":
         from swift_autotrader.mvp_review import review_status
         print(json.dumps(review_status(frozenset(commands.choices)), sort_keys=True))
