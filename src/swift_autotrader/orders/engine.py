@@ -101,8 +101,10 @@ class PaperOrderEngine:
         exit_policy: ExitPolicy | None = None,
         clock: Callable[[], datetime] | None = None,
         live_mode: bool = False,
+        entry_authorizer: Callable[[sqlite3.Connection, sqlite3.Row, OrderIntent, datetime], bool] | None = None,
     ) -> None:
         self.live_mode = live_mode
+        self.entry_authorizer = entry_authorizer
         if not live_mode and type(broker) is not PaperBroker:
             raise TypeError("Phase 3 engine accepts ONLY the concrete PaperBroker when live_mode=False")
         self.db_path = Path(db_path)
@@ -231,6 +233,9 @@ class PaperOrderEngine:
                     existing["idempotency_key"] != intent.idempotency_key):
                     raise ReconciliationError("existing order intent differs from request")
                 return intent, False
+            if (side is OrderSide.BUY_TO_OPEN and self.entry_authorizer is not None
+                    and not self.entry_authorizer(db, signal, intent, as_utc(self.clock()))):
+                raise PermissionError("Entry is outside supervised authorization or allowance consumed")
             db.execute(
                 "INSERT INTO order_intents(logical_order_id,signal_id,idempotency_key,"
                 "side,requested_quantity,filled_quantity,limit_price,state) "
