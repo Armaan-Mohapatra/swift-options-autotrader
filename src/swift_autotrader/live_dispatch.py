@@ -30,6 +30,8 @@ from swift_autotrader.config import Settings
 from swift_autotrader.notifications.alerts import NotificationCenter
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.exposure_state import active_signal_ids
+from swift_autotrader.orders.acceptance_scope import AcceptanceScope
+from swift_autotrader.orders.commands import OrderIntent
 from swift_autotrader.orders.exit_policy import ExitQuote
 from swift_autotrader.orders.risk import Preflight, RiskCeilings
 from swift_autotrader.orders.slippage import resolve_live_entry_limit, SlippageExceededError
@@ -73,6 +75,7 @@ class LiveDispatcher:
         single_entry: bool = False,
         authorized_symbol: str | None = None,
         target_message_id: int | None = None,
+        acceptance_scope: AcceptanceScope | None = None,
     ):
         if not mcp_broker.allow_live_writes:
             raise PermissionError("LiveDispatcher requires mcp_broker.allow_live_writes=True")
@@ -86,6 +89,14 @@ class LiveDispatcher:
         self.single_entry = single_entry
         self.authorized_symbol = authorized_symbol.strip().upper() if authorized_symbol else None
         self.target_message_id = target_message_id
+        self.acceptance_scope = acceptance_scope
+        if acceptance_scope is not None:
+            if not single_entry or acceptance_scope.account != account.account_number or acceptance_scope.channel_id != channel_id:
+                raise PermissionError("Supervised account/channel scope mismatch")
+            if self.authorized_symbol not in (None, acceptance_scope.contract.underlying) or target_message_id not in (None, acceptance_scope.message_id):
+                raise PermissionError("Supervised command scope mismatch")
+            self.authorized_symbol = acceptance_scope.contract.underlying
+            self.target_message_id = acceptance_scope.message_id
 
         # Risk limits derived from settings
         self.limits = RiskCeilings(
@@ -114,11 +125,68 @@ class LiveDispatcher:
             limits=self.limits,
             clock=self.clock,
             live_mode=True,
+            entry_authorizer=self._authorize_entry if self.single_entry else None,
         )
         self.notifications = NotificationCenter(self.db_path)
 
+    def _authorize_entry(self, db, signal, intent: OrderIntent, now: datetime) -> bool:
+        # Called within the engine's BEGIN IMMEDIATE transaction. Enforce one
+        # durable attempted entry even when two dispatch cycles race.
+        if db.execute("SELECT 1 FROM order_intents WHERE side='BUY_TO_OPEN' LIMIT 1").fetchone():
+            return False
+        scope = self.acceptance_scope
+        if scope is None:
+            # Existing isolated simulation callers only. The real service
+            # refuses single-entry startup without an exact local receipt.
+            return True
+        row = db.execute(
+            "SELECT m.channel_id,m.source_message_id,m.first_revision_id,t.latest_revision_id "
+            "FROM signal_metadata m JOIN telegram_messages t "
+            "ON t.channel_id=m.channel_id AND t.message_id=m.source_message_id "
+            "WHERE m.signal_id=?", (str(signal["signal_id"]),),
+        ).fetchone()
+        if row is None or int(row[2]) != int(row[3]):
+            return False
+        return scope.permits(
+            account=self.account.account_number, channel_id=int(row[0]),
+            message_id=int(row[1]), revision_id=int(row[2]),
+            contract=intent.contract, quantity=intent.quantity,
+            limit=intent.limit_price, now=now,
+        )
+
+    def _verify_supervised_journal(self) -> None:
+        scope = self.acceptance_scope
+        if scope is None:
+            return
+        import sqlite3
+        from contextlib import closing
+        with closing(sqlite3.connect(str(self.db_path))) as db:
+            rows = db.execute(
+                "SELECT o.side,o.requested_quantity,o.limit_price,s.underlying,s.option_right,s.strike,"
+                "s.expiration_date,m.channel_id,m.source_message_id,m.first_revision_id "
+                "FROM order_intents o LEFT JOIN option_signals s ON s.signal_id=o.signal_id "
+                "LEFT JOIN signal_metadata m ON m.signal_id=o.signal_id"
+            ).fetchall()
+        from datetime import date
+        from swift_autotrader.signals.identity import OptionRight
+        buys = 0
+        for row in rows:
+            contract = OptionContract(row[3], OptionRight(row[4]), Decimal(row[5]), date.fromisoformat(row[6]))
+            if (contract != scope.contract or int(row[7]) != scope.channel_id
+                    or int(row[8]) != scope.message_id or int(row[9]) != scope.revision_id):
+                raise PermissionError("Existing journal contains out-of-scope orders")
+            if row[0] == "BUY_TO_OPEN":
+                buys += 1
+                if row[1] != scope.quantity or not Decimal("0") < Decimal(row[2]) <= scope.maximum_limit:
+                    raise PermissionError("Existing buy differs from supervised receipt")
+            elif row[0] != "SELL_TO_CLOSE":
+                raise PermissionError("Unknown journal order side")
+        if buys > 1 or (rows and buys != 1):
+            raise PermissionError("Supervised journal contains ambiguous ownership")
+
     async def run_once(self) -> LiveDispatchResult:
         """Execute one complete live cycle."""
+        self._verify_supervised_journal()
         now = self.clock()
         log.info("Starting live dispatch cycle at %s", now.isoformat())
 
@@ -307,6 +375,8 @@ class LiveDispatcher:
                     continue
                 if self.single_entry:
                     if self.target_message_id is not None and mid != self.target_message_id:
+                        continue
+                    if self.acceptance_scope is not None and rid != self.acceptance_scope.revision_id:
                         continue
                     if (
                         self.authorized_symbol is not None
