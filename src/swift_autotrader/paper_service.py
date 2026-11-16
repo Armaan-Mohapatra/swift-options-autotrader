@@ -29,7 +29,7 @@ async def _forbid_interactive_authorization(*_args, **_kwargs):
 
 def token_file(root: Path) -> Path:
     """Accept only a managed, private secrets directory; never a repository path."""
-    managed = validate_install_root(root)
+    managed = validate_install_root(root, allowed_modes=("PAPER_ONLY",))
     destination = (managed / "secrets" / "oauth.dpapi").resolve()
     if destination.parent != (managed / "secrets").resolve():
         raise LocalAuthNotConfigured("Untrusted MCP token location")

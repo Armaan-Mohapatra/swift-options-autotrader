@@ -105,3 +105,58 @@ def test_live_manifest_not_accepted(installed):
     }), encoding="utf-8")
     with pytest.raises(ConfigurationError, match="private slot"):
         Settings.from_env(env)
+
+
+def test_live_manifest_accepted_for_live_settings(installed):
+    root, env = installed
+    (root / "deployment.json").write_text(json.dumps({
+        "product": "swift-options-autotrader", "mode": "LIVE",
+        "live_enabled": True, "broker_writes_enabled": True,
+    }), encoding="utf-8")
+    live_env = dict(
+        env,
+        PAPER_ONLY="false",
+        LIVE_ENABLED="true",
+        ALLOW_BROKER_WRITES="true",
+        BROKER_BACKEND="robinhood_mcp",
+        ROBINHOOD_MCP_ACCOUNT="RH_LIVE_ACC_123",
+    )
+    settings = Settings.from_env(live_env)
+    assert settings.is_live is True
+    assert settings.mode == "LIVE"
+    assert settings.telegram_session_path == (root / "secrets/telegram.session").resolve()
+
+
+def test_paper_manifest_rejected_for_live_settings(installed):
+    root, env = installed
+    (root / "deployment.json").write_text(json.dumps({
+        "product": "swift-options-autotrader", "mode": "PAPER_ONLY",
+        "live_enabled": False, "broker_writes_enabled": False,
+    }), encoding="utf-8")
+    live_env = dict(
+        env,
+        PAPER_ONLY="false",
+        LIVE_ENABLED="true",
+        ALLOW_BROKER_WRITES="true",
+        BROKER_BACKEND="robinhood_mcp",
+        ROBINHOOD_MCP_ACCOUNT="RH_LIVE_ACC_123",
+    )
+    with pytest.raises(ConfigurationError, match="private slot"):
+        Settings.from_env(live_env)
+
+
+def test_oauth_path_accepts_live_and_paper_manifest(installed):
+    root, _ = installed
+    path = root / "secrets/oauth.dpapi"
+    # Paper manifest
+    (root / "deployment.json").write_text(json.dumps({
+        "product": "swift-options-autotrader", "mode": "PAPER_ONLY",
+        "live_enabled": False, "broker_writes_enabled": False,
+    }), encoding="utf-8")
+    assert validate_private_path(path, install_root=root, managed_name="oauth.dpapi") == path
+    # Live manifest
+    (root / "deployment.json").write_text(json.dumps({
+        "product": "swift-options-autotrader", "mode": "LIVE",
+        "live_enabled": True, "broker_writes_enabled": True,
+    }), encoding="utf-8")
+    assert validate_private_path(path, install_root=root, managed_name="oauth.dpapi") == path

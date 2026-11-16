@@ -45,6 +45,30 @@ def test_manifest_rejects_unmanaged_paths(install: Path, tmp_path: Path) -> None
         validate_install_root(install)
 
 
+def test_validate_install_root_live_manifest(install: Path) -> None:
+    # Valid live manifest
+    live_doc = {
+        "product": "swift-options-autotrader", "mode": "LIVE",
+        "live_enabled": True, "broker_writes_enabled": True,
+    }
+    (install / "deployment.json").write_text(json.dumps(live_doc))
+    assert validate_install_root(install) == install
+
+    # Unsafe live manifest (live_enabled False)
+    bad_live_doc = {
+        "product": "swift-options-autotrader", "mode": "LIVE",
+        "live_enabled": False, "broker_writes_enabled": True,
+    }
+    (install / "deployment.json").write_text(json.dumps(bad_live_doc))
+    with pytest.raises(RuntimeError, match="Unsafe or unknown installation manifest"):
+        validate_install_root(install)
+
+    # Allowed modes restriction
+    (install / "deployment.json").write_text(json.dumps(live_doc))
+    with pytest.raises(RuntimeError, match="Unsafe or unknown installation manifest"):
+        validate_install_root(install, allowed_modes=("PAPER_ONLY",))
+
+
 def test_nonblocking_single_instance(install: Path) -> None:
     lock = install / "state" / "service.lock"
     with (

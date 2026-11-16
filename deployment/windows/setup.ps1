@@ -165,6 +165,9 @@ foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $source 'src') -Recurs
 foreach ($file in @('common.ps1','setup.ps1','manage.ps1','service.ps1','secrets.ps1','healthcheck.ps1','extract_approved_package.py')) {
     Copy-Item -LiteralPath (Join-Path $source ('deployment/windows/' + $file)) -Destination (Join-Path $root ('scripts\' + $file)) -Force
 }
+if (Test-Path -LiteralPath (Join-Path $source 'scripts\pin_account.py')) {
+    Copy-Item -LiteralPath (Join-Path $source 'scripts\pin_account.py') -Destination (Join-Path $root 'scripts\pin_account.py') -Force
+}
 $manifest = Join-Path $root 'deployment.json'
 if (-not (Test-Path -LiteralPath $manifest)) {
     $document = [ordered]@{

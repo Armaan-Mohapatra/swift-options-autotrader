@@ -1,0 +1,94 @@
+{
+  "manifest_version": "1.0.0",
+  "project": "swift-options-autotrader",
+  "timestamp_utc": "2026-11-16T05:22:00Z",
+  "base_commit": "5303a89ab707dd51e81331b54db3e70450bc3a6b",
+  "target_branch": "fix/production-deployment-compatibility-20261116",
+  "test_suite": {
+    "baseline_passed": 710,
+    "current_passed": 720,
+    "warnings": 1,
+    "failures": 0,
+    "duration_seconds": 10.16
+  },
+  "remediated_issues": [
+    "1. Managed credential validation (validate_private_path & WindowsDPAPITokenStorage) accepts LIVE manifest when Settings is live while preserving fail-closed rejection for paper settings.",
+    "2. deployment/windows/common.ps1 Assert-SwiftManifest accepts LIVE manifests and Set-SwiftEnvironment configures LIVE environment with Set-SwiftLiveEnvironment helper.",
+    "3. deployment/windows/service.ps1 and manage.ps1 support RegisterLiveTask and UnregisterLiveTask actions for SwiftAutoTrader-Live-Local.",
+    "4. scripts/pin_account.py implemented and packaged along with pin_agentic_account DPAPI helper and swift-autotrader pin-account CLI.",
+    "5. Windows installation procedure corrected to use setup.ps1 from checkout to managed install directory rather than invalid Git operations inside managed root.",
+    "6. live-dispatch --once accurately classified as an active execution cycle, clearly distinguished from read-only mcp-diagnostics --connect."
+  ],
+  "files": {
+    "deployment/windows/common.ps1": {
+      "bytes": 13718,
+      "sha256": "0e299cb844c1260347ed6a4583df07e7332e9d2aef995444dfbdd78dfa26bb3a",
+      "git_blob": "98f5076ffc93849a835860c91ab6207565308914"
+    },
+    "deployment/windows/manage.ps1": {
+      "bytes": 7666,
+      "sha256": "04aa3fb113b5b56fdafd572445b9ad387db5d65e81b56f2c68179cafbcb9fe6e",
+      "git_blob": "616bf4048968aa5c20f8cb8d8f15e04ef7fb8271"
+    },
+    "deployment/windows/service.ps1": {
+      "bytes": 3357,
+      "sha256": "26effc0f48ab5fd0905b711cac2348a0236dec8ac86547aab0814a45871a0a03",
+      "git_blob": "bc3e33985b8d0958ab7c6d338e5340a9adbad8b4"
+    },
+    "deployment/windows/setup.ps1": {
+      "bytes": 13582,
+      "sha256": "8d4631f30fd8a35982d11040408852b398da1533bf2eeaf622d05c1d8393e6d8",
+      "git_blob": "1cbedf2c16e0dfc34bcf8c3e4f859c6c1052f297"
+    },
+    "scripts/build_windows_package.py": {
+      "bytes": 9584,
+      "sha256": "c073cc82eba420670b5c253bb4ee7795f3129d6c969891a718ad6f22e3f38a58",
+      "git_blob": "24a60036808537abdf81f832a5d997723e0b0d78"
+    },
+    "scripts/pin_account.py": {
+      "bytes": 1163,
+      "sha256": "4044fe7af902b0278127a4fb8f83d504e8f913347eb1b0d75c57e756f35619eb",
+      "git_blob": "e0b006cbce69941007c6b86d9c6384409f7bd065"
+    },
+    "src/swift_autotrader/app.py": {
+      "bytes": 15587,
+      "sha256": "52b3916e572ee3c1c4e7008a7ebf22ce2e032f7477210023250325c987903100",
+      "git_blob": "c1bb11f994113301e8e15e01dc432f6675b29bcb"
+    },
+    "src/swift_autotrader/broker/mcp_local_auth.py": {
+      "bytes": 11498,
+      "sha256": "6d8254a77a5f9740a103d8196fc6c916572b7c5d8c63fca1379ff736725e024a",
+      "git_blob": "3556dd7c12c523f26312d224c1ffb34d4dbaff34"
+    },
+    "src/swift_autotrader/config.py": {
+      "bytes": 13208,
+      "sha256": "945125d6a55dd3d426ac07669c5e3f3fcd035df2d0831c03479833392d9f32f8",
+      "git_blob": "24e729e08ea6c754501dc766502ce1f4308bf5ec"
+    },
+    "src/swift_autotrader/paper_service.py": {
+      "bytes": 3722,
+      "sha256": "8ebbed5291d8bc11dc24b1225f05d6bea7f4de784189e06f7f22f2554d05cb18",
+      "git_blob": "6a23b4c729d6a22283e5d1845944ce214808d097"
+    },
+    "src/swift_autotrader/windows_runtime.py": {
+      "bytes": 21760,
+      "sha256": "2ba99f0abe2b61401b8238e39b4d8a4f45d8fdf62ecbc0653b05d9d85fd90d82",
+      "git_blob": "8b667ed324fd7de356661862cb3d55d3fd1d8a78"
+    },
+    "tests/unit/test_managed_credential_paths.py": {
+      "bytes": 6153,
+      "sha256": "fcad15b207f66b4f324e66392d665dfb7b0bb40dbcd3e2dc132c37d83ea891f0",
+      "git_blob": "a50bacb36b1f85f8f3dda86368e56344c0fb75fc"
+    },
+    "tests/unit/test_pin_account.py": {
+      "bytes": 4526,
+      "sha256": "39777b2e80ef9ac3881e5726c4127f7a662845cfccfa327fc81bb569fe7d959c",
+      "git_blob": "f368be4b4ae607682fe5c532ec599367ca86f978"
+    },
+    "tests/unit/test_windows_runtime.py": {
+      "bytes": 13093,
+      "sha256": "a9938cc1ef59b3f5103bc59ed8240613927591ce6f1a8164e0dc597f4322c462",
+      "git_blob": "3d4d0799c4b8a53a8458bbfc5bbdeba54b1f210c"
+    }
+  }
+}

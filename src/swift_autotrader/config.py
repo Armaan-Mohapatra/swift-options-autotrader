@@ -15,7 +15,8 @@ class ConfigurationError(ValueError):
 
 
 def validate_private_path(path: Path, *, install_root: Path | None = None,
-                          managed_name: str) -> Path:
+                          managed_name: str,
+                          allowed_modes: tuple[str, ...] = ("PAPER_ONLY", "LIVE")) -> Path:
     """Keep credentials outside source checkouts; allow only the managed secret slot."""
     if not path.is_absolute():
         raise ConfigurationError("Credential path must be absolute")
@@ -41,11 +42,23 @@ def validate_private_path(path: Path, *, install_root: Path | None = None,
             raise ConfigurationError("Managed credential manifest is invalid") from exc
         if (not install_root.is_absolute() or marker.is_symlink() or
                 not isinstance(manifest, dict) or
-                manifest.get("product") != "swift-options-autotrader" or
-                manifest.get("mode") != "PAPER_ONLY" or
-                manifest.get("live_enabled") is not False or
-                manifest.get("broker_writes_enabled") is not False or
-                target != expected or not expected.parent.is_dir()):
+                manifest.get("product") != "swift-options-autotrader"):
+            raise ConfigurationError("Credential path is not the managed private slot")
+
+        mode = manifest.get("mode")
+        if mode not in allowed_modes:
+            raise ConfigurationError("Credential path is not the managed private slot")
+
+        if mode == "PAPER_ONLY":
+            if manifest.get("live_enabled") is not False or manifest.get("broker_writes_enabled") is not False:
+                raise ConfigurationError("Credential path is not the managed private slot")
+        elif mode == "LIVE":
+            if manifest.get("live_enabled") is not True or manifest.get("broker_writes_enabled") is not True:
+                raise ConfigurationError("Credential path is not the managed private slot")
+        else:
+            raise ConfigurationError("Credential path is not the managed private slot")
+
+        if target != expected or not expected.parent.is_dir():
             raise ConfigurationError("Credential path is not the managed private slot")
         return target
     if target.is_relative_to(Path.cwd().resolve()):
@@ -151,9 +164,11 @@ class Settings:
                 raise ConfigurationError("Telegram API hash is missing or malformed")
             if self.telegram_session_path is None or not self.telegram_session_path.is_absolute():
                 raise ConfigurationError("Session path must be an absolute local path")
+            expected_mode = "LIVE" if self.is_live else "PAPER_ONLY"
             path = validate_private_path(
                 self.telegram_session_path, install_root=self.managed_install_root,
                 managed_name="telegram.session",
+                allowed_modes=(expected_mode,),
             )
             if path.suffix != ".session" or not path.is_file():
                 raise ConfigurationError("A pre-authorized local .session file is required")

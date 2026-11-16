@@ -50,19 +50,34 @@ def _atomic_json(path: Path, document: dict[str, object]) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def validate_install_root(root: Path) -> Path:
+def validate_install_root(
+    root: Path,
+    *,
+    allowed_modes: tuple[str, ...] = ("PAPER_ONLY", "LIVE"),
+) -> Path:
     """Reject arbitrary paths: commands may affect only manifest-owned install."""
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
         raise RuntimeError("Swift install directory not present")
     marker = root / MANIFEST_NAME
     if not marker.is_file() or marker.is_symlink():
-        raise RuntimeError("Managed paper-only installation marker is missing")
-    document = json.loads(marker.read_text(encoding="utf-8"))
-    if (document.get("product") != "swift-options-autotrader" or
-        document.get("mode") != "PAPER_ONLY" or
-        document.get("live_enabled") is not False or
-        document.get("broker_writes_enabled") is not False):
+        raise RuntimeError("Managed installation marker is missing")
+    try:
+        document = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("Installation manifest is unreadable") from exc
+    if not isinstance(document, dict) or document.get("product") != "swift-options-autotrader":
+        raise RuntimeError("Unsafe or unknown installation manifest")
+    mode = document.get("mode")
+    if mode not in allowed_modes:
+        raise RuntimeError("Unsafe or unknown installation manifest")
+    if mode == "PAPER_ONLY":
+        if document.get("live_enabled") is not False or document.get("broker_writes_enabled") is not False:
+            raise RuntimeError("Unsafe or unknown installation manifest")
+    elif mode == "LIVE":
+        if document.get("live_enabled") is not True or document.get("broker_writes_enabled") is not True:
+            raise RuntimeError("Unsafe or unknown installation manifest")
+    else:
         raise RuntimeError("Unsafe or unknown installation manifest")
     for part in ("data", "logs", "backups", "secrets", "state", "releases"):
         location = root / part
@@ -235,7 +250,7 @@ class PaperSupervisor:
         sleep: Callable[[float], None] = time.sleep,
         spawn: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     ) -> None:
-        self.root = validate_install_root(root)
+        self.root = validate_install_root(root, allowed_modes=("PAPER_ONLY",))
         self.env = dict(os.environ if env is None else env)
         settings = Settings.from_env(self.env)
         settings.validate()

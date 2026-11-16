@@ -4,9 +4,10 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start','Stop','Restart','Status','Health','Backup','Restore','Rollback','Uninstall','Logs')]
+    [ValidateSet('Start','Stop','Restart','Status','Health','Backup','Restore','Rollback','Uninstall','Logs','RegisterLiveTask','UnregisterLiveTask')]
     [string]$Action,
     [string]$InstallRoot = '',
+    [ValidateSet('Paper', 'Live')][string]$Mode = 'Paper',
     [string]$BackupFile = '',
     [switch]$PurgeData,
     [switch]$IUnderstandDataLoss,
@@ -16,7 +17,7 @@ param(
 Assert-SwiftWindows
 $root = Resolve-SwiftInstallRoot -InstallRoot $InstallRoot
 Assert-SwiftManifest $root
-$taskName = 'SwiftAutoTrader-Paper-Local'
+$taskName = if ($Mode -eq 'Live') { 'SwiftAutoTrader-Live-Local' } else { 'SwiftAutoTrader-Paper-Local' }
 $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 # Refuse to operate a colliding task owned by another application/installation.
 if ($null -ne $task) {
@@ -82,13 +83,21 @@ switch ($Action) {
         }
     }
     'Status' {
-        $heartbeat = Join-Path $root 'state\health.json'
-        $state = @{ task_state = (Get-TaskState); status = 'NOT_STARTED'; mode = 'PAPER_ONLY' }
+        $heartbeatFile = if ($Mode -eq 'Live') { 'state\live-health.json' } else { 'state\health.json' }
+        $heartbeat = Join-Path $root $heartbeatFile
+        $expectedMode = if ($Mode -eq 'Live') { 'LIVE' } else { 'PAPER_ONLY' }
+        $state = @{ task_state = (Get-TaskState); status = 'NOT_STARTED'; mode = $expectedMode }
         if (Test-Path -LiteralPath $heartbeat -PathType Leaf) {
             $state.status = 'HEARTBEAT_RECORDED'
             $state.heartbeat = Get-Content -LiteralPath $heartbeat -Raw -Encoding UTF8 | ConvertFrom-Json
         }
         $state | ConvertTo-Json -Depth 4
+    }
+    'RegisterLiveTask' {
+        & (Join-Path $PSScriptRoot 'service.ps1') -Action RegisterLiveTask -InstallRoot $root
+    }
+    'UnregisterLiveTask' {
+        & (Join-Path $PSScriptRoot 'service.ps1') -Action UnregisterLiveTask -InstallRoot $root
     }
     'Health' {
         Invoke-PythonRuntime -Arguments @('status', '--root', $root)

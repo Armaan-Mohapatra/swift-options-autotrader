@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import importlib.util
 import json
+from pathlib import Path
 import sqlite3
 import sys
 from collections.abc import Sequence
@@ -72,6 +73,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     supervisor_cmd = commands.add_parser("supervisor", help="Cross-platform daemon supervisor")
     supervisor_cmd.add_argument("--root", default=None, help="Managed install root directory")
     supervisor_cmd.add_argument("--once", action="store_true", help="Run a single worker check cycle and exit")
+    pin_cmd = commands.add_parser("pin-account", help="Pin confirmed Robinhood MCP account locally using Windows DPAPI")
+    pin_cmd.add_argument("--root", required=True, help="Managed install root directory")
+    pin_cmd.add_argument("--account-number", required=True, help="Confirmed Robinhood account number")
     args = parser.parse_args(argv)
     if args.command == "mvp-startup-check":
         from swift_autotrader.mvp_review import startup_check
@@ -114,20 +118,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "real_broker_writes_enabled": False,
                 }
         elif args.command == "paper-dispatch-service":
-            from pathlib import Path
-
             from swift_autotrader.paper_service import run_paper_service
             asyncio.run(run_paper_service(config, Path(args.root)))
             payload = {"status": "PAPER_DISPATCH_STOPPED", "real_broker_writes_enabled": False}
         elif args.command == "live-dispatch":
-            from pathlib import Path
-
             from swift_autotrader.live_service import run_live_service
             asyncio.run(run_live_service(config, Path(args.root), once=args.once))
             payload = {"status": "LIVE_DISPATCH_STOPPED", "real_broker_writes_enabled": config.allow_broker_writes}
         elif args.command == "paper-replay":
-            from pathlib import Path
-
             from swift_autotrader.analytics.replay import replay_from_file
 
             payload = replay_from_file(Path(args.input), compare=args.compare)
@@ -226,7 +224,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 payload = {"status": "PARSER_HEALTH", "decisions": matcher.statistics()}
         elif args.command == "telegram-enroll":
-            from pathlib import Path
             from swift_autotrader.telegram.enrollment import enroll_telegram_session
 
             target_path = Path(args.session_path) if args.session_path else config.telegram_session_path
@@ -247,12 +244,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_kill_switch_listener(config)
             payload = {"status": "KILL_SWITCH_STOPPED"}
         elif args.command == "supervisor":
-            from pathlib import Path
             from swift_autotrader.supervisor import run_supervisor
 
             root_path = Path(args.root) if args.root else Path.cwd()
             run_supervisor(root_path, config=config, once=args.once)
             payload = {"status": "SUPERVISOR_STOPPED"}
+        elif args.command == "pin-account":
+            from swift_autotrader.broker.mcp_local_auth import pin_agentic_account
+
+            target_path = pin_agentic_account(Path(args.root), args.account_number)
+            payload = {
+                "status": "ACCOUNT_PINNED",
+                "path": str(target_path),
+                "account_length": len(args.account_number.strip()),
+            }
         else:
             configure_logging(config.log_level)
             start_listener(config)

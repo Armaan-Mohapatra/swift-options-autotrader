@@ -22,6 +22,10 @@ class LocalAuthNotConfigured(RuntimeError):
     pass
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 class WindowsDPAPITokenStorage:
     """Official SDK TokenStorage shape; encrypt both token and registered client info.
 
@@ -30,11 +34,12 @@ class WindowsDPAPITokenStorage:
     """
 
     def __init__(self, path: Path, *, install_root: Path | None = None):
-        if os.name != "nt":
+        if not _is_windows():
             raise LocalAuthNotConfigured("Windows DPAPI is required")
         try:
             self.path = validate_private_path(path, install_root=install_root,
-                                              managed_name="oauth.dpapi")
+                                              managed_name="oauth.dpapi",
+                                              allowed_modes=("PAPER_ONLY", "LIVE"))
         except ConfigurationError as exc:
             raise LocalAuthNotConfigured("OAuth data must live in a private, non-checkout location") from exc
 
@@ -101,8 +106,10 @@ class WindowsDPAPITokenStorage:
 
 def load_pinned_agentic_account(root: Path) -> str:
     """Read only the operator-confirmed MCP account from the local DPAPI store."""
-    if os.name != "nt":
+    if not _is_windows():
         raise LocalAuthNotConfigured("Windows DPAPI required for account binding")
+    from swift_autotrader.windows_runtime import validate_install_root
+    root = validate_install_root(Path(root), allowed_modes=("PAPER_ONLY", "LIVE"))
     import win32crypt  # type: ignore[import-not-found]
 
     path = root / "secrets" / "agentic_account.dpapi"
@@ -119,6 +126,37 @@ def load_pinned_agentic_account(root: Path) -> str:
     except Exception as exc:
         raise LocalAuthNotConfigured("Exclusive MCP account binding invalid") from exc
     return account
+
+
+def pin_agentic_account(root: Path, account_number: str) -> Path:
+    """Encrypt and store operator-confirmed MCP account binding in local DPAPI store."""
+    if not _is_windows():
+        raise LocalAuthNotConfigured("Windows DPAPI required for account binding")
+    account = account_number.strip()
+    if not (4 <= len(account) <= 256):
+        raise ValueError("Account number must be between 4 and 256 characters")
+    from swift_autotrader.windows_runtime import validate_install_root
+    root = validate_install_root(Path(root), allowed_modes=("PAPER_ONLY", "LIVE"))
+    secrets_dir = (root / "secrets").resolve()
+    target = (secrets_dir / "agentic_account.dpapi").resolve()
+    if target.parent != secrets_dir:
+        raise LocalAuthNotConfigured("Invalid secrets path")
+    import win32crypt  # type: ignore[import-not-found]
+    record = {"version": 1, "account_number": account}
+    payload = json.dumps(record).encode("utf-8")
+    cipher = win32crypt.CryptProtectData(
+        payload,
+        "SwiftAutoTrader Agentic Account Binding",
+        None,
+        None,
+        None,
+        0,
+    )
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temp_target = target.with_suffix(".tmp")
+    temp_target.write_bytes(cipher)
+    temp_target.replace(target)
+    return target
 
 
 class LoopbackAuthorization:

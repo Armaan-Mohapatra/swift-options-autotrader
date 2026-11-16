@@ -30,6 +30,7 @@ ALLOWED_DOCS = (
 ALLOWED_SCRIPT = (
     "scripts/audit_lock.py", "scripts/scan_secrets.py",
     "scripts/build_windows_package.py", "scripts/phase7_verify.py",
+    "scripts/pin_account.py",
 )
 
 
