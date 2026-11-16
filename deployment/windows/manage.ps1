@@ -61,6 +61,11 @@ function Invoke-PythonRuntime {
 switch ($Action) {
     'Start' {
         if ($null -eq $task) { throw 'No scheduled task. Install with scheduling enabled.' }
+        $opposingTaskName = if ($Mode -eq 'Live') { 'SwiftAutoTrader-Paper-Local' } else { 'SwiftAutoTrader-Live-Local' }
+        $opposingTask = Get-ScheduledTask -TaskName $opposingTaskName -ErrorAction SilentlyContinue
+        if ($null -ne $opposingTask -and $opposingTask.State -eq 'Running') {
+            throw ("Cannot start $Mode service while $opposingTaskName is currently running. Stop it first.")
+        }
         if ($PSCmdlet.ShouldProcess($taskName, 'Start isolated PAPER service')) {
             Remove-Item -LiteralPath (Join-Path $root 'state\stop.request') `
                 -ErrorAction SilentlyContinue
@@ -74,6 +79,11 @@ switch ($Action) {
     }
     'Restart' {
         if ($null -eq $task) { throw 'No scheduled task registered.' }
+        $opposingTaskName = if ($Mode -eq 'Live') { 'SwiftAutoTrader-Paper-Local' } else { 'SwiftAutoTrader-Live-Local' }
+        $opposingTask = Get-ScheduledTask -TaskName $opposingTaskName -ErrorAction SilentlyContinue
+        if ($null -ne $opposingTask -and $opposingTask.State -eq 'Running') {
+            throw ("Cannot restart $Mode service while $opposingTaskName is currently running. Stop it first.")
+        }
         if ($PSCmdlet.ShouldProcess($taskName, 'Restart isolated PAPER service')) {
             Stop-SwiftTask
             Start-Sleep -Seconds 2

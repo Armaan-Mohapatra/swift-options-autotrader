@@ -45,6 +45,10 @@ switch ($Action) {
     }
     'Run' {
         if ($Mode -eq 'Paper') {
+            $opposingTask = Get-ScheduledTask -TaskName 'SwiftAutoTrader-Live-Local' -ErrorAction SilentlyContinue
+            if ($null -ne $opposingTask -and $opposingTask.State -eq 'Running') {
+                throw 'Cannot run Paper service: SwiftAutoTrader-Live-Local is currently running.'
+            }
             Set-SwiftEnvironment -InstallRoot $root -Mode 'PAPER_ONLY'
             try {
                 $python = Get-SwiftPython $root
@@ -55,6 +59,10 @@ switch ($Action) {
                 Remove-Item Env:TELEGRAM_STATUS_BOT_TOKEN -ErrorAction SilentlyContinue
             }
         } else {
+            $opposingTask = Get-ScheduledTask -TaskName 'SwiftAutoTrader-Paper-Local' -ErrorAction SilentlyContinue
+            if ($null -ne $opposingTask -and $opposingTask.State -eq 'Running') {
+                throw 'Cannot run Live service: SwiftAutoTrader-Paper-Local is currently running.'
+            }
             Set-SwiftEnvironment -InstallRoot $root -Mode 'LIVE'
             try {
                 $python = Get-SwiftPython $root

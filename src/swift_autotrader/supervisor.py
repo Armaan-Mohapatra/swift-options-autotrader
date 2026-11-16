@@ -79,6 +79,8 @@ class ServiceSupervisor:
         max_restarts: int = MAX_RESTARTS,
         restart_window_seconds: float = RESTART_WINDOW_SECONDS,
         single_entry: bool = False,
+        authorized_symbol: str | None = None,
+        target_message_id: int | None = None,
     ) -> None:
         self.root = Path(root)
         self.env = dict(os.environ if env is None else env)
@@ -88,6 +90,8 @@ class ServiceSupervisor:
         self.max_restarts = max_restarts
         self.restart_window_seconds = restart_window_seconds
         self.single_entry = single_entry
+        self.authorized_symbol = authorized_symbol
+        self.target_message_id = target_message_id
 
         self.workers: dict[str, Any] = {}
         self.crash_times: dict[str, list[float]] = {}
@@ -154,6 +158,10 @@ class ServiceSupervisor:
             dispatch_cmd = [python_bin, "-m", "swift_autotrader", "live-dispatch", "--root", str(self.root)]
             if self.single_entry:
                 dispatch_cmd.append("--single-entry")
+                if self.authorized_symbol:
+                    dispatch_cmd.extend(["--authorized-symbol", self.authorized_symbol])
+                if self.target_message_id is not None:
+                    dispatch_cmd.extend(["--target-message-id", str(self.target_message_id)])
             self.spawn("live-dispatch", dispatch_cmd)
         else:
             # 1. Dashboard worker
@@ -272,19 +280,27 @@ def run_supervisor(
     *,
     once: bool = False,
     single_entry: bool = False,
+    authorized_symbol: str | None = None,
+    target_message_id: int | None = None,
     poll_interval: float = 1.0,
     supervisor_factory: Callable[..., ServiceSupervisor] | None = None,
 ) -> None:
-    """Run production daemon supervisor under single-instance lock."""
+    """Run production daemon supervisor under single-instance lock with mutual exclusion."""
     target_root = Path(root).resolve()
     (target_root / "state").mkdir(parents=True, exist_ok=True)
     lock_file = target_root / "state" / "supervisor.lock"
+    service_lock = target_root / "state" / "service.lock"
 
-    with single_instance(lock_file):
+    with single_instance(lock_file), single_instance(service_lock):
         if supervisor_factory is not None:
             supervisor = supervisor_factory(target_root)
         else:
-            supervisor = ServiceSupervisor(target_root, single_entry=single_entry)
+            supervisor = ServiceSupervisor(
+                target_root,
+                single_entry=single_entry,
+                authorized_symbol=authorized_symbol,
+                target_message_id=target_message_id,
+            )
 
         # Keep a persistent local stop independent of the optional mobile bot.
         if any(os.path.lexists(target_root / "state" / marker)

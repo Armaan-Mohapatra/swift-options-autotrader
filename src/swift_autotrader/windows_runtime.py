@@ -414,7 +414,8 @@ class PaperSupervisor:
             self.log.error("local_notification_scan_or_delivery_unavailable: %s", exc)
 
     def run(self, *, max_cycles: int | None = None) -> None:
-        with single_instance(self.root / "state" / "service.lock"):
+        (self.root / "state").mkdir(parents=True, exist_ok=True)
+        with single_instance(self.root / "state" / "service.lock"), single_instance(self.root / "state" / "supervisor.lock"):
             self.stop_marker.unlink(missing_ok=True)
             failed = False
             try:

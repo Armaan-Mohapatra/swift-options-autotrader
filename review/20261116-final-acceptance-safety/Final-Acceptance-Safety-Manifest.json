@@ -1,0 +1,58 @@
+{
+  "project": "swift-options-autotrader",
+  "review_session": "20261116-final-acceptance-safety",
+  "created_at_utc": "2026-11-16T16:21:00Z",
+  "target_branch": "fix/production-deployment-compatibility-20261116",
+  "base_commit": "590b9b9d6ee249e88745369e7c967465310f1408",
+  "installed_windows_release": "fb3d68811900adaffa262e0ac7b7e6f092c2e69f",
+  "windows_install_path": "E:\\SwiftAutoTrader\\install-837aec03",
+  "verification_evidence": {
+    "test_command": "pytest -v",
+    "passed": 748,
+    "failed": 0,
+    "warnings": 1,
+    "secret_scan_status": "PASSED"
+  },
+  "standing_risk_parameters": {
+    "max_daily_loss_usd": "750.00",
+    "max_contracts_per_signal": 1,
+    "max_concurrent_positions": 3,
+    "slippage_tolerance_pct": "10.0",
+    "total_exposure_ceiling_usd": "10000.00",
+    "lotto_eligible": true,
+    "broker_writes_in_simulation": false
+  },
+  "file_hashes_sha256": {
+    "src/swift_autotrader/live_dispatch.py": "0bf36a24cab27a5d9ed174987d0c98ad27e665ea24b75a74a1ef8720e0ebb787",
+    "src/swift_autotrader/live_service.py": "753d47c7b5906442840066d69ffabb3f653a878d87dac497034605518d22932e",
+    "src/swift_autotrader/supervisor.py": "22ba0406f06d7b36020aae7039ad998d37b967f347c101c60ce26d4a4611abdb",
+    "src/swift_autotrader/windows_runtime.py": "920194746226dce9720f5c6bb5b51e4eb0aef284dab8c3e774a595bfff084c4c",
+    "src/swift_autotrader/app.py": "0cff624b039cf3617af1343d376cde5cc970cafe59731e3be5e85f50dd4d5879",
+    "deployment/windows/service.ps1": "3582af290ba822819bfb3e2760a55a56f394487be864e748d2ab2cb03ef3762a",
+    "deployment/windows/manage.ps1": "a171926c26e431aa129dbb50b2ec38cd32785f1c083fdb8a7d34045228d265db",
+    "tests/unit/test_supervised_lifecycle.py": "1e44ceb7ad46eb6419b7ad459ff0e6096485efaa7495ccc28072ef82fd8a6eaf"
+  },
+  "remediated_deficiencies": [
+    {
+      "id": "DEF-01-FAIL-CLOSED-SINGLE-ENTRY",
+      "summary": "Fixed fail-open behavior where allowed_signal_ids defaulted to None when decisions were empty, allowing consideration of prior candidate signals in the database. Now strictly initializes allowed_signal_ids = frozenset() and allow_entries = False.",
+      "scope_filters_added": ["authorized_symbol", "target_message_id"]
+    },
+    {
+      "id": "DEF-02-DURABLE-ACCEPTANCE-STATE",
+      "summary": "Query existing BUY_TO_OPEN intents directly in SQLite before evaluating candidates. If an entry intent already exists, permanently lock out new entries across all cycles and crashes. Added write_stop_marker_durable with atomic write, flush, fsync, and os.replace that fails closed on OSError."
+    },
+    {
+      "id": "DEF-03-CONTINUOUS-RECONCILIATION-AND-LIFECYCLE",
+      "summary": "Decoupled entry lockout (allow_entries=False) from service reconciliation (process_closes=True). The live service continues monitoring resting orders, broker fills, and exit signals until the single trade has fully settled and all positions are closed."
+    },
+    {
+      "id": "DEF-04-WINDOWS-SERVICE-MUTUAL-EXCLUSION",
+      "summary": "Enforced mutual exclusion between SwiftAutoTrader-Paper-Local and SwiftAutoTrader-Live-Local at both PowerShell task scheduler level and Python single_instance file locking level (service.lock and supervisor.lock)."
+    },
+    {
+      "id": "DEF-05-ADVERSARIAL-REGRESSION-SUITE",
+      "summary": "Implemented 12 dedicated regression tests in tests/unit/test_supervised_lifecycle.py covering simultaneous alerts, prior recorded signals, scope filtering, crash recovery, approval blocking, and full lifecycle settlement."
+    }
+  ]
+}

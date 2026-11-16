@@ -70,6 +70,8 @@ class LiveDispatcher:
         clock: Callable[[], datetime] | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
         single_entry: bool = False,
+        authorized_symbol: str | None = None,
+        target_message_id: int | None = None,
     ):
         if not mcp_broker.allow_live_writes:
             raise PermissionError("LiveDispatcher requires mcp_broker.allow_live_writes=True")
@@ -81,6 +83,8 @@ class LiveDispatcher:
         self.settings = settings
         self.clock = clock or (lambda: datetime.now(UTC))
         self.single_entry = single_entry
+        self.authorized_symbol = authorized_symbol.strip().upper() if authorized_symbol else None
+        self.target_message_id = target_message_id
 
         # Risk limits derived from settings
         self.limits = RiskCeilings(
@@ -132,11 +136,33 @@ class LiveDispatcher:
                 process_closes=False,
             )
 
+            # Check durable acceptance state in database
+            import sqlite3
+            from contextlib import closing
+            with closing(sqlite3.connect(str(self.db_path))) as con:
+                row = con.execute("SELECT count(*) FROM order_intents WHERE side='BUY_TO_OPEN'").fetchone()
+                existing_buys = int(row[0]) if row else 0
+
             # 2. Get pending Telegram updates and active positions
             matcher = SignalMatcher(self.db_path, self.channel_id)
-            entries, active = self._get_pending_and_active(now)
-            if self.single_entry and entries:
-                entries = entries[:1]
+            pending_entries, pending_followups, active = self._get_pending_and_active(now)
+
+            target_revision_ids: list[int] | None = None
+            if self.single_entry:
+                allow_entries = False
+                allowed_signal_ids: frozenset[str] | None = frozenset()
+                if existing_buys > 0:
+                    entries = []
+                elif pending_entries:
+                    target_rev_id, _mid, target_alert = pending_entries[0]
+                    entries = [target_alert]
+                    target_revision_ids = [target_rev_id]
+                else:
+                    entries = []
+            else:
+                allow_entries = True
+                allowed_signal_ids = None
+                entries = [p[2] for p in pending_entries]
 
             # 3. Fetch live market data snapshot from Robinhood MCP
             snapshot = None
@@ -171,8 +197,16 @@ class LiveDispatcher:
                 self.preflight.instruments.update(snapshot.instruments)
                 catalog = StaticInstrumentCatalog(snapshot.instruments.keys())
                 matcher.catalog = catalog
-                limit = 1 if self.single_entry else 200
-                decisions = matcher.process_pending(limit=limit)
+                if self.single_entry:
+                    revisions_to_process = []
+                    if target_revision_ids:
+                        revisions_to_process.extend(target_revision_ids)
+                    if pending_followups:
+                        revisions_to_process.extend(pending_followups)
+                    if revisions_to_process:
+                        decisions = matcher.process_pending(limit=len(revisions_to_process), revision_ids=revisions_to_process)
+                else:
+                    decisions = matcher.process_pending(limit=200)
 
                 for contract, quote in snapshot.quotes.items():
                     inst_check = snapshot.instruments.get(contract)
@@ -182,17 +216,36 @@ class LiveDispatcher:
                         )
 
             # 5. Run the live execution cycle off-thread
-            allowed_signal_ids = None
-            if self.single_entry and decisions:
-                valid_sids = [d.signal_id for d in decisions if d.signal_id and d.status == "RECORDED"]
+            if self.single_entry:
+                valid_sids = []
+                if decisions and existing_buys == 0:
+                    for d in decisions:
+                        if d.intent == "ENTRY" and d.signal_id and d.status == "RECORDED":
+                            with closing(sqlite3.connect(str(self.db_path))) as con:
+                                sig = con.execute(
+                                    "SELECT underlying FROM option_signals WHERE signal_id=?",
+                                    (d.signal_id,),
+                                ).fetchone()
+                            if sig:
+                                if self.authorized_symbol is not None and sig[0].upper() != self.authorized_symbol:
+                                    log.warning(
+                                        "Signal %s underlying %s does not match authorized %s",
+                                        d.signal_id, sig[0], self.authorized_symbol,
+                                    )
+                                    continue
+                                valid_sids.append(d.signal_id)
                 if valid_sids:
                     allowed_signal_ids = frozenset([valid_sids[0]])
+                    allow_entries = True
+                else:
+                    allowed_signal_ids = frozenset()
+                    allow_entries = False
 
             cycle = await asyncio.to_thread(
                 self.engine.run_cycle,
                 quotes=exit_quotes,
                 entry_quotes=snapshot.quotes if snapshot else None,
-                allow_entries=True,
+                allow_entries=allow_entries,
                 process_closes=True,
                 allowed_signal_ids=allowed_signal_ids,
             )
@@ -214,17 +267,19 @@ class LiveDispatcher:
         finally:
             self.live_broker.loop = None
 
-    def _get_pending_and_active(self, now: datetime) -> tuple[list[Any], list[OptionContract]]:
+    def _get_pending_and_active(
+        self, now: datetime
+    ) -> tuple[list[tuple[int, int, Any]], list[int], list[OptionContract]]:
         import sqlite3
         from contextlib import closing
         with closing(sqlite3.connect(str(self.db_path))) as db, db:
             pending = db.execute(
-                "SELECT r.revision_id, e.body, r.eligible_for_future_processing, r.telegram_sent_at_utc "
+                "SELECT r.revision_id, r.message_id, e.body, r.eligible_for_future_processing, r.telegram_sent_at_utc "
                 "FROM telegram_message_revisions r "
                 "JOIN raw_events e ON e.event_id=r.raw_event_id "
                 "LEFT JOIN signal_parser_decisions p ON p.revision_id=r.revision_id "
                 "WHERE r.channel_id=? AND p.revision_id IS NULL "
-                "ORDER BY r.revision_id DESC LIMIT 500",
+                "ORDER BY r.revision_id ASC LIMIT 500",
                 (str(self.channel_id),),
             ).fetchall()
 
@@ -242,10 +297,21 @@ class LiveDispatcher:
             for row in active_rows
         ]
         entries = []
-        for _rid, body, eligible, sent_at in reversed(pending):
+        followup_rev_ids = []
+        for rid, mid, body, eligible, sent_at in pending:
             if eligible:
                 alert = parse_message(body)
                 if alert.intent is SignalIntent.ENTRY:
-                    entries.append(alert)
+                    if self.single_entry:
+                        if self.target_message_id is not None and mid != self.target_message_id:
+                            continue
+                        if (
+                            self.authorized_symbol is not None
+                            and getattr(alert, "underlying", "").upper() != self.authorized_symbol
+                        ):
+                            continue
+                    entries.append((rid, mid, alert))
+                else:
+                    followup_rev_ids.append(rid)
 
-        return entries, active
+        return entries, followup_rev_ids, active

@@ -66,6 +66,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Supervised single-trade acceptance: place at most 1 entry order, write stop marker, and halt",
     )
+    live_cmd.add_argument("--authorized-symbol", default=None, help="Explicit underlying symbol authorized for single-entry execution")
+    live_cmd.add_argument("--target-message-id", type=int, default=None, help="Explicit Telegram message ID authorized for single-entry execution")
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")
     enroll = commands.add_parser("telegram-enroll", help="Interactive Telegram MTProto session enrollment")
@@ -83,6 +85,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Run live supervisor in supervised single-entry mode",
     )
+    supervisor_cmd.add_argument("--authorized-symbol", default=None, help="Explicit underlying symbol authorized for single-entry execution")
+    supervisor_cmd.add_argument("--target-message-id", type=int, default=None, help="Explicit Telegram message ID authorized for single-entry execution")
     pin_cmd = commands.add_parser("pin-account", help="Pin confirmed Robinhood MCP account locally using Windows DPAPI")
     pin_cmd.add_argument("--root", required=True, help="Managed install root directory")
     pin_cmd.add_argument("--account-number", required=True, help="Confirmed Robinhood account number")
@@ -141,6 +145,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     Path(args.root),
                     once=args.once,
                     single_entry=getattr(args, "single_entry", False),
+                    authorized_symbol=getattr(args, "authorized_symbol", None),
+                    target_message_id=getattr(args, "target_message_id", None),
                 )
             )
             payload = {"status": "LIVE_DISPATCH_STOPPED", "real_broker_writes_enabled": config.allow_broker_writes}
@@ -271,6 +277,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 config=config,
                 once=args.once,
                 single_entry=getattr(args, "single_entry", False),
+                authorized_symbol=getattr(args, "authorized_symbol", None),
+                target_message_id=getattr(args, "target_message_id", None),
             )
             payload = {"status": "SUPERVISOR_STOPPED"}
         elif args.command == "pin-account":

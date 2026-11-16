@@ -15,6 +15,7 @@ import sys
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from time import monotonic_ns
 
 from swift_autotrader.broker.mcp_local_auth import (
     LocalAuthNotConfigured,
@@ -70,6 +71,49 @@ def token_file(root: Path) -> Path:
     return destination
 
 
+def write_stop_marker_durable(root: Path, reason: str = "STOP", filename: str = "stop.request") -> Path:
+    """Durably persist stop marker using atomic write, flush, fsync and atomic replace.
+
+    Fails closed by raising RuntimeError on any OSError instead of swallowing.
+    """
+    root = Path(root).resolve()
+    state_dir = root / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    target = state_dir / filename
+    tmp = state_dir / f"{filename}.{os.getpid()}.{monotonic_ns()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(reason)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+    except OSError as exc:
+        log.critical("Failed to durably write stop marker %s: %s", target, exc)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError(f"Failed to durably persist stop marker {filename}: {exc}") from exc
+    return target
+
+
+def _has_active_orders_or_positions(db_path: Path) -> bool:
+    """Check if there are any non-terminal orders or open positions in the database."""
+    import sqlite3
+    from contextlib import closing
+    with closing(sqlite3.connect(str(db_path))) as con:
+        pending_orders = con.execute(
+            "SELECT count(*) FROM order_intents WHERE state NOT IN ('FILLED', 'CANCELED', 'REJECTED')"
+        ).fetchone()[0]
+        open_positions = con.execute(
+            "SELECT count(*) FROM option_signals s "
+            "JOIN order_intents o ON o.signal_id=s.signal_id "
+            "WHERE o.side='BUY_TO_OPEN' AND o.state IN ('ACCEPTED','PARTIALLY_FILLED','FILLED') "
+            "AND s.state NOT IN ('CLOSED','REJECTED','CANCELED')"
+        ).fetchone()[0]
+        return bool(pending_orders > 0 or open_positions > 0)
+
+
 def write_live_health(
     root: Path,
     state: str,
@@ -119,6 +163,8 @@ async def run_live_service(
     *,
     once: bool = False,
     single_entry: bool = False,
+    authorized_symbol: str | None = None,
+    target_message_id: int | None = None,
     interval_seconds: float = 5.0,
     stop_event: asyncio.Event | None = None,
     client_override=None,
@@ -219,6 +265,8 @@ async def run_live_service(
             config,
             clock=clock,
             single_entry=single_entry,
+            authorized_symbol=authorized_symbol,
+            target_message_id=target_message_id,
         )
 
         write_live_health(managed_root, "STARTING", simulated=client_override is not None)
@@ -244,14 +292,22 @@ async def run_live_service(
                 write_live_health(managed_root, "RUNNING", result=last_result,
                                   simulated=client_override is not None)
 
-                if single_entry and last_result.entry_orders_submitted >= 1:
-                    log.info("Supervised single-entry placed (%s); stopping live service", last_result.entry_orders_submitted)
-                    stop_marker = managed_root / "state" / "stop.request"
-                    try:
-                        stop_marker.write_text("STOP", encoding="ascii")
-                    except OSError:
-                        pass
-                    break
+                if single_entry:
+                    import sqlite3
+                    from contextlib import closing
+                    with closing(sqlite3.connect(str(config.db_path))) as con:
+                        buys_count = con.execute(
+                            "SELECT count(*) FROM order_intents WHERE side='BUY_TO_OPEN'"
+                        ).fetchone()[0]
+                    if buys_count > 0:
+                        has_active = _has_active_orders_or_positions(config.db_path)
+                        if not has_active:
+                            log.info("Supervised single-trade lifecycle completed (all positions settled); stopping")
+                            write_stop_marker_durable(managed_root, "STOP")
+                            break
+                        elif once:
+                            write_stop_marker_durable(managed_root, "STOP")
+                            break
 
                 if once:
                     break
