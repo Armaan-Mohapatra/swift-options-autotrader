@@ -13,6 +13,7 @@ from swift_autotrader.signals.identity import OptionContract
 
 class BrokerOrderState(StrEnum):
     UNKNOWN = "UNKNOWN"
+    SUBMITTED = "SUBMITTED"
     ACCEPTED = "ACCEPTED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
@@ -42,6 +43,7 @@ class BrokerOrderStatus:
     requested_quantity: int | None = None
     limit_price: Decimal | None = None
     idempotency_key: str | None = None
+    broker_order_id: str | None = None
 
 
 @runtime_checkable

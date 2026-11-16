@@ -34,7 +34,7 @@ def test_review_is_offline_and_does_not_read_configuration(monkeypatch,capsys):
     assert main(['mvp-review'])==0
     report=json.loads(capsys.readouterr().out)
     assert report['status']=='REVIEW_ONLY_NOT_LIVE_CERTIFIED' and report['real_order_submission'] is False
-    assert report['cli']['live_dispatch_registered'] is False
+    assert report['cli']['live_dispatch_registered'] is True
 
 def test_supervisor_cannot_claim_healthy_or_overwrite_receiver(tmp_path):
     state=tmp_path/'state';state.mkdir();rx=state/'health.json';rx.write_text('receiver evidence')

@@ -55,6 +55,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "paper-dispatch-service", help="Opt-in Windows PAPER read-only data worker"
     )
     service.add_argument("--root", required=True)
+    live_cmd = commands.add_parser(
+        "live-dispatch", help="Opt-in production LIVE options trading service"
+    )
+    live_cmd.add_argument("--root", required=True, help="Managed install root directory")
+    live_cmd.add_argument("--once", action="store_true", help="Run a single live cycle and exit")
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")
     enroll = commands.add_parser("telegram-enroll", help="Interactive Telegram MTProto session enrollment")
@@ -114,6 +119,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             from swift_autotrader.paper_service import run_paper_service
             asyncio.run(run_paper_service(config, Path(args.root)))
             payload = {"status": "PAPER_DISPATCH_STOPPED", "real_broker_writes_enabled": False}
+        elif args.command == "live-dispatch":
+            from pathlib import Path
+
+            from swift_autotrader.live_service import run_live_service
+            asyncio.run(run_live_service(config, Path(args.root), once=args.once))
+            payload = {"status": "LIVE_DISPATCH_STOPPED", "real_broker_writes_enabled": config.allow_broker_writes}
         elif args.command == "paper-replay":
             from pathlib import Path
 

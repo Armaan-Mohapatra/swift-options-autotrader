@@ -93,7 +93,7 @@ class LiveDispatcher:
         )
 
         # Build live broker adapter
-        self.live_broker = RobinhoodLiveBroker(self.mcp, self.account, loop=loop)
+        self.live_broker = RobinhoodLiveBroker(self.mcp, self.account, loop=loop, db_path=self.db_path)
 
         # Preflight store
         from swift_autotrader.orders.risk import PaperPreflight

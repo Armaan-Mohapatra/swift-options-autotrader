@@ -106,7 +106,7 @@ class PaperOrderEngine:
         if not live_mode and type(broker) is not PaperBroker:
             raise TypeError("Phase 3 engine accepts ONLY the concrete PaperBroker when live_mode=False")
         self.db_path = Path(db_path)
-        if hasattr(broker, "db_path") and broker.db_path.resolve() != self.db_path.resolve():
+        if getattr(broker, "db_path", None) is not None and broker.db_path.resolve() != self.db_path.resolve():
             raise ValueError("paper broker and order engine must share the same database")
         self.broker = broker
         self.preflight = preflight
@@ -290,9 +290,10 @@ class PaperOrderEngine:
             status.filled_quantity != int(row["requested_quantity"])
         ):
             raise ReconciliationError("false fully filled status")
-        if status.state in {BrokerOrderState.ACCEPTED, BrokerOrderState.PARTIALLY_FILLED,
-                            BrokerOrderState.FILLED, BrokerOrderState.CANCEL_PENDING,
-                            BrokerOrderState.CANCELED} and status.accepted_at_utc is None:
+        if status.state in {BrokerOrderState.SUBMITTED, BrokerOrderState.ACCEPTED,
+                            BrokerOrderState.PARTIALLY_FILLED, BrokerOrderState.FILLED,
+                            BrokerOrderState.CANCEL_PENDING, BrokerOrderState.CANCELED
+                            } and status.accepted_at_utc is None:
             raise ReconciliationError("broker acceptance timestamp missing")
         accepted = as_utc(status.accepted_at_utc) if status.accepted_at_utc else None
         former_accepted = dt(row["accepted_at_utc"])
@@ -356,6 +357,12 @@ class PaperOrderEngine:
                 (status.state.value, status.filled_quantity,
                  iso(accepted) if accepted else None, expiry, order_id),
             )
+            if status.broker_order_id:
+                db.execute(
+                    "UPDATE order_intents SET broker_order_id=? WHERE logical_order_id=? "
+                    "AND (broker_order_id IS NULL OR broker_order_id=?)",
+                    (status.broker_order_id, order_id, status.broker_order_id),
+                )
             if status.state.value != fresh["state"]:
                 db.execute(
                     "INSERT INTO order_state_events(logical_order_id,state,"
@@ -389,7 +396,7 @@ class PaperOrderEngine:
     def _attempt_cancel(self, order_id: str, now: datetime) -> bool:
         snapshot = self.broker.get_order(order_id)
         self._reconcile_one(order_id, now, snapshot=snapshot)
-        if snapshot.state not in {BrokerOrderState.ACCEPTED, BrokerOrderState.PARTIALLY_FILLED}:
+        if snapshot.state not in {BrokerOrderState.SUBMITTED, BrokerOrderState.ACCEPTED, BrokerOrderState.PARTIALLY_FILLED}:
             return False
         try:
             self._reconcile_one(order_id, now, snapshot=self.broker.cancel_order(order_id))
@@ -540,16 +547,39 @@ class PaperOrderEngine:
 
     def _outstanding_risk(self) -> tuple[Decimal, int]:
         with self._db() as db:
-            rows = db.execute(
-                "SELECT o.signal_id,o.requested_quantity,o.limit_price,o.state "
-                "FROM order_intents o JOIN option_signals s ON s.signal_id=o.signal_id "
-                "WHERE o.side='BUY_TO_OPEN' "
-                "AND o.state NOT IN ('REJECTED','CANCELED') "
-                "AND s.state NOT IN ('CLOSED','REJECTED')"
+            signals = db.execute(
+                "SELECT signal_id, original_limit, confirmed_avg_fill_price "
+                "FROM option_signals WHERE state NOT IN ('CLOSED','REJECTED')"
             ).fetchall()
-        total = sum((int(r["requested_quantity"]) * Decimal(r["limit_price"]) * 100
-                    for r in rows), Decimal(0))
-        return total, len({str(r["signal_id"]) for r in rows})
+            held_total = Decimal("0")
+            active_sids: set[str] = set()
+            for sig in signals:
+                sid = str(sig["signal_id"])
+                buys, sold = self._summary(sid)
+                if buys > sold:
+                    active_sids.add(sid)
+                    price = (
+                        Decimal(sig["confirmed_avg_fill_price"])
+                        if sig["confirmed_avg_fill_price"]
+                        else Decimal(sig["original_limit"])
+                    )
+                    held_total += Decimal(buys - sold) * price * Decimal("100")
+
+            pending_rows = db.execute(
+                "SELECT signal_id, requested_quantity, filled_quantity, limit_price "
+                "FROM order_intents WHERE side='BUY_TO_OPEN' "
+                "AND state IN ('INTENT_RECORDED', 'SUBMITTED', 'ACCEPTED', 'CANCEL_PENDING')"
+            ).fetchall()
+            pending_total = Decimal("0")
+            for row in pending_rows:
+                sid = str(row["signal_id"])
+                active_sids.add(sid)
+                unfilled = int(row["requested_quantity"]) - int(row["filled_quantity"])
+                if unfilled > 0:
+                    pending_total += Decimal(unfilled) * Decimal(row["limit_price"]) * Decimal("100")
+
+            total = held_total + pending_total
+            return total, len(active_sids)
 
     def _block(self, signal_id: str, reason: str, now: datetime) -> None:
         with self._db() as db:
@@ -639,6 +669,18 @@ class PaperOrderEngine:
         contract = self._contract(signal)
         if contract.expiration < now.date():
             self._block(sid, "EXPIRED_OPTION", now)
+            return False
+        with self._db() as db:
+            dup_contract = db.execute(
+                "SELECT 1 FROM option_signals s JOIN order_intents o ON o.signal_id=s.signal_id "
+                "WHERE s.underlying=? AND s.option_right=? AND s.strike=? AND s.expiration_date=? "
+                "AND s.signal_id != ? AND s.state NOT IN ('CLOSED','REJECTED') "
+                "AND o.side='BUY_TO_OPEN' AND o.state NOT IN ('REJECTED','CANCELED')",
+                (contract.underlying, contract.right.value, str(contract.strike),
+                 contract.expiration.isoformat(), sid),
+            ).fetchone()
+        if dup_contract:
+            self._block(sid, "DUPLICATE_CONTRACT_POSITION", now)
             return False
         price = Decimal(signal["original_limit"])
         preflight = self.preflight.check(contract)

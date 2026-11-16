@@ -7,6 +7,7 @@ transport is opened by construction, and no method calls place/cancel tools.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -631,40 +632,65 @@ class RobinhoodMCPBroker:
         if expected_broker_order_id and broker_id != expected_broker_order_id:
             raise MCPContractError("Order broker ID does not match persisted intent")
         ref = order.get("ref_id")
-        expected_ref = RobinhoodMCPBroker.future_order_payload(
-            MCPAccount("unused", True, "option_level_2"),
-            MCPInstrument("unused", intent.contract, True, None), intent,
-        )["ref_id"]
-        if ref != expected_ref:
-            raise MCPContractError("Broker order idempotency key mismatch")
+        if ref is not None:
+            expected_ref = RobinhoodMCPBroker.future_order_payload(
+                MCPAccount("unused", True, "option_level_2"),
+                MCPInstrument("unused", intent.contract, True, None), intent,
+            )["ref_id"]
+            if ref != expected_ref:
+                raise MCPContractError("Broker order idempotency key mismatch")
         status_map = {
-            "queued": BrokerOrderState.ACCEPTED, "confirmed": BrokerOrderState.ACCEPTED,
+            "unconfirmed": BrokerOrderState.SUBMITTED,
+            "queued": BrokerOrderState.ACCEPTED,
+            "confirmed": BrokerOrderState.ACCEPTED,
             "partially_filled": BrokerOrderState.PARTIALLY_FILLED,
             "filled": BrokerOrderState.FILLED,
             "pending_cancelled": BrokerOrderState.CANCEL_PENDING,
             "cancelled": BrokerOrderState.CANCELED,
+            "canceled": BrokerOrderState.CANCELED,
             "rejected": BrokerOrderState.REJECTED,
             "failed": BrokerOrderState.REJECTED,
             "voided": BrokerOrderState.REJECTED,
         }
         if order.get("state") not in status_map:
             raise MCPContractError("Unknown option order state")
-        filled = order.get("filled_quantity")
-        if isinstance(filled, bool) or not str(filled).isdigit():
+        raw_filled = order.get("filled_quantity")
+        if raw_filled is None:
+            raw_filled = order.get("processed_quantity", 0)
+        if isinstance(raw_filled, bool):
             raise MCPContractError("Missing filled quantity")
-        quantity = int(filled)
+        try:
+            d_filled = Decimal(str(raw_filled))
+            if not d_filled.is_finite() or d_filled < 0:
+                raise MCPContractError("Filled quantity must be finite nonnegative")
+            quantity = int(d_filled)
+        except (InvalidOperation, ValueError) as exc:
+            raise MCPContractError("Missing or malformed filled quantity") from exc
         if quantity > intent.quantity:
             raise MCPContractError("Unexpected overfill")
+        raw_fills = order.get("fills") or order.get("executions") or []
         fills: list[BrokerFill] = []
-        for item in order.get("fills", []):
+        accepted = order.get("accepted_at") or order.get("created_at") or order.get("updated_at")
+        for item in raw_fills:
             f = _obj(item)
-            qty = f.get("quantity")
-            if not str(qty).isdigit() or int(qty) < 1:
+            f_qty_raw = f.get("quantity")
+            if isinstance(f_qty_raw, bool):
                 raise MCPContractError("Invalid broker fill quantity")
+            try:
+                f_qty_d = Decimal(str(f_qty_raw))
+                if not f_qty_d.is_finite() or f_qty_d < 1:
+                    raise MCPContractError("Invalid broker fill quantity")
+                f_qty = int(f_qty_d)
+            except (InvalidOperation, ValueError) as exc:
+                raise MCPContractError("Invalid broker fill quantity") from exc
+            f_time = (
+                f.get("timestamp") or f.get("executed_at") or f.get("created_at")
+                or order.get("last_transaction_at") or accepted
+            )
             fills.append(BrokerFill(
-                _identifier(f.get("id")), int(qty),
+                _identifier(f.get("id")), f_qty,
                 _money(f.get("price"), "fill_price"),
-                _timestamp(f.get("timestamp")),
+                _timestamp(f_time),
             ))
         if sum(x.quantity for x in fills) != quantity:
             raise MCPContractError("Broker fills not independently reconciled")
@@ -672,21 +698,23 @@ class RobinhoodMCPBroker:
         if (normalized_state is BrokerOrderState.FILLED and quantity != intent.quantity
             or normalized_state is BrokerOrderState.PARTIALLY_FILLED
             and not 0 < quantity < intent.quantity
-            or normalized_state is BrokerOrderState.ACCEPTED and quantity != 0):
+            or normalized_state in {BrokerOrderState.ACCEPTED, BrokerOrderState.SUBMITTED}
+            and quantity != 0):
             raise MCPContractError("Broker quantity conflicts with order state")
-        accepted = order.get("accepted_at")
         accepted_at = _timestamp(accepted) if accepted else None
-        if status_map[order["state"]] not in {BrokerOrderState.REJECTED} and accepted_at is None:
+        if (normalized_state not in {BrokerOrderState.REJECTED, BrokerOrderState.SUBMITTED}
+            and accepted_at is None):
             raise MCPContractError("Broker acceptance time missing")
         return BrokerOrderStatus(
             logical_order_id=intent.logical_order_id,
-            state=status_map[order["state"]], filled_quantity=quantity,
+            state=normalized_state, filled_quantity=quantity,
             accepted_at_utc=accepted_at, fills=tuple(fills),
             rejected_reason=str(order.get("reject_reason"))
-            if status_map[order["state"]] is BrokerOrderState.REJECTED else None,
+            if normalized_state is BrokerOrderState.REJECTED else None,
             contract=intent.contract, side=intent.side,
             requested_quantity=intent.quantity, limit_price=intent.limit_price,
             idempotency_key=intent.idempotency_key,
+            broker_order_id=broker_id,
         )
 
     async def reconcile_order(self, account: MCPAccount, intent: OrderIntent,
@@ -697,12 +725,17 @@ class RobinhoodMCPBroker:
         expected_ref = self.future_order_payload(
             account, MCPInstrument("identity-only", intent.contract, True, None), intent,
         )["ref_id"]
-        matches = [row for row in rows if row.get("ref_id") == expected_ref]
+        matches = []
+        for row in rows:
+            if row.get("ref_id") and row.get("ref_id") == expected_ref:
+                matches.append(row)
+            elif broker_order_id and str(row.get("id")) == str(broker_order_id):
+                matches.append(row)
         if len(matches) == 1:
             return self.normalize_order(
                 matches[0], intent, expected_broker_order_id=broker_order_id,
             )
-        if matches:
+        if len(matches) > 1:
             raise MCPContractError("Multiple broker orders share an idempotency key")
         return BrokerOrderStatus(
             logical_order_id=intent.logical_order_id,
@@ -710,6 +743,7 @@ class RobinhoodMCPBroker:
             accepted_at_utc=None, contract=intent.contract, side=intent.side,
             requested_quantity=intent.quantity, limit_price=intent.limit_price,
             idempotency_key=intent.idempotency_key,
+            broker_order_id=broker_order_id,
         )
 
     async def read_only_preflight(self, contract: OptionContract, *, account: MCPAccount,
@@ -739,6 +773,7 @@ class RobinhoodLiveBroker:
         mcp_broker: RobinhoodMCPBroker,
         account: MCPAccount,
         loop: asyncio.AbstractEventLoop | None = None,
+        db_path: Path | None = None,
     ):
         if not mcp_broker.allow_live_writes:
             raise BrokerWritesDisabledError("Live broker requires allow_live_writes=True")
@@ -747,10 +782,68 @@ class RobinhoodLiveBroker:
         self.mcp = mcp_broker
         self.account = account
         self.loop = loop
+        self.db_path = Path(db_path) if db_path else None
         self._orders_by_id: dict[str, OrderIntent] = {}
         self._broker_id_map: dict[str, str] = {}  # logical_order_id -> broker_order_id
         self._last_status: dict[str, BrokerOrderStatus] = {}
         self._resolved_instruments: dict[OptionContract, MCPInstrument] = {}
+        if self.db_path and self.db_path.is_file():
+            self._load_broker_id_map()
+
+    def _load_broker_id_map(self) -> None:
+        import sqlite3
+        from contextlib import closing
+        try:
+            with closing(sqlite3.connect(str(self.db_path))) as db:
+                for row in db.execute(
+                    "SELECT logical_order_id, broker_order_id FROM order_intents WHERE broker_order_id IS NOT NULL"
+                ).fetchall():
+                    if row[0] and row[1]:
+                        self._broker_id_map[str(row[0])] = str(row[1])
+        except Exception:
+            pass
+
+    def _persist_broker_id(self, logical_order_id: str, broker_order_id: str) -> None:
+        if not self.db_path or not self.db_path.is_file():
+            return
+        import sqlite3
+        from contextlib import closing
+        try:
+            with closing(sqlite3.connect(str(self.db_path))) as db, db:
+                db.execute(
+                    "UPDATE order_intents SET broker_order_id=? WHERE logical_order_id=? AND (broker_order_id IS NULL OR broker_order_id=?)",
+                    (broker_order_id, logical_order_id, broker_order_id),
+                )
+        except Exception:
+            pass
+
+    def _load_intent_from_db(self, logical_order_id: str) -> OrderIntent | None:
+        if not self.db_path or not self.db_path.is_file():
+            return None
+        import sqlite3
+        from contextlib import closing
+        try:
+            with closing(sqlite3.connect(str(self.db_path))) as db:
+                row = db.execute(
+                    "SELECT o.logical_order_id, o.idempotency_key, o.side, o.requested_quantity, o.limit_price, "
+                    "s.underlying, s.option_right, s.strike, s.expiration_date, o.broker_order_id "
+                    "FROM order_intents o JOIN option_signals s ON s.signal_id=o.signal_id "
+                    "WHERE o.logical_order_id=?",
+                    (logical_order_id,),
+                ).fetchone()
+                if row:
+                    from swift_autotrader.signals.identity import OptionRight
+                    contract = OptionContract(
+                        row[5], OptionRight(row[6]), Decimal(str(row[7])), date.fromisoformat(row[8])
+                    )
+                    if row[9]:
+                        self._broker_id_map[logical_order_id] = str(row[9])
+                    return OrderIntent(
+                        row[0], row[1], contract, OrderSide(row[2]), int(row[3]), Decimal(str(row[4]))
+                    )
+        except Exception:
+            pass
+        return None
 
     def _run(self, coro):
         if self.loop is not None and not self.loop.is_closed():
@@ -784,10 +877,14 @@ class RobinhoodLiveBroker:
         async def _submit():
             response = await self.mcp.place_order(self.account, instrument, intent)
             order_data = response.get("order") if isinstance(response, Mapping) else None
+            if order_data is None and isinstance(response, Mapping):
+                order_data = response.get("data", response)
             if order_data is not None and isinstance(order_data, Mapping):
                 broker_id = order_data.get("id")
-                if broker_id and isinstance(broker_id, str):
-                    self._broker_id_map[intent.logical_order_id] = broker_id
+                if broker_id and isinstance(broker_id, (str, int)):
+                    b_id = str(broker_id)
+                    self._broker_id_map[intent.logical_order_id] = b_id
+                    self._persist_broker_id(intent.logical_order_id, b_id)
             # Reconcile immediately with broker
             return await self.mcp.reconcile_order(
                 self.account, intent,
@@ -801,6 +898,10 @@ class RobinhoodLiveBroker:
     def get_order(self, logical_order_id: str) -> BrokerOrderStatus:
         """Poll and reconcile status of an order by its logical order ID."""
         intent = self._orders_by_id.get(logical_order_id)
+        if intent is None:
+            intent = self._load_intent_from_db(logical_order_id)
+            if intent is not None:
+                self._orders_by_id[logical_order_id] = intent
         if intent is None:
             return BrokerOrderStatus(logical_order_id, BrokerOrderState.UNKNOWN, 0, None)
         broker_id = self._broker_id_map.get(logical_order_id)
@@ -830,6 +931,10 @@ class RobinhoodLiveBroker:
         if not self.mcp.allow_live_writes:
             raise BrokerWritesDisabledError("Live broker writes are disabled")
         intent = self._orders_by_id.get(logical_order_id)
+        if intent is None:
+            intent = self._load_intent_from_db(logical_order_id)
+            if intent is not None:
+                self._orders_by_id[logical_order_id] = intent
         if intent is None:
             return BrokerOrderStatus(logical_order_id, BrokerOrderState.UNKNOWN, 0, None)
         broker_id = self._broker_id_map.get(logical_order_id)

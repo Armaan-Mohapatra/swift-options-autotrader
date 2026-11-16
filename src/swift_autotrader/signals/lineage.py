@@ -215,7 +215,32 @@ class SignalMatcher:
         if alert.intent == SignalIntent.REVIEW_REQUIRED:
             return self._result(row, alert, "REVIEW_REQUIRED", alert.reason)
         if not bool(row["eligible_for_future_processing"]):
-            return self._result(row, alert, "SKIPPED", "NON_ACTIONABLE_TELEGRAM_HISTORY")
+            if alert.intent != SignalIntent.CLOSE_100_PERCENT:
+                return self._result(row, alert, "SKIPPED", "NON_ACTIONABLE_TELEGRAM_HISTORY")
+            # Delayed exit instructions (CLOSE_100_PERCENT) are permitted ONLY if a matching
+            # active Swift position is held, preventing freshness rules from stranding positions.
+            sid_check, _ = self._find_signal(con, row, alert)
+            if sid_check is None:
+                return self._result(row, alert, "SKIPPED", "NON_ACTIONABLE_TELEGRAM_HISTORY")
+            has_open_position = False
+            try:
+                open_buy = con.execute(
+                    "SELECT 1 FROM order_intents WHERE signal_id=? AND side='BUY_TO_OPEN' "
+                    "AND state IN ('ACCEPTED', 'PARTIALLY_FILLED', 'FILLED')",
+                    (sid_check,),
+                ).fetchone()
+                if open_buy is not None:
+                    already_closed = con.execute(
+                        "SELECT 1 FROM signal_close_requests WHERE signal_id=?",
+                        (sid_check,),
+                    ).fetchone()
+                    if not already_closed:
+                        has_open_position = True
+            except sqlite3.OperationalError:
+                has_open_position = False
+
+            if not has_open_position:
+                return self._result(row, alert, "SKIPPED", "NON_ACTIONABLE_TELEGRAM_HISTORY")
         if alert.intent == SignalIntent.ENTRY:
             if row["reply_to_message_id"] is not None:
                 return self._result(row, alert, "REVIEW_REQUIRED", "ENTRY_IS_REPLY")

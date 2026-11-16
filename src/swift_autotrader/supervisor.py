@@ -126,19 +126,27 @@ class ServiceSupervisor:
         is_live = cfg.is_live if cfg is not None else (self.env.get("LIVE_ENABLED", "").lower() == "true")
 
         if is_live:
-            raise RuntimeError("Live supervisor entry point not integrated or certified")
-
-        # 1. Dashboard worker
-        self.spawn("dashboard", [python_bin, "-m", "swift_autotrader", "paper-dashboard"])
-
-        # 2. Telegram listener worker
-        self.spawn("telegram", [python_bin, "-m", "swift_autotrader", "telegram-listen"])
-
-        # 3. Execution dispatcher worker (live vs paper)
-        self.spawn(
-            "paper-dispatch",
-            [python_bin, "-m", "swift_autotrader", "paper-dispatch-service", "--root", str(self.root)],
-        )
+            if cfg is None or not (cfg.is_live and cfg.allow_broker_writes):
+                raise RuntimeError("Live supervisor entry point not integrated or certified")
+            # 1. Dashboard worker
+            self.spawn("dashboard", [python_bin, "-m", "swift_autotrader", "paper-dashboard"])
+            # 2. Telegram listener worker
+            self.spawn("telegram", [python_bin, "-m", "swift_autotrader", "telegram-listen"])
+            # 3. Live dispatch worker
+            self.spawn(
+                "live-dispatch",
+                [python_bin, "-m", "swift_autotrader", "live-dispatch", "--root", str(self.root)],
+            )
+        else:
+            # 1. Dashboard worker
+            self.spawn("dashboard", [python_bin, "-m", "swift_autotrader", "paper-dashboard"])
+            # 2. Telegram listener worker
+            self.spawn("telegram", [python_bin, "-m", "swift_autotrader", "telegram-listen"])
+            # 3. Paper execution dispatcher worker
+            self.spawn(
+                "paper-dispatch",
+                [python_bin, "-m", "swift_autotrader", "paper-dispatch-service", "--root", str(self.root)],
+            )
 
         # Mobile service is optional for MVP; require a configured paper-mode bot.
         if (cfg is not None and cfg.kill_switch_enabled
