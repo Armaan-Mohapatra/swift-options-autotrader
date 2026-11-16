@@ -11,6 +11,10 @@ from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.signals.identity import OptionContract
 
 
+class PrePlacementRefusal(RuntimeError):
+    """A broker adapter proved the placement request was never sent."""
+
+
 class BrokerOrderState(StrEnum):
     UNKNOWN = "UNKNOWN"
     SUBMITTED = "SUBMITTED"

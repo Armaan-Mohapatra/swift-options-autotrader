@@ -117,7 +117,7 @@ def write_live_health(
     if state == "RUNNING":
         if result is None:
             state = "STARTING"
-        elif result.status != "LIVE_CYCLE_COMPLETED":
+        elif result.status != "LIVE_CYCLE_COMPLETED" or result.unresolved_exit_count:
             state = "DEGRADED"
     health_file = root / "state" / "live-health.json"
     health_file.parent.mkdir(parents=True, exist_ok=True)
@@ -138,6 +138,8 @@ def write_live_health(
         "last_cancellations": result.cancellations if result else 0,
         "last_entry_submissions": result.entry_orders_submitted if result else 0,
         "last_close_submissions": result.close_orders_submitted if result else 0,
+        "unresolved_exit_count": result.unresolved_exit_count if result else None,
+        "exit_entry_hold": bool(result.unresolved_exit_count) if result else None,
     }
     tmp = health_file.with_suffix(f".{os.getpid()}.tmp")
     try:

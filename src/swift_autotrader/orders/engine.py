@@ -17,10 +17,11 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from swift_autotrader.broker.base import Broker, BrokerOrderState, BrokerOrderStatus
+from swift_autotrader.broker.base import Broker, BrokerOrderState, BrokerOrderStatus, PrePlacementRefusal
 from swift_autotrader.broker.paper import PaperBroker, as_utc, dt, iso
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.exit_policy import ExitPolicy, ExitQuote
+from swift_autotrader.orders.exposure_state import unresolved_exit_signal_ids
 from swift_autotrader.orders.policy import deadline_from_acceptance
 from swift_autotrader.orders.risk import PreflightProvider, RiskCeilings, rejection_reason
 from swift_autotrader.orders.slippage import SlippageExceededError, resolve_live_entry_limit
@@ -233,6 +234,9 @@ class PaperOrderEngine:
                     existing["idempotency_key"] != intent.idempotency_key):
                     raise ReconciliationError("existing order intent differs from request")
                 return intent, False
+            if (self.live_mode and side is OrderSide.BUY_TO_OPEN
+                    and unresolved_exit_signal_ids(db)):
+                raise PermissionError("Unresolved exit: new entry held pending reconciliation")
             if (side is OrderSide.BUY_TO_OPEN and self.entry_authorizer is not None
                     and not self.entry_authorizer(db, signal, intent, as_utc(self.clock()))):
                 raise PermissionError("Entry is outside supervised authorization or allowance consumed")
@@ -254,16 +258,24 @@ class PaperOrderEngine:
         """Safe in paper mode: same durable key maps to exactly one broker order."""
         try:
             snapshot = self.broker.submit_order(intent)
+        except PrePlacementRefusal:
+            # Classify only adapter-proven pre-placement refusal, not an exception
+            # raised after a placement or during reconciliation.
+            self._state(intent.logical_order_id, "REJECTED", now,
+                        detail="NOT_SUBMITTED_AUTHORIZATION_OR_REVIEW")
+            sid = intent.logical_order_id.split(":")[0]
+            self._alert(sid, intent.logical_order_id, "SUBMISSION_REFUSED_PRE_PLACEMENT", now)
+            if intent.side is OrderSide.SELL_TO_CLOSE:
+                self._signal_state(sid, "ALERT_REQUIRED")
+                self._alert(sid, intent.logical_order_id, "UNFILLED_EXIT", now)
+            raise
+        except Exception:
+            self._alert(intent.logical_order_id.split(":")[0],
+                        intent.logical_order_id, "SUBMISSION_UNCERTAIN", now)
+            raise
+        try:
             self._reconcile_one(intent.logical_order_id, now, snapshot=snapshot)
-        except Exception as exc:
-            if type(exc).__name__ == "SubmissionNotAttemptedError":
-                # Provably no placement request was sent: terminal, never retried.
-                self._state(intent.logical_order_id, "REJECTED", now,
-                            detail="NOT_SUBMITTED_AUTHORIZATION_OR_REVIEW")
-                self._alert(intent.logical_order_id.split(":")[0],
-                            intent.logical_order_id, "SUBMISSION_REFUSED_PRE_PLACEMENT", now)
-                raise
-            # An ambiguous response MUST NOT generate a fresh logical order/key.
+        except Exception:
             self._alert(intent.logical_order_id.split(":")[0],
                         intent.logical_order_id, "SUBMISSION_UNCERTAIN", now)
             raise
@@ -808,7 +820,12 @@ class PaperOrderEngine:
         if not created:
             return False, False
         self._signal_state(sid, "CLOSE_SUBMITTED")
-        self._submit_existing(intent, now)
+        try:
+            self._submit_existing(intent, now)
+        except PrePlacementRefusal:
+            # The durable refusal and exit incident were persisted above.
+            # Keep monitoring; never create a replacement order on a refusal.
+            return False, False
         return True, False
 
     def run_cycle(
@@ -873,6 +890,10 @@ class PaperOrderEngine:
                 submitted, cancelled = self._close_signal(signal, now, quotes)
                 close_submissions += int(submitted)
                 cancels += int(cancelled)
+        # Exit-first circuit breaker survives crashes without a process-local latch.
+        # Keep the engine running for reconciliation and existing close requests.
+        if self.live_mode and self.unresolved_exit_count():
+            allow_entries = False
         if allow_entries and not paused and not stopped:
             with self._db() as db:
                 candidates = db.execute(
@@ -912,6 +933,10 @@ class PaperOrderEngine:
         return CycleResult(entry_submissions, close_submissions, cancels,
                            blocked, int(alert_count))
 
+    def unresolved_exit_count(self) -> int:
+        with self._db() as db:
+            return len(unresolved_exit_signal_ids(db))
+
     def health(self) -> dict[str, object]:
         with self._db() as db:
             controls = db.execute(
@@ -930,4 +955,5 @@ class PaperOrderEngine:
             "paused": bool(controls[0]), "emergency_stop": bool(controls[1]),
             "orders_by_state": {str(x[0]): int(x[1]) for x in counts},
             "open_alerts": {str(x[0]): int(x[1]) for x in alerts},
+            "unresolved_exit_count": self.unresolved_exit_count(),
         }

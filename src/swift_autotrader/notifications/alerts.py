@@ -76,7 +76,7 @@ class NotificationCenter:
         count = 0
         for alert_id, code in paper:
             severity = "CRITICAL" if code in {
-                "RECONCILIATION_REQUIRED", "UNKNOWN_BROKER_ORDER"
+                "RECONCILIATION_REQUIRED", "UNKNOWN_BROKER_ORDER", "UNFILLED_EXIT"
             } else "ERROR"
             count += int(self.record("PAPER_ORDER", code,
                                      source_key=str(alert_id), severity=severity, at=now))

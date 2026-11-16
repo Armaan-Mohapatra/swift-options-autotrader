@@ -21,6 +21,7 @@ from swift_autotrader.broker.base import (
     BrokerFill,
     BrokerOrderState,
     BrokerOrderStatus,
+    PrePlacementRefusal,
 )
 from swift_autotrader.broker.review_validation import exact_contract_quantity, reconciled_processed_quantity
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
@@ -36,7 +37,7 @@ class MCPContractError(RuntimeError):
     """The MCP tool or data contract is missing, ambiguous or unsafe."""
 
 
-class SubmissionNotAttemptedError(MCPContractError):
+class SubmissionNotAttemptedError(MCPContractError, PrePlacementRefusal):
     """Definitively refused BEFORE any broker placement request was sent."""
 
 
@@ -564,8 +565,9 @@ class RobinhoodMCPBroker:
         # ambiguous, approval-required or warned review must not reach placement.
         try:
             review = await self.review_order(account, instrument, intent)
-        except MCPContractError as exc:
-            raise SubmissionNotAttemptedError(f"Provider review unusable: {exc}") from exc
+        except (MCPContractError, MCPReadError) as exc:
+            # Only this read-only review boundary proves no placement was sent.
+            raise SubmissionNotAttemptedError("Provider review unusable") from exc
         if not review.unblocked:
             raise SubmissionNotAttemptedError("Provider review did not permit unattended submission")
         payload = self.future_order_payload(account, instrument, intent)

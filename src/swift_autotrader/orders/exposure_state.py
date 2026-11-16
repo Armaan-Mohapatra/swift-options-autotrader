@@ -23,6 +23,25 @@ def active_signal_ids(connection: sqlite3.Connection) -> set[str]:
     return {str(row[0]) for row in rows}
 
 
+def unresolved_exit_signal_ids(connection: sqlite3.Connection) -> set[str]:
+    """Journal-derived entry hold: requested closure plus non-flat or unresolved orders.
+
+    One SQLite statement provides a consistent snapshot. A terminal refused sell
+    is not evidence of a flat position. Never infer closure from signal labels,
+    operator acknowledgment, or a missing broker reference.
+    """
+    rows = connection.execute(
+        "SELECT o.signal_id FROM order_intents o "
+        "WHERE EXISTS (SELECT 1 FROM signal_close_requests c WHERE c.signal_id=o.signal_id) "
+        "OR EXISTS (SELECT 1 FROM order_intents x WHERE x.signal_id=o.signal_id "
+        "AND x.side='SELL_TO_CLOSE') "
+        "GROUP BY o.signal_id "
+        f"HAVING {_NET} != 0 OR "
+        f"MAX(CASE WHEN state NOT IN {_NONTERMINAL} THEN 1 ELSE 0 END) > 0"
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
 def has_active_exposure(db_path: Path) -> bool:
     """False only when every journaled intent is terminal and net fills are zero."""
     with closing(sqlite3.connect(str(db_path))) as connection:

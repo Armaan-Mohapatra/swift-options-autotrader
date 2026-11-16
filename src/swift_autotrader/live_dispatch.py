@@ -56,6 +56,7 @@ class LiveDispatchResult:
     cancellations: int
     realized_daily_loss_usd: Decimal
     open_positions_count: int
+    unresolved_exit_count: int = 0
 
 
 class LiveDispatcher:
@@ -286,6 +287,7 @@ class LiveDispatcher:
                         cancellations=watchdog.cancellation_requests,
                         realized_daily_loss_usd=realized_loss,
                         open_positions_count=len(active),
+                        unresolved_exit_count=await asyncio.to_thread(self.engine.unresolved_exit_count),
                     )
 
             # 4. Process parser decisions for verified contracts
@@ -362,6 +364,7 @@ class LiveDispatcher:
                 cancellations=watchdog.cancellation_requests + cycle.cancellation_requests,
                 realized_daily_loss_usd=realized_loss,
                 open_positions_count=len(active),
+                unresolved_exit_count=await asyncio.to_thread(self.engine.unresolved_exit_count),
             )
         finally:
             self.live_broker.loop = None
