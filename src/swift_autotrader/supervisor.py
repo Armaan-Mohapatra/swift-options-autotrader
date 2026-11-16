@@ -240,8 +240,17 @@ def run_supervisor(
         else:
             supervisor = ServiceSupervisor(target_root)
 
-        supervisor.setup_default_workers(config=config)
-        supervisor.write_health_heartbeat(state="STARTING")
+        # Keep a persistent local stop independent of the optional mobile bot.
+        if any(os.path.lexists(target_root / "state" / marker)
+               for marker in ("stop.request", "SWIFT_REVIEWED_STOP")):
+            raise RuntimeError("Persistent local stop is active")
+        try:
+            supervisor.setup_default_workers(config=config)
+            supervisor.write_health_heartbeat(state="STARTING")
+        except Exception:
+            supervisor.stop_all()
+            supervisor.write_health_heartbeat(state="STOPPED")
+            raise
 
         def handle_stop(signum: int, frame: Any) -> None:
             logger.info("Termination signal %s received. Stopping all workers...", signum)
@@ -266,6 +275,11 @@ def run_supervisor(
         supervisor.running = True
         while supervisor.running:
             try:
+                if any(os.path.lexists(target_root / "state" / marker)
+                       for marker in ("stop.request", "SWIFT_REVIEWED_STOP")):
+                    supervisor.stop_all()
+                    supervisor.write_health_heartbeat(state="STOPPED")
+                    break
                 supervisor.check_workers()
                 supervisor.write_health_heartbeat(state="HEALTHY")
             except RuntimeError as exc:
