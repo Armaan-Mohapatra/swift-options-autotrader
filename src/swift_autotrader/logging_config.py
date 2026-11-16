@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
 
 
 class SafeJsonFormatter(logging.Formatter):
@@ -25,7 +27,13 @@ class SafeJsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: str = "INFO") -> None:
-    handler = logging.StreamHandler()
+    log_path = os.environ.get("SWIFT_WORKER_LOG")
+    if log_path:
+        handler = RotatingFileHandler(
+            log_path, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8"
+        )
+    else:
+        handler = logging.StreamHandler()
     handler.setFormatter(SafeJsonFormatter())
     root = logging.getLogger("swift_autotrader")
     root.handlers[:] = [handler]

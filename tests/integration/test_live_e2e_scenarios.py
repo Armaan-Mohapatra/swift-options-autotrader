@@ -633,8 +633,12 @@ def test_scenario_5_supervisor_crash_recovery_high_volatility(tmp_path: Path) ->
     assert data_degraded["status"] == "DEGRADED"
     assert data_degraded["workers"]["live-dispatch"] is False
 
-    # 5. Check workers restarts crashed process
-    restarted = pm.check_workers(now_ts=1000.0)
+    # 5. Restart remains pending until the configured backoff expires.
+    assert pm.check_workers(now_ts=1000.0) == []
+    assert pm.workers["live-dispatch"].poll() == 1
+    data_waiting = json.loads(health_file.read_text(encoding="utf-8"))
+    assert data_waiting["workers"]["live-dispatch"] is False
+    restarted = pm.check_workers(now_ts=1002.0)
     assert "live-dispatch" in restarted
     assert pm.workers["live-dispatch"].poll() is None
 

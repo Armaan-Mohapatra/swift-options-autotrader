@@ -32,7 +32,7 @@ th{color:#a0b0d0;font-weight:500}td{color:#e4e8f6}
 #status{font-size:12px;color:#a0b0d0}
 </style></head><body>
 <nav><div><h1>Swift / Paper Console</h1>
-<small>Local only · simulated fills · no broker orders</small></div>
+<small>Local only · simulated fills · no broker execution certification</small></div>
 <div id="mode">PAPER ONLY</div></nav>
 <p id="status">Connecting to local read-only status …</p><div class="cards" id="cards"></div>
 <section><h2>Pending orders &amp; deadlines</h2><div id="orders"></div></section>
@@ -66,7 +66,8 @@ function card(label,value) {const e=document.createElement('div');e.className='c
 async function refresh() {try {
 const result = await fetch('/api/status',{cache:'no-store'});
 if (!result.ok) throw new Error('Unavailable'); const x=await result.json();
-if (x.mode!=='PAPER_ONLY'&&x.mode!=='LIVE') throw new Error('Unsafe status');
+if (x.mode!=='PAPER_ONLY'&&x.mode!=='LIVE_CONFIGURED') throw new Error('Unsafe status');
+byId('mode').textContent=x.mode==='LIVE_CONFIGURED'?'LIVE CONFIGURED · NOT CERTIFIED':'PAPER ONLY';
 const c=byId('cards');c.replaceChildren(
 card('Realized gross (sim USD)',x.realized_gross_usd),
 card('Realized net (sim USD)',x.realized_net_usd),
@@ -88,7 +89,9 @@ table('alerts',['Category','Code','Severity','UTC'],
 ...x.alerts.map(a=>['PAPER_ORDER',a.code,'ERROR',a.recorded_at_utc]),
 ...(x.telegram.status==='DEGRADED'||x.telegram.status==='DISCONNECTED' ?
 [['TELEGRAM_SERVICE','TELEGRAM_'+x.telegram.status,'ERROR',x.as_of_utc]] : [])]);
-byId('status').textContent='Updated '+x.as_of_utc+' · Fees: '+
+byId('status').textContent='Updated '+x.as_of_utc+' · Configured broker writes: '+
+(x.configured_broker_writes_enabled?'YES':'NO')+' · Broker connectivity: '+
+x.authenticated_broker_connectivity+' · Execution: '+x.execution_evidence+' · Fees: '+
 safe(x.costs_assumed.fee_per_contract_side_usd)+
 ' · All figures simulated; missing quotes are unavailable.';
 } catch (_) {byId('status').textContent='Local status unavailable. No data has been inferred.';}}

@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 MAX_RESTARTS = 5
 RESTART_WINDOW_SECONDS = 600.0
+WORKER_STOP_TIMEOUT_SECONDS = 10.0
+WORKER_KILL_TIMEOUT_SECONDS = 5.0
 
 
 class ProcessHandle:
@@ -43,6 +45,12 @@ class ProcessHandle:
 
     def terminate(self) -> None:
         self.terminated = True
+        if os.name == "nt" and hasattr(signal, "CTRL_BREAK_EVENT"):
+            try:
+                self._proc.send_signal(signal.CTRL_BREAK_EVENT)
+                return
+            except (OSError, ValueError):
+                pass
         self._proc.terminate()
 
     def kill(self) -> None:
@@ -84,6 +92,7 @@ class ServiceSupervisor:
         self.failures: dict[str, int] = {}
         self.circuit_tripped: dict[str, bool] = {}
         self.backoff_delays: dict[str, list[float]] = {}
+        self.pending_restarts: dict[str, tuple[float, list[str], dict[str, str]]] = {}
         self._pid_counter = 5000
         self.running = False
 
@@ -101,14 +110,21 @@ class ServiceSupervisor:
         if self.spawn_fn is not None:
             handle = self.spawn_fn(name, cmd, worker_env)
         else:
+            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+            log_dir = self.root / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            worker_env["SWIFT_WORKER_LOG"] = str(log_dir / f"worker-{safe_name}.jsonl")
             self._pid_counter += 1
             flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
             proc = subprocess.Popen(
                 cmd,
                 env=worker_env,
                 cwd=str(self.root),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                # Workers write structured, rotating logs through logging_config.
+                # Do not create an undrained pipe: a noisy child can block forever.
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 creationflags=flags,
             )
             handle = ProcessHandle(proc.pid, cmd, worker_env, proc)
@@ -169,6 +185,14 @@ class ServiceSupervisor:
 
         restarted: list[str] = []
         for name, proc in list(self.workers.items()):
+            pending = self.pending_restarts.get(name)
+            if pending is not None:
+                due_at, cmd, worker_env = pending
+                if now >= due_at:
+                    self.pending_restarts.pop(name, None)
+                    self.workers[name] = self.spawn(name, cmd, worker_env)
+                    restarted.append(name)
+                continue
             code = proc.poll()
             if code is None:
                 continue
@@ -192,10 +216,8 @@ class ServiceSupervisor:
 
             delay = min(30.0, 2.0 ** min(failure_count, 4))
             self.backoff_delays.setdefault(name, []).append(delay)
-
-            # Respawn worker
-            self.workers[name] = self.spawn(name, proc.cmd, proc.env)
-            restarted.append(name)
+            self.pending_restarts[name] = (now + delay, list(proc.cmd), dict(proc.env))
+            logger.warning("Worker %s exited with code %s; restart scheduled in %.1fs", name, code, delay)
 
         return restarted
 
@@ -222,10 +244,23 @@ class ServiceSupervisor:
         tmp.replace(health_file)
 
     def stop_all(self) -> None:
-        """Terminate all running worker processes."""
+        """Gracefully stop workers, then forcefully reap any that exceed bounded waits."""
+        self.pending_restarts.clear()
+        stopping: list[tuple[str, Any]] = []
         for proc in self.workers.values():
             if proc.poll() is None:
                 proc.terminate()
+                stopping.append((str(getattr(proc, "pid", "unknown")), proc))
+        for pid, proc in stopping:
+            try:
+                proc.wait(timeout=WORKER_STOP_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                logger.error("Worker %s did not stop gracefully; forcing termination", pid)
+                proc.kill()
+                try:
+                    proc.wait(timeout=WORKER_KILL_TIMEOUT_SECONDS)
+                except subprocess.TimeoutExpired:
+                    logger.critical("Worker %s could not be reaped after forced termination", pid)
         self.running = False
 
 

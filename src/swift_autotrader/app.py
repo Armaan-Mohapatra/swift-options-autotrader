@@ -88,6 +88,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     try:
         config = Settings.from_env()
+        configure_logging(config.log_level)
         if args.command == "smoke":
             payload = {"status": "OK", "version": __version__, "mode": "PAPER_ONLY"}
         elif args.command == "config-check":
@@ -259,7 +260,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "account_length": len(args.account_number.strip()),
             }
         else:
-            configure_logging(config.log_level)
             start_listener(config)
             payload = {"status": "LISTENER_STOPPED", "mode": config.mode}
         print(json.dumps(payload, sort_keys=True))

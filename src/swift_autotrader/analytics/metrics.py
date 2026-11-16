@@ -267,20 +267,28 @@ class PaperAnalytics:
             equity += delta
             peak = max(peak, equity)
             max_dd = max(max_dd, peak - equity)
-        is_live = False
+        live_configured = False
+        writes_configured = False
         try:
             from swift_autotrader.config import Settings
             cfg = Settings.from_env()
-            is_live = cfg.is_live
+            live_configured = cfg.is_live
+            writes_configured = bool(cfg.is_live and cfg.allow_broker_writes)
         except Exception:
             pass
-        if not is_live and self.db_path.name == "live.sqlite3":
-            is_live = True
-        mode = "LIVE" if is_live else "PAPER_ONLY"
-        real_broker_writes = is_live
+        # Configuration and file names are not evidence of broker authorization,
+        # authenticated connectivity, or an order accepted by Robinhood.
+        mode = "LIVE_CONFIGURED" if live_configured else "PAPER_ONLY"
         return {
-            "mode": mode, "real_broker_writes_enabled": real_broker_writes,
-            "as_of_utc": iso(now), "data_quality": "LIVE_PORTFOLIO" if is_live else "SYNTHETIC_OR_UNVERIFIED_PAPER",
+            "mode": mode,
+            "configured_mode": mode,
+            "configured_broker_writes_enabled": writes_configured,
+            "real_broker_writes_enabled": False,
+            "authenticated_broker_connectivity": "NOT_VERIFIED_BY_DASHBOARD",
+            "worker_liveness": "NOT_VERIFIED_BY_DASHBOARD",
+            "execution_evidence": "NO_STANDALONE_BROKER_EXECUTION_VERIFIED",
+            "production_authorization": "NOT_ESTABLISHED_BY_CONFIGURATION",
+            "as_of_utc": iso(now), "data_quality": "SYNTHETIC_OR_UNVERIFIED_PAPER",
             "costs_assumed": {"fee_per_contract_side_usd": amount(fee),
                               "slippage_per_contract_premium": str(
                                   self.costs.slippage_per_contract_premium),

@@ -270,14 +270,19 @@ def test_dashboard_live_mode_availability_and_reporting(managed_live_env, monkey
         with urlopen(base_url + "/static/dashboard.js") as resp:
             assert resp.status == 200
             js_text = resp.read().decode()
-            assert "mode!=='PAPER_ONLY'&&x.mode!=='LIVE'" in js_text
+            assert "mode!=='PAPER_ONLY'&&x.mode!=='LIVE_CONFIGURED'" in js_text
 
         # 3. Status API
         with urlopen(base_url + "/api/status") as resp:
             assert resp.status == 200
             payload = json.loads(resp.read().decode())
-            assert payload["mode"] == "LIVE"
-            assert payload["real_broker_writes_enabled"] is True
+            assert payload["mode"] == "LIVE_CONFIGURED"
+            assert payload["configured_broker_writes_enabled"] is True
+            assert payload["real_broker_writes_enabled"] is False
+            assert payload["authenticated_broker_connectivity"] == "NOT_VERIFIED_BY_DASHBOARD"
+            assert payload["execution_evidence"] == "NO_STANDALONE_BROKER_EXECUTION_VERIFIED"
+            assert payload["production_authorization"] == "NOT_ESTABLISHED_BY_CONFIGURATION"
+            assert payload["data_quality"] != "LIVE_PORTFOLIO"
             # Verify no secret leakage
             assert "robinhood_mcp_account" not in payload
             assert "telegram_api_hash" not in payload
@@ -292,6 +297,18 @@ def test_dashboard_live_mode_availability_and_reporting(managed_live_env, monkey
             urlopen(base_url + "/api/status?leak=1")
         assert blocked.value.code == 400
 
+
+def test_live_database_filename_does_not_claim_live_execution(managed_live_env, monkeypatch) -> None:
+    """A DB filename alone cannot establish mode, writes, or broker fills."""
+    _, _, _, live_db = managed_live_env
+    monkeypatch.delenv("LIVE_ENABLED", raising=False)
+    monkeypatch.delenv("ALLOW_BROKER_WRITES", raising=False)
+    monkeypatch.delenv("PAPER_ONLY", raising=False)
+    payload = PaperAnalytics(live_db).snapshot()
+    assert payload["mode"] == "PAPER_ONLY"
+    assert payload["configured_broker_writes_enabled"] is False
+    assert payload["real_broker_writes_enabled"] is False
+    assert payload["execution_evidence"] == "NO_STANDALONE_BROKER_EXECUTION_VERIFIED"
 
 # ============================================================================
 # Rehearsal 4: Supervisor Multi-Worker Lifecycle & Crash Backoff
@@ -322,8 +339,9 @@ def test_supervisor_live_mode_multi_worker_lifecycle(managed_live_env) -> None:
     supervisor.workers["telegram"].crash(exit_code=1)
     assert supervisor.workers["telegram"].poll() == 1
 
-    # check_workers detects crash and respawns
-    restarted = supervisor.check_workers(now_ts=1000.0)
+    # check_workers detects crash, waits, then respawns.
+    assert supervisor.check_workers(now_ts=1000.0) == []
+    restarted = supervisor.check_workers(now_ts=1002.0)
     assert "telegram" in restarted
     assert supervisor.workers["telegram"].poll() is None  # new process alive
     assert supervisor.failures["telegram"] == 1
@@ -343,14 +361,16 @@ def test_supervisor_circuit_breaker_trips_on_repeated_crashes(managed_live_env) 
 
     # Crash live-dispatch repeatedly exceeding MAX_RESTARTS (5)
     now = 1000.0
-    for i in range(5):
+    for delay in (2.0, 4.0, 8.0, 16.0, 30.0):
         supervisor.workers["live-dispatch"].crash(exit_code=1)
-        supervisor.check_workers(now_ts=now + i * 2.0)
+        supervisor.check_workers(now_ts=now)
+        now += delay
+        supervisor.check_workers(now_ts=now)
 
     # 6th crash exceeds threshold within window
     supervisor.workers["live-dispatch"].crash(exit_code=1)
     with pytest.raises(RuntimeError, match="Circuit breaker tripped"):
-        supervisor.check_workers(now_ts=now + 20.0)
+        supervisor.check_workers(now_ts=now)
 
 
 # ============================================================================

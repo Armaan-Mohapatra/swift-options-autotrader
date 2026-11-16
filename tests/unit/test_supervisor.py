@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -97,7 +99,8 @@ def test_worker_crash_detection_and_restart(managed_root: Path) -> None:
     proc.crash(exit_code=1)
     assert proc.poll() == 1
 
-    restarted = manager.check_workers(now_ts=100.0)
+    assert manager.check_workers(now_ts=100.0) == []
+    restarted = manager.check_workers(now_ts=102.0)
     assert "live-dispatch" in restarted
     new_proc = manager.workers["live-dispatch"]
     assert new_proc.pid != old_pid
@@ -145,15 +148,18 @@ def test_crash_loop_circuit_breaker(managed_root: Path) -> None:
     manager = make_supervisor(managed_root)
     manager.spawn("live-dispatch", ["live-dispatch"])
 
-    # Simulate 5 crashes in rapid succession
-    for i in range(5):
+    # Let each crash pass through its scheduled exponential backoff.
+    now = 100.0
+    for delay in (2.0, 4.0, 8.0, 16.0, 30.0):
         manager.workers["live-dispatch"].crash(exit_code=1)
-        manager.check_workers(now_ts=100.0 + i)
+        manager.check_workers(now_ts=now)
+        now += delay
+        manager.check_workers(now_ts=now)
 
     # 6th crash exceeds threshold of 5 and trips circuit breaker
     manager.workers["live-dispatch"].crash(exit_code=1)
     with pytest.raises(RuntimeError, match="Circuit breaker tripped"):
-        manager.check_workers(now_ts=105.0)
+        manager.check_workers(now_ts=now)
 
     assert manager.circuit_tripped.get("live-dispatch") is True
 
@@ -163,14 +169,57 @@ def test_exponential_backoff_on_repeated_crashes(managed_root: Path) -> None:
     manager = make_supervisor(managed_root)
     manager.spawn("worker", ["worker"])
 
-    now = 1000.0
-    for i in range(4):
+    for crash_at, due in zip((1000.0, 1002.0, 1006.0, 1014.0),
+                             (1002.0, 1006.0, 1014.0, 1030.0), strict=True):
         manager.workers["worker"].crash(exit_code=1)
-        manager.check_workers(now_ts=now + i)
+        assert manager.check_workers(now_ts=crash_at) == []
+        assert manager.check_workers(now_ts=due - 0.1) == []
+        assert manager.check_workers(now_ts=due) == ["worker"]
 
     # Expected delays: 2^1=2s, 2^2=4s, 2^3=8s, 2^4=16s
     delays = manager.backoff_delays["worker"]
     assert delays == [2.0, 4.0, 8.0, 16.0]
+
+
+def test_real_worker_output_cannot_block_on_undrained_pipe(managed_root: Path) -> None:
+    """A noisy real child is drained to a bounded metadata-only rotating log."""
+    manager = ServiceSupervisor(managed_root)
+    source_root = Path(__file__).resolve().parents[2] / "src"
+    command = (
+        "import logging; from swift_autotrader.logging_config import configure_logging; "
+        "configure_logging(); log=logging.getLogger('swift_autotrader.test'); "
+        "[log.info('private message %s', 'x'*100) for _ in range(40000)]"
+    )
+    child = manager.spawn("noisy", [
+        sys.executable, "-c", command
+    ], env={"PYTHONPATH": str(source_root)})
+    assert child._proc.stdout is None
+    assert child.wait(timeout=8) == 0
+    log_files = list((managed_root / "logs").glob("worker-noisy.jsonl*"))
+    assert log_files and len(log_files) <= 4
+    assert sum(path.stat().st_size for path in log_files) <= 8 * 1024 * 1024
+    assert all("private message" not in path.read_text(encoding="utf-8") for path in log_files)
+
+
+def test_real_worker_is_reaped_after_bounded_graceful_shutdown(managed_root: Path) -> None:
+    """Shutdown waits for the actual child process and verifies it exited."""
+    manager = ServiceSupervisor(managed_root)
+    child = manager.spawn("sleep", [sys.executable, "-c", "import time; time.sleep(60)"])
+    time.sleep(0.2)
+    manager.stop_all()
+    assert child.poll() is not None
+    assert child.wait(timeout=1) == child.poll()
+
+
+def test_worker_restart_waits_for_backoff_deadline(managed_root: Path) -> None:
+    manager = make_supervisor(managed_root)
+    child = manager.spawn("worker", ["worker"])
+    child.crash(exit_code=1)
+    assert manager.check_workers(now_ts=10) == []
+    assert manager.workers["worker"] is child
+    assert manager.check_workers(now_ts=11.9) == []
+    assert manager.check_workers(now_ts=12) == ["worker"]
+    assert manager.workers["worker"] is not child
 
 
 def test_stale_lock_cleanup_on_orphan_death(managed_root: Path) -> None:
@@ -201,7 +250,8 @@ def test_isolated_worker_failure_independence(managed_root: Path) -> None:
     disp = manager.spawn("live-dispatch", ["disp"])
 
     dash.crash(exit_code=1)
-    restarted = manager.check_workers(now_ts=200.0)
+    assert manager.check_workers(now_ts=200.0) == []
+    restarted = manager.check_workers(now_ts=202.0)
 
     assert restarted == ["dashboard"]
     assert disp.poll() is None  # live-dispatch remains healthy and unaffected
