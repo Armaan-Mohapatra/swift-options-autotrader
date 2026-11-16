@@ -11,7 +11,7 @@
 - Reviewed source baseline used for acceptance: `8dd3811eebae1a2fb101767e6328f80dd6396837`; the source/deployment code was verified identical to the installed release.
 - Installed interpreter: active release Python 3.11.
 - Storage at final measurement: C: 23.73 GiB free; E: 496.48 GiB free.
-- Sleep timeout: Never on AC and battery. The laptop was discharging with AC power absent at final check; continuous service therefore depends on connecting AC. Hibernate remains enabled because disabling it requires elevation. Lid-close action was not verified.
+- Sleep timeout: Never on AC and battery. Windows GetSystemPowerStatus and WMI both reported AC offline and battery discharging at final check, while the AC Adapter device enumerated as OK. The operator reports the laptop should be connected to power, so AC recognition is unresolved; the sensor result is not proof the cable is physically absent. Hibernate remains enabled because disabling it requires elevation. Lid-close action was not verified.
 - No unrelated project or authentication data was removed.
 
 ## Native validation
@@ -43,7 +43,7 @@
 ## Required blockers and owner actions
 
 1. Keep the installation PAPER_ONLY and broker writes disabled.
-2. Connect the laptop to AC for continuous operation; separately verify lid-close behavior.
+2. Resolve the AC-state discrepancy: the adapter device is present/OK, but Windows API and WMI report AC offline despite the operator's observation. Verify the charger, port or firmware state and confirm Windows recognizes AC; separately verify lid-close behavior.
 3. The operator/provider must establish whether Robinhood's required order-review approval is enabled and whether unattended agentic orders are allowed for this account. Read-only account eligibility does not prove this.
 4. A reviewed software change and isolated regression must bind supervised authorization to the exact durable order intent and revalidate its expiry immediately before submission, or fail closed. Current source has no such expiry boundary.
 5. Demonstrate a fresh-alert-to-simulated-order path with synthetic or authorized paper data, and verify persistent cycle evidence; current status explicitly reports automated paper orders false and no fresh candidate was observed.
