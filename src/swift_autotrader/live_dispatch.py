@@ -29,6 +29,7 @@ from swift_autotrader.broker.robinhood_mcp import (
 from swift_autotrader.config import Settings
 from swift_autotrader.notifications.alerts import NotificationCenter
 from swift_autotrader.orders.engine import PaperOrderEngine
+from swift_autotrader.orders.exposure_state import active_signal_ids
 from swift_autotrader.orders.exit_policy import ExitQuote
 from swift_autotrader.orders.risk import Preflight, RiskCeilings
 from swift_autotrader.orders.slippage import resolve_live_entry_limit, SlippageExceededError
@@ -283,12 +284,13 @@ class LiveDispatcher:
                 (str(self.channel_id),),
             ).fetchall()
 
-            active_rows = db.execute(
-                "SELECT DISTINCT s.underlying, s.option_right, s.strike, s.expiration_date "
-                "FROM option_signals s JOIN order_intents o ON o.signal_id=s.signal_id "
-                "WHERE o.side='BUY_TO_OPEN' AND o.state IN ('ACCEPTED','PARTIALLY_FILLED','FILLED') "
-                "AND s.state NOT IN ('CLOSED','REJECTED','CANCELED')"
-            ).fetchall()
+            active_ids = active_signal_ids(db)
+            active_rows = [
+                row[1:] for row in db.execute(
+                    "SELECT signal_id, underlying, option_right, strike, expiration_date "
+                    "FROM option_signals"
+                ).fetchall() if str(row[0]) in active_ids
+            ]
 
         from datetime import date
         from swift_autotrader.signals.identity import OptionRight
@@ -299,19 +301,22 @@ class LiveDispatcher:
         entries = []
         followup_rev_ids = []
         for rid, mid, body, eligible, sent_at in pending:
-            if eligible:
-                alert = parse_message(body)
-                if alert.intent is SignalIntent.ENTRY:
-                    if self.single_entry:
-                        if self.target_message_id is not None and mid != self.target_message_id:
-                            continue
-                        if (
-                            self.authorized_symbol is not None
-                            and getattr(alert, "underlying", "").upper() != self.authorized_symbol
-                        ):
-                            continue
-                    entries.append((rid, mid, alert))
-                else:
-                    followup_rev_ids.append(rid)
+            alert = parse_message(body)
+            if alert.intent is SignalIntent.ENTRY:
+                if not eligible:
+                    continue
+                if self.single_entry:
+                    if self.target_message_id is not None and mid != self.target_message_id:
+                        continue
+                    if (
+                        self.authorized_symbol is not None
+                        and (alert.underlying or "").upper() != self.authorized_symbol
+                    ):
+                        continue
+                entries.append((rid, mid, alert))
+            elif eligible or alert.intent is SignalIntent.CLOSE_100_PERCENT:
+                # SignalMatcher verifies delayed exits against durable ownership,
+                # source lineage and the entry timestamp. Never promote old buys.
+                followup_rev_ids.append(rid)
 
         return entries, followup_rev_ids, active
