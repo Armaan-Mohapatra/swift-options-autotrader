@@ -36,6 +36,10 @@ class MCPContractError(RuntimeError):
     """The MCP tool or data contract is missing, ambiguous or unsafe."""
 
 
+class SubmissionNotAttemptedError(MCPContractError):
+    """Definitively refused BEFORE any broker placement request was sent."""
+
+
 class MCPReadError(RuntimeError):
     """Read-only MCP call failed; do not assume a trade or fill occurred."""
 
@@ -257,6 +261,8 @@ class RobinhoodMCPBroker:
         if approved_account_number is not None:
             _identifier(approved_account_number)
         self.approved_account_number = approved_account_number
+        # Optional final pre-placement authorization (intent) -> bool. Never an issuer.
+        self.submission_guard = None
         self.client = client
         self.timeout_seconds = timeout_seconds
         self.allow_live_writes = allow_live_writes
@@ -556,10 +562,23 @@ class RobinhoodMCPBroker:
             raise BrokerWritesDisabledError("Live order placement is not authorized")
         # A local write flag is not proof of provider permission. An absent,
         # ambiguous, approval-required or warned review must not reach placement.
-        review = await self.review_order(account, instrument, intent)
+        try:
+            review = await self.review_order(account, instrument, intent)
+        except MCPContractError as exc:
+            raise SubmissionNotAttemptedError(f"Provider review unusable: {exc}") from exc
         if not review.unblocked:
-            raise MCPContractError("Provider review did not permit unattended submission")
+            raise SubmissionNotAttemptedError("Provider review did not permit unattended submission")
         payload = self.future_order_payload(account, instrument, intent)
+        # Final authorization boundary: re-validate AFTER instrument resolution,
+        # network latency and provider review, immediately before placement.
+        guard = self.submission_guard
+        if guard is not None:
+            try:
+                permitted = guard(intent)
+            except Exception as exc:
+                raise SubmissionNotAttemptedError("Submission authorization check failed") from exc
+            if permitted is not True:
+                raise SubmissionNotAttemptedError("Authorization no longer valid at submission boundary")
         return await self._call("place_option_order", payload)
 
     async def cancel_order_by_id(

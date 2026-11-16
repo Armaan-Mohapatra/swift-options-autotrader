@@ -43,7 +43,7 @@ function Stop-SwiftTask {
     if ($null -eq $task) { return }
     $marker = Join-Path $root 'state\stop.request'
     'STOP' | Set-Content -LiteralPath $marker -Encoding Ascii
-    $deadline = [DateTime]::UtcNow.AddSeconds(35)
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
     do {
         if ((Get-TaskState) -ne 'Running') { break }
         Start-Sleep -Seconds 1

@@ -343,8 +343,10 @@ class PaperSupervisor:
             "status": state, "as_of_utc": _now(), "pid": os.getpid(),
             "mode": "PAPER_ONLY", "live_enabled": False,
             "broker_writes_enabled": False,
-            "automated_paper_orders": False,
+            # Truthful: configured AND alive. Never implies orders were placed or filled.
+            "automated_paper_orders": bool(workers.get("paper-dispatch", False)),
             "paper_dispatch_worker_enabled": any(c.name == "paper-dispatch" for c in self.children),
+            "paper_dispatch_worker_alive": bool(workers.get("paper-dispatch", False)),
             "workers": workers,
             "health_scope": "PROCESS_LIVENESS_ONLY",
             "live_startup_ready": False,

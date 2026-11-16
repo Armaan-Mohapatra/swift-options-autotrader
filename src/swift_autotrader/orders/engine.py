@@ -255,7 +255,14 @@ class PaperOrderEngine:
         try:
             snapshot = self.broker.submit_order(intent)
             self._reconcile_one(intent.logical_order_id, now, snapshot=snapshot)
-        except Exception:
+        except Exception as exc:
+            if type(exc).__name__ == "SubmissionNotAttemptedError":
+                # Provably no placement request was sent: terminal, never retried.
+                self._state(intent.logical_order_id, "REJECTED", now,
+                            detail="NOT_SUBMITTED_AUTHORIZATION_OR_REVIEW")
+                self._alert(intent.logical_order_id.split(":")[0],
+                            intent.logical_order_id, "SUBMISSION_REFUSED_PRE_PLACEMENT", now)
+                raise
             # An ambiguous response MUST NOT generate a fresh logical order/key.
             self._alert(intent.logical_order_id.split(":")[0],
                         intent.logical_order_id, "SUBMISSION_UNCERTAIN", now)
@@ -826,9 +833,14 @@ class PaperOrderEngine:
         quotes = dict(quotes or {})
         entry_submissions = close_submissions = cancels = blocked = 0
         with self._db() as db:
+            # Intents provably refused before any placement request have no
+            # broker counterpart; reconciling them would loop on UNKNOWN.
             orders = db.execute(
-                "SELECT logical_order_id FROM order_intents "
-                "ORDER BY logical_order_id"
+                "SELECT o.logical_order_id FROM order_intents o "
+                "WHERE NOT (o.state='REJECTED' AND o.broker_order_id IS NULL AND EXISTS("
+                "SELECT 1 FROM order_state_events e WHERE e.logical_order_id=o.logical_order_id "
+                "AND e.state='REJECTED' AND e.detail='NOT_SUBMITTED_AUTHORIZATION_OR_REVIEW')) "
+                "ORDER BY o.logical_order_id"
             ).fetchall()
         for row in orders:
             try:

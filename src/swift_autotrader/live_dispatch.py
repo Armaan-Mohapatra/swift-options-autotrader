@@ -31,7 +31,7 @@ from swift_autotrader.notifications.alerts import NotificationCenter
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.exposure_state import active_signal_ids
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope
-from swift_autotrader.orders.commands import OrderIntent
+from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.exit_policy import ExitQuote
 from swift_autotrader.orders.risk import Preflight, RiskCeilings
 from swift_autotrader.orders.slippage import resolve_live_entry_limit, SlippageExceededError
@@ -128,6 +128,8 @@ class LiveDispatcher:
             entry_authorizer=self._authorize_entry if self.single_entry else None,
         )
         self.notifications = NotificationCenter(self.db_path)
+        if self.acceptance_scope is not None:
+            self.live_broker.mcp.submission_guard = self._authorize_submission
 
     def _authorize_entry(self, db, signal, intent: OrderIntent, now: datetime) -> bool:
         # Called within the engine's BEGIN IMMEDIATE transaction. Enforce one
@@ -152,6 +154,34 @@ class LiveDispatcher:
             message_id=int(row[1]), revision_id=int(row[2]),
             contract=intent.contract, quantity=intent.quantity,
             limit=intent.limit_price, now=now,
+        )
+
+    def _authorize_submission(self, intent: OrderIntent) -> bool:
+        """Re-check exact scope at the broker boundary. Exits are not blocked."""
+        if intent.side is not OrderSide.BUY_TO_OPEN:
+            return True
+        scope = self.acceptance_scope
+        if scope is None:
+            return True
+        import sqlite3
+        from contextlib import closing
+        with closing(sqlite3.connect(str(self.db_path))) as db:
+            row = db.execute(
+                "SELECT m.channel_id,m.source_message_id,m.first_revision_id,t.latest_revision_id,"
+                "o.state,o.broker_order_id,(SELECT count(*) FROM order_intents WHERE side='BUY_TO_OPEN') "
+                "FROM order_intents o JOIN signal_metadata m ON m.signal_id=o.signal_id "
+                "JOIN telegram_messages t ON t.channel_id=m.channel_id AND t.message_id=m.source_message_id "
+                "WHERE o.logical_order_id=?", (intent.logical_order_id,),
+            ).fetchone()
+        if row is None or int(row[2]) != int(row[3]):
+            return False  # unknown intent or superseded Telegram revision
+        if row[4] != "INTENT_RECORDED" or row[5] is not None or int(row[6]) != 1:
+            return False  # duplicate / already-submitted / extra entry
+        return scope.permits(
+            account=self.account.account_number, channel_id=int(row[0]),
+            message_id=int(row[1]), revision_id=int(row[2]),
+            contract=intent.contract, quantity=intent.quantity,
+            limit=intent.limit_price, now=self.clock(),
         )
 
     def _verify_supervised_journal(self) -> None:
