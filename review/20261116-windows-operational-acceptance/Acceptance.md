@@ -33,7 +33,7 @@
 ## Storage and power
 
 - First measured free space this run: C: **495,480,832 bytes (472.53 MiB)**; E: **534,104,584,192 bytes (497.42 GiB)**.
-- Latest measured free space: C: **0 bytes reported**; E: **533,210,894,336 bytes (496.59 GiB)**. No C: files were deliberately deleted or relocated during this installation. The cause of the C: decrease was not established. Do not treat the system as having adequate free space.
+- C: fluctuated from **0 bytes reported** to **101,457,920 bytes (96.73 MiB)** on the final check; E: **533,210,877,952 bytes (496.59 GiB)**. No C: files were deliberately deleted or relocated during this installation. The cause of the C: decrease/fluctuation was not established. Do not treat the system as having adequate free space.
 - Sleep timeout is set to Never on AC and battery. The battery provider reported 100% charge with status `Discharging`; continuous operation therefore requires AC power. No lid-close action was exposed in the queried power plan. The interactive logon task requires the designated Windows user to log in after a reboot for DPAPI access.
 
 ## Production boundary
