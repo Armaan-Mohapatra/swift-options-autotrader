@@ -239,6 +239,8 @@ class PaperSupervisor:
         self.env = dict(os.environ if env is None else env)
         settings = Settings.from_env(self.env)
         settings.validate()
+        if settings.is_live:
+            raise PermissionError("The Windows PAPER supervisor cannot start in LIVE mode")
         if settings.db_path.resolve() != (self.root / "data" / "swift.sqlite3").resolve():
             raise RuntimeError("DB_PATH must point at isolated managed database")
         if not settings.db_path.is_file():
@@ -314,14 +316,19 @@ class PaperSupervisor:
         self.log.info("worker_stopped kind=%s", child.name)
 
     def _heartbeat(self, state: str) -> None:
+        workers = {c.name: c.process is not None and c.process.poll() is None
+                   for c in self.children}
+        if state == "RUNNING" and not all(workers.values()):
+            state = "DEGRADED"
         _atomic_json(self.root / "state" / "health.json", {
             "status": state, "as_of_utc": _now(), "pid": os.getpid(),
             "mode": "PAPER_ONLY", "live_enabled": False,
             "broker_writes_enabled": False,
             "automated_paper_orders": False,
             "paper_dispatch_worker_enabled": any(c.name == "paper-dispatch" for c in self.children),
-            "workers": {c.name: c.process is not None and c.process.poll() is None
-                        for c in self.children},
+            "workers": workers,
+            "health_scope": "PROCESS_LIVENESS_ONLY",
+            "live_startup_ready": False,
         })
 
     def _check_workers(self) -> None:
@@ -360,8 +367,14 @@ class PaperSupervisor:
     def _notify_scan(self) -> None:
         try:
             scan_env = {key: value for key, value in self.env.items()
-                        if key not in {"TELEGRAM_STATUS_BOT_TOKEN",
-                                       "TELEGRAM_API_HASH", "TELEGRAM_SESSION_PATH"}}
+                        if key not in {"TELEGRAM_STATUS_BOT_TOKEN", "TELEGRAM_STATUS_CHAT_ID",
+                                       "TELEGRAM_API_HASH", "TELEGRAM_API_ID",
+                                       "TELEGRAM_SESSION_PATH", "KILL_SWITCH_TELEGRAM_BOT_TOKEN",
+                                       "KILL_SWITCH_TELEGRAM_CHAT_ID", "ROBINHOOD_MCP_ACCOUNT"}}
+            # The notification scan only reads its local database. Do not require
+            # authentication for a worker that deliberately has no credentials.
+            scan_env.update(TELEGRAM_ENABLED="false", KILL_SWITCH_ENABLED="false",
+                            PAPER_DISPATCH_ENABLED="false", PAPER_MARKET_DATA_SOURCE="none")
             result = subprocess.run(
                 [sys.executable, "-m", "swift_autotrader", "paper-notify-scan"],
                 cwd=self.root, env=scan_env, capture_output=True, timeout=10,
@@ -417,8 +430,14 @@ def service_status(root: Path, *, now: datetime | None = None) -> dict[str, obje
         raise RuntimeError("Heartbeat timestamp must carry UTC offset")
     current = now or datetime.now(UTC)
     age = (current - timestamp).total_seconds()
-    if record.get("status") == "RUNNING" and (age < 0 or age > HEARTBEAT_MAX_SECONDS):
-        record["status"] = "STALE"
+    if record.get("status") in {"RUNNING", "DEGRADED"}:
+        if age < 0 or age > HEARTBEAT_MAX_SECONDS:
+            record["status"] = "STALE"
+        elif record.get("status") == "RUNNING":
+            workers = record.get("workers")
+            if (not isinstance(workers, dict) or not workers or
+                    any(value is not True for value in workers.values())):
+                record["status"] = "DEGRADED"
     return record
 
 
