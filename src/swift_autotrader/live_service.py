@@ -73,8 +73,14 @@ def write_live_health(
     result: LiveDispatchResult | None = None,
     open_positions: int = 0,
     daily_loss: Decimal = Decimal("0"),
+    simulated: bool = False,
 ) -> None:
-    """Record atomic structured live service health heartbeat."""
+    """Record cycle evidence, not a certificate of trading authorization."""
+    if state == "RUNNING":
+        if result is None:
+            state = "STARTING"
+        elif result.status != "LIVE_CYCLE_COMPLETED":
+            state = "DEGRADED"
     health_file = root / "state" / "live-health.json"
     health_file.parent.mkdir(parents=True, exist_ok=True)
     doc = {
@@ -83,7 +89,12 @@ def write_live_health(
         "pid": os.getpid(),
         "mode": "LIVE",
         "live_enabled": True,
-        "broker_writes_enabled": True,
+        "broker_writes_configured": True,
+        "broker_writes_enabled": not simulated and state in {"RUNNING", "DEGRADED"},
+        "simulation": simulated,
+        "health_scope": "CYCLE_OUTCOME_ONLY",
+        "live_certified": False,
+        "last_dispatch_status": result.status if result is not None else None,
         "open_positions_count": result.open_positions_count if result else open_positions,
         "realized_daily_loss_usd": str(result.realized_daily_loss_usd if result else daily_loss),
         "last_cancellations": result.cancellations if result else 0,
@@ -126,15 +137,30 @@ async def run_live_service(
     # Check persistent stop markers
     for marker in ("stop.request", "SWIFT_REVIEWED_STOP"):
         if (managed_root / "state" / marker).exists():
-            write_live_health(managed_root, "STOPPED")
+            write_live_health(managed_root, "STOPPED", simulated=client_override is not None)
             raise RuntimeError(f"Persistent stop marker active: {marker}")
 
-    # Resolve token storage
+    # Production is distinct from the paper installation. Never allow local
+    # flags alone to turn a paper journal or credential store into a live one.
+    # Mock-client tests exercise the service without reaching local credentials.
     approved_account = config.robinhood_mcp_account
-    if not approved_account:
-        approved_account = load_pinned_agentic_account(managed_root)
+    if client_override is None:
+        document = json.loads((managed_root / "deployment.json").read_text(encoding="utf-8"))
+        if (document.get("mode") != "LIVE" or document.get("live_enabled") is not True
+                or document.get("broker_writes_enabled") is not True):
+            write_live_health(managed_root, "FAILED")
+            raise LocalAuthNotConfigured("Managed installation is not approved for production execution")
+        live_db = managed_root / "data" / "live.sqlite3"
+        if (config.db_path.resolve() != live_db or config.db_path.is_symlink()
+                or not live_db.is_file() or getattr(live_db.lstat(), "st_file_attributes", 0) & 0x400):
+            write_live_health(managed_root, "FAILED")
+            raise LocalAuthNotConfigured("A distinct managed production journal is required")
+        pinned_account = load_pinned_agentic_account(managed_root)
+        if approved_account != pinned_account:
+            write_live_health(managed_root, "FAILED")
+            raise LocalAuthNotConfigured("Configured account differs from local account binding")
 
-    write_live_health(managed_root, "STARTING")
+    write_live_health(managed_root, "STARTING", simulated=client_override is not None)
 
     # Connect to Robinhood MCP
     if client_override is not None:
@@ -165,10 +191,10 @@ async def run_live_service(
             None,
         )
         if matched_account is None:
-            raise PermissionError(f"Approved account {approved_account} not found among broker accounts")
+            raise PermissionError("Configured account not found among broker accounts")
         if not matched_account.eligible:
             raise PermissionError(
-                f"Account {approved_account} is not eligible for options trading with external agents"
+                "Configured account is not eligible for options trading with external agents"
             )
 
         # 2. Build live market data provider and dispatcher
@@ -188,25 +214,28 @@ async def run_live_service(
             clock=clock,
         )
 
-        write_live_health(managed_root, "RUNNING")
-        log.info("Live trading service started for account %s", approved_account)
+        write_live_health(managed_root, "STARTING", simulated=client_override is not None)
+        log.info("Execution service initialized")
+        last_result = None
 
         try:
             while True:
                 # Check for stop markers before each cycle
                 for marker in ("stop.request", "SWIFT_REVIEWED_STOP"):
-                    if (managed_root / "state" / marker).exists():
-                        log.info("Stop marker %s detected; shutting down live service", marker)
-                        write_live_health(managed_root, "STOPPED")
-                        return
+                    if os.path.lexists(managed_root / "state" / marker):
+                        log.info("Stop marker %s detected; shutting down execution service", marker)
+                        break
 
                 if stop_event is not None and stop_event.is_set():
                     log.info("Stop event signaled; shutting down live service")
-                    write_live_health(managed_root, "STOPPED")
-                    return
+                    break
 
-                result = await dispatcher.run_once()
-                write_live_health(managed_root, "RUNNING", result=result)
+                if any(os.path.lexists(managed_root / "state" / marker)
+                       for marker in ("stop.request", "SWIFT_REVIEWED_STOP")):
+                    break
+                last_result = await dispatcher.run_once()
+                write_live_health(managed_root, "RUNNING", result=last_result,
+                                  simulated=client_override is not None)
 
                 if once:
                     break
@@ -220,6 +249,11 @@ async def run_live_service(
                         break
                 except asyncio.TimeoutError:
                     pass
-        finally:
-            write_live_health(managed_root, "STOPPED")
-            log.info("Live trading service stopped cleanly")
+        except BaseException:
+            write_live_health(managed_root, "FAILED", result=last_result,
+                              simulated=client_override is not None)
+            raise
+        else:
+            write_live_health(managed_root, "STOPPED", result=last_result,
+                              simulated=client_override is not None)
+            log.info("Execution service stopped")
