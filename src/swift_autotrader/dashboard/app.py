@@ -66,7 +66,9 @@ function card(label,value) {const e=document.createElement('div');e.className='c
 async function refresh() {try {
 const result = await fetch('/api/status',{cache:'no-store'});
 if (!result.ok) throw new Error('Unavailable'); const x=await result.json();
-if (x.mode!=='PAPER_ONLY'||x.real_broker_writes_enabled!==false) throw new Error('Unsafe status');
+const okPaper=x.mode==='PAPER_ONLY'&&x.real_broker_writes_enabled===false;
+const okLive=x.mode==='LIVE'&&x.real_broker_writes_enabled===true;
+if (!okPaper&&!okLive) throw new Error('Unsafe status');
 const c=byId('cards');c.replaceChildren(
 card('Realized gross (sim USD)',x.realized_gross_usd),
 card('Realized net (sim USD)',x.realized_net_usd),

@@ -154,12 +154,12 @@ def test_supervisor_single_worker_start_stop_and_no_order_path(install: Path) ->
 
 
 def test_supervisor_respects_fail_closed_config(install: Path) -> None:
-    safe = {"PAPER_ONLY": "true", "LIVE_ENABLED": "true",
+    safe = {"PAPER_ONLY": "yes", "LIVE_ENABLED": "false",
             "ALLOW_BROKER_WRITES": "false",
             "DB_PATH": str(install / "data" / "swift.sqlite3")}
     with pytest.raises(ValueError):
         PaperSupervisor(install, env=safe)
-    safe["LIVE_ENABLED"] = "false"
+    safe["PAPER_ONLY"] = "true"
     safe["DB_PATH"] = str(install / "data" / "other.sqlite3")
     with pytest.raises(RuntimeError):
         PaperSupervisor(install, env=safe)

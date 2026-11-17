@@ -52,10 +52,11 @@ function Assert-SwiftManifest {
         throw 'No managed Swift paper-only installation at this path.'
     }
     $config = Get-Content -LiteralPath $marker -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($config.product -ne 'swift-options-autotrader' -or
-        $config.mode -ne 'PAPER_ONLY' -or
-        $config.live_enabled -ne $false -or
-        $config.broker_writes_enabled -ne $false) {
+    $paperOk = ($config.mode -eq 'PAPER_ONLY' -and $config.live_enabled -eq $false -and
+        $config.broker_writes_enabled -eq $false)
+    $liveOk = ($config.mode -eq 'LIVE' -and $config.live_enabled -eq $true -and
+        $config.broker_writes_enabled -eq $true)
+    if ($config.product -ne 'swift-options-autotrader' -or (-not $paperOk -and -not $liveOk)) {
         throw 'Invalid or unsafe installation manifest.'
     }
 }
@@ -98,14 +99,28 @@ function Set-SwiftEnvironment {
         throw 'Managed non-secret settings file missing.'
     }
     $cfg = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($cfg.mode -ne 'PAPER_ONLY' -or $cfg.live_enabled -ne $false) {
-        throw 'Forbidden configuration: only paper mode is allowed.'
-    }
     $env:SWIFT_INSTALL_ROOT = $InstallRoot
-    $env:PAPER_ONLY = 'true'
-    $env:LIVE_ENABLED = 'false'
-    $env:ALLOW_BROKER_WRITES = 'false'
-    $env:BROKER_BACKEND = 'paper'
+    if ($cfg.mode -eq 'LIVE') {
+        # Live only when EVERY live setting is present; otherwise refuse (never half-live).
+        if ($cfg.live_enabled -ne $true -or $cfg.broker_backend -ne 'robinhood_live' -or
+            [string]::IsNullOrWhiteSpace([string]$cfg.live_account_number) -or
+            [string]::IsNullOrWhiteSpace([string]$cfg.live_journal_path)) {
+            throw 'Incomplete live configuration: all live settings are required.'
+        }
+        $env:PAPER_ONLY = 'false'
+        $env:LIVE_ENABLED = 'true'
+        $env:ALLOW_BROKER_WRITES = 'true'
+        $env:BROKER_BACKEND = 'robinhood_live'
+        $env:LIVE_ACCOUNT_NUMBER = [string]$cfg.live_account_number
+        $env:LIVE_JOURNAL_PATH = [string]$cfg.live_journal_path
+    } elseif ($cfg.mode -eq 'PAPER_ONLY' -and $cfg.live_enabled -eq $false) {
+        $env:PAPER_ONLY = 'true'
+        $env:LIVE_ENABLED = 'false'
+        $env:ALLOW_BROKER_WRITES = 'false'
+        $env:BROKER_BACKEND = 'paper'
+    } else {
+        throw 'Forbidden configuration: mode must be PAPER_ONLY or a complete LIVE setup.'
+    }
     $env:DB_PATH = Join-Path $InstallRoot 'data\swift.sqlite3'
     $env:MAX_CONTRACTS_PER_SIGNAL = '1'
     $env:MAX_PREMIUM_PER_SIGNAL_USD = '0'

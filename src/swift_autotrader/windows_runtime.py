@@ -50,6 +50,23 @@ def _atomic_json(path: Path, document: dict[str, object]) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def manifest_mode(document: dict) -> str | None:
+    """PAPER_ONLY (no live, no writes) or LIVE (live and writes); any mix is invalid."""
+    if document.get("product") != "swift-options-autotrader":
+        return None
+    live, writes = document.get("live_enabled"), document.get("broker_writes_enabled")
+    if document.get("mode") == "PAPER_ONLY" and live is False and writes is False:
+        return "PAPER_ONLY"
+    if document.get("mode") == "LIVE" and live is True and writes is True:
+        return "LIVE"
+    return None
+
+
+def install_mode(root: Path) -> str:
+    return manifest_mode(json.loads((Path(root) / MANIFEST_NAME).read_text(encoding="utf-8"))) \
+        or "PAPER_ONLY"
+
+
 def validate_install_root(root: Path) -> Path:
     """Reject arbitrary paths: commands may affect only manifest-owned install."""
     root = Path(root).expanduser().resolve()
@@ -57,12 +74,9 @@ def validate_install_root(root: Path) -> Path:
         raise RuntimeError("Swift install directory not present")
     marker = root / MANIFEST_NAME
     if not marker.is_file() or marker.is_symlink():
-        raise RuntimeError("Managed paper-only installation marker is missing")
+        raise RuntimeError("Managed installation marker is missing")
     document = json.loads(marker.read_text(encoding="utf-8"))
-    if (document.get("product") != "swift-options-autotrader" or
-        document.get("mode") != "PAPER_ONLY" or
-        document.get("live_enabled") is not False or
-        document.get("broker_writes_enabled") is not False):
+    if manifest_mode(document) is None:
         raise RuntimeError("Unsafe or unknown installation manifest")
     for part in ("data", "logs", "backups", "secrets", "state", "releases"):
         location = root / part
@@ -239,6 +253,8 @@ class PaperSupervisor:
         self.env = dict(os.environ if env is None else env)
         settings = Settings.from_env(self.env)
         settings.validate()
+        if settings.live_mode != (install_mode(self.root) == "LIVE"):
+            raise RuntimeError("Install manifest and settings disagree about live mode")
         if settings.db_path.resolve() != (self.root / "data" / "swift.sqlite3").resolve():
             raise RuntimeError("DB_PATH must point at isolated managed database")
         if not settings.db_path.is_file():
@@ -316,8 +332,8 @@ class PaperSupervisor:
     def _heartbeat(self, state: str) -> None:
         _atomic_json(self.root / "state" / "health.json", {
             "status": state, "as_of_utc": _now(), "pid": os.getpid(),
-            "mode": "PAPER_ONLY", "live_enabled": False,
-            "broker_writes_enabled": False,
+            "mode": (mode := install_mode(self.root)), "live_enabled": mode == "LIVE",
+            "broker_writes_enabled": mode == "LIVE",
             "automated_paper_orders": False,
             "paper_dispatch_worker_enabled": any(c.name == "paper-dispatch" for c in self.children),
             "workers": {c.name: c.process is not None and c.process.poll() is None
@@ -410,7 +426,7 @@ def service_status(root: Path, *, now: datetime | None = None) -> dict[str, obje
     root = validate_install_root(root)
     health = root / "state" / "health.json"
     if not health.is_file():
-        return {"status": "NOT_STARTED", "mode": "PAPER_ONLY"}
+        return {"status": "NOT_STARTED", "mode": install_mode(root)}
     record = json.loads(health.read_text(encoding="utf-8"))
     timestamp = datetime.fromisoformat(str(record["as_of_utc"]))
     if timestamp.tzinfo is None:

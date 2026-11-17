@@ -29,7 +29,7 @@ def test_phase6_preserves_paper_only_no_unapproved_order_worker():
     assert '"telegram-listen"' in source
     assert '"paper-cycle"' not in source
     assert '"parse-replay"' not in source
-    assert '"broker_writes_enabled": False' in source
+    assert '"broker_writes_enabled": mode == "LIVE"' in source  # paper unless manifest is LIVE
 
 
 def test_task_user_only_and_bounded_restarts():
