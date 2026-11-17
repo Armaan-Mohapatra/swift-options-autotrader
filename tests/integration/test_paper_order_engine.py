@@ -663,3 +663,142 @@ def test_terminal_order_status_regression_requires_review(rig):
     ):
         engine.run_cycle()
     assert "RECONCILIATION_REQUIRED" in engine.health()["open_alerts"]
+
+
+# --- Approved risk limits: realized daily net-loss circuit breaker (US/Eastern day) ---
+
+
+def seed_closed_trade(
+    path: Path, *, mid: int, buy: str, sell: str, filled_at: datetime = NOW,
+) -> str:
+    """Insert a fully filled, closed synthetic one-contract round trip."""
+    sid = synthetic_signal(path, mid=mid, sent=filled_at - timedelta(minutes=5))
+    with connect(path) as db:
+        db.execute("UPDATE option_signals SET state='CLOSED' WHERE signal_id=?", (sid,))
+        for side, price, suffix in (
+            ("BUY_TO_OPEN", buy, "entry"), ("SELL_TO_CLOSE", sell, "close"),
+        ):
+            order = f"{sid}:{suffix}"
+            db.execute(
+                "INSERT INTO order_intents(logical_order_id,signal_id,idempotency_key,side,"
+                "requested_quantity,filled_quantity,limit_price,state) "
+                "VALUES(?,?,?,?,1,1,?,'FILLED')",
+                (order, sid, f"seed-{order}", side, price),
+            )
+            db.execute(
+                "INSERT INTO order_fills(fill_id,logical_order_id,filled_quantity,"
+                "filled_price,filled_at_utc) VALUES(?,?,1,?,?)",
+                (f"fill-{order}", order, price, iso(filled_at)),
+            )
+    return sid
+
+
+def decision(path: Path, sid: str):
+    row = get(path, "SELECT outcome,reason FROM paper_engine_decisions WHERE signal_id=?",
+              (sid,))
+    return None if row is None else (row["outcome"], row["reason"])
+
+
+def test_daily_net_loss_ceiling_blocks_new_entries(rig):
+    path, _, _, engine = rig
+    # (0.50 - 8.00) x 1 contract x 100 = -750.00, exactly the approved ceiling.
+    seed_closed_trade(path, mid=10, buy="8.00", sell="0.50")
+    assert engine._realized_net_pnl_today(NOW) == Decimal("-750")
+    sid = synthetic_signal(path, mid=11)
+    assert engine.run_cycle().entry_submissions == 0
+    assert decision(path, sid) == ("BLOCKED", "DAILY_LOSS_CEILING_REACHED")
+    assert get(path, "SELECT COUNT(*) FROM order_intents WHERE signal_id=?", (sid,))[0] == 0
+
+
+def test_loss_just_inside_the_ceiling_still_allows_an_entry(rig):
+    path, _, _, engine = rig
+    seed_closed_trade(path, mid=10, buy="8.00", sell="0.51")  # -749.00
+    sid = synthetic_signal(path, mid=11)
+    assert engine.run_cycle().entry_submissions == 1
+    assert decision(path, sid) == ("INTENT_RECORDED", None)
+
+
+def test_daily_net_pnl_nets_winners_against_losers(rig):
+    path, _, _, engine = rig
+    seed_closed_trade(path, mid=10, buy="8.00", sell="0.50")  # -750
+    seed_closed_trade(path, mid=12, buy="1.00", sell="2.00")  # +100
+    assert engine._realized_net_pnl_today(NOW) == Decimal("-650")
+    sid = synthetic_signal(path, mid=11)
+    assert engine.run_cycle().entry_submissions == 1
+    assert decision(path, sid) == ("INTENT_RECORDED", None)
+
+
+def test_loss_from_a_prior_trading_day_is_not_counted(rig):
+    path, _, _, engine = rig
+    seed_closed_trade(path, mid=10, buy="8.00", sell="0.50", filled_at=NOW - timedelta(days=1))
+    assert engine._realized_net_pnl_today(NOW) == 0
+    sid = synthetic_signal(path, mid=11)
+    assert engine.run_cycle().entry_submissions == 1
+    assert decision(path, sid) == ("INTENT_RECORDED", None)
+
+
+def test_trading_day_rolls_over_at_us_eastern_midnight(rig):
+    path, _, _, engine = rig
+    # 2026-11-13 04:59Z is 23:59 EST on Nov 12; 05:00Z is already Nov 13 in New York.
+    seed_closed_trade(
+        path, mid=10, buy="8.00", sell="0.50", filled_at=datetime(2026, 11, 13, 4, 59, tzinfo=UTC),
+    )
+    seed_closed_trade(
+        path, mid=12, buy="8.00", sell="0.50", filled_at=datetime(2026, 11, 13, 5, 0, tzinfo=UTC),
+    )
+    assert engine._realized_net_pnl_today(NOW) == Decimal("-750")
+    assert engine._realized_net_pnl_today(datetime(2026, 11, 13, 15, 0, tzinfo=UTC)) == Decimal(
+        "-750"
+    )
+
+
+def test_unverifiable_exit_basis_fails_closed(rig):
+    path, _, _, engine = rig
+    sid = seed_closed_trade(path, mid=10, buy="8.00", sell="0.50")
+    with connect(path) as db:
+        db.execute("DELETE FROM order_fills WHERE logical_order_id=?", (entry_id(sid),))
+    assert engine._realized_net_pnl_today(NOW).is_nan()
+    new = synthetic_signal(path, mid=11)
+    assert engine.run_cycle().entry_submissions == 0
+    assert decision(path, new) == ("BLOCKED", "DAILY_PNL_UNVERIFIED")
+
+
+# --- One contract per trade; trade count bounded only by buying power ---
+
+
+def uncapped_engine(rig, buying_power: str) -> PaperOrderEngine:
+    path, clock, _, _ = rig
+    checks = {CONTRACT: Preflight(
+        True, True, True, Decimal(buying_power), Decimal("0.01"), CONTRACT,
+    )}
+    return PaperOrderEngine(
+        path, PaperBroker(path, clock=clock), preflight=PaperPreflight(checks),
+        limits=RiskCeilings.from_environment({"MAX_PREMIUM_PER_SIGNAL_USD": "999"}),
+        clock=clock,
+    )
+
+
+def test_no_trade_count_cap_one_contract_each_with_ample_buying_power(rig):
+    path = rig[0]
+    engine = uncapped_engine(rig, "100000")
+    for mid in range(1, 13):
+        synthetic_signal(path, mid=mid)
+    assert engine.limits.open_signal_count is None
+    assert engine.limits.total_exposure_usd is None
+    assert engine.run_cycle().entry_submissions == 12
+    assert get(path, "SELECT COUNT(*) FROM order_intents")[0] == 12
+    assert get(path, "SELECT MAX(requested_quantity) FROM order_intents")[0] == 1
+
+
+def test_buying_power_alone_stops_further_trades(rig):
+    path = rig[0]
+    engine = uncapped_engine(rig, "300")  # $120 premium per trade: two fit, third does not
+    for mid in range(1, 6):
+        synthetic_signal(path, mid=mid)
+    assert engine.run_cycle().entry_submissions == 2
+    blocked = get(
+        path, "SELECT COUNT(*) FROM paper_engine_decisions "
+        "WHERE outcome='BLOCKED' AND reason='INSUFFICIENT_BUYING_POWER'",
+    )[0]
+    assert blocked == 3
+    assert get(path, "SELECT MAX(requested_quantity) FROM order_intents")[0] == 1

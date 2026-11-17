@@ -109,7 +109,10 @@ function Set-SwiftEnvironment {
     $env:DB_PATH = Join-Path $InstallRoot 'data\swift.sqlite3'
     $env:MAX_CONTRACTS_PER_SIGNAL = '1'
     $env:MAX_PREMIUM_PER_SIGNAL_USD = '0'
-    $env:PAPER_MAX_TOTAL_EXPOSURE_USD = '0'
+    # Blank = no cap: trade count is bounded only by buying power.
+    $env:PAPER_MAX_TOTAL_EXPOSURE_USD = ''
+    $env:PAPER_MAX_OPEN_SIGNALS = ''
+    $env:PAPER_MAX_DAILY_NET_LOSS_USD = '750'
     $env:ENTRY_TIMEOUT_SECONDS = '3600'
     $env:LOG_LEVEL = 'INFO'
     $env:TELEGRAM_ENABLED = 'false'
@@ -150,23 +153,40 @@ function Set-SwiftEnvironment {
         if (-not (Test-Path -LiteralPath $tokenFile -PathType Leaf)) {
             throw 'Manually enrolled Windows user OAuth tokens required.'
         }
-        foreach ($property in @('paper_max_premium_usd','paper_max_exposure_usd')) {
-            if ([string]$cfg.$property -notmatch '^[0-9]+(\.[0-9]{1,2})?$') {
-                throw 'Approved paper budgets must be nonnegative exact dollar strings.'
-            }
+        if ([string]$cfg.paper_max_premium_usd -notmatch '^[0-9]+(\.[0-9]{1,2})?$') {
+            throw 'Approved paper premium budget must be a nonnegative exact dollar string.'
         }
         if ([decimal]$cfg.paper_max_premium_usd -le 0 -or
-            [decimal]$cfg.paper_max_exposure_usd -le 0 -or
-            [int]$cfg.paper_max_contracts -le 0 -or
-            [int]$cfg.paper_max_open_signals -le 0) {
-            throw 'Explicit positive PAPER-only risk ceilings are required.'
+            [int]$cfg.paper_max_contracts -le 0) {
+            throw 'Explicit positive PAPER-only premium and contract ceilings are required.'
         }
+        # Exposure and open-trade caps are OPTIONAL (blank = unlimited, buying power only).
+        $exposureCap = if ($null -eq $cfg.paper_max_exposure_usd) { '' } else { [string]$cfg.paper_max_exposure_usd }
+        $openCap = if ($null -eq $cfg.paper_max_open_signals) { '' } else { [string]$cfg.paper_max_open_signals }
+        if ($exposureCap -ne '' -and ($exposureCap -notmatch '^[0-9]+(\.[0-9]{1,2})?$' -or
+            [decimal]$exposureCap -le 0)) {
+            throw 'Optional exposure cap must be blank or a positive exact dollar string.'
+        }
+        if ($openCap -ne '' -and ($openCap -notmatch '^[0-9]+$' -or [int]$openCap -le 0)) {
+            throw 'Optional open-trade cap must be blank or a positive integer.'
+        }
+        # Approved hard maxima; keep in sync with src/swift_autotrader/risk_limits.py.
+        $dailyLoss = if ($null -eq $cfg.paper_max_daily_net_loss_usd) { '750' } else { [string]$cfg.paper_max_daily_net_loss_usd }
+        if ($dailyLoss -notmatch '^[0-9]+(\.[0-9]{1,2})?$' -or [decimal]$dailyLoss -le 0 -or
+            [decimal]$dailyLoss -gt 750) {
+            throw 'Daily net loss ceiling must be above 0 and at most 750 USD.'
+        }
+        if ([decimal]$cfg.paper_max_premium_usd -gt 999 -or
+            [int]$cfg.paper_max_contracts -gt 1) {
+            throw 'PAPER-only risk ceilings exceed approved maxima (999 premium, 1 contract).'
+        }
+        $env:PAPER_MAX_DAILY_NET_LOSS_USD = $dailyLoss
         $env:PAPER_DISPATCH_ENABLED = 'true'
         $env:PAPER_MARKET_DATA_SOURCE = 'robinhood_mcp_readonly'
         $env:MAX_CONTRACTS_PER_SIGNAL = [string]$cfg.paper_max_contracts
         $env:MAX_PREMIUM_PER_SIGNAL_USD = [string]$cfg.paper_max_premium_usd
-        $env:PAPER_MAX_TOTAL_EXPOSURE_USD = [string]$cfg.paper_max_exposure_usd
-        $env:PAPER_MAX_OPEN_SIGNALS = [string]$cfg.paper_max_open_signals
+        $env:PAPER_MAX_TOTAL_EXPOSURE_USD = $exposureCap
+        $env:PAPER_MAX_OPEN_SIGNALS = $openCap
     }
     if ($cfg.status_notifications_enabled -eq $true) {
         $tokenFile = Join-Path $InstallRoot 'secrets\status_bot_token.dpapi'
