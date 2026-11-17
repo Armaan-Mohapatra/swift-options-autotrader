@@ -77,6 +77,7 @@ class FakeMCPClient:
         self.stale_quote = False
         self.omit_close = False
         self.page_positions = False
+        self.next_at_top = False  # `next` beside `data` instead of inside it
         self.extra_positions: list[dict[str, Any]] = []
 
     def _stamp(self) -> str:
@@ -174,7 +175,10 @@ class FakeMCPClient:
             assert arguments['nonzero'] is True
             rows = [self.position_row(self.instrument_id)] if self.position else []
             if self.page_positions and 'cursor' not in arguments:
-                return {'data': {'positions': rows, 'next': 'https://api.example/p/?cursor=p2'}}
+                url = 'https://api.example/p/?cursor=p2'
+                if self.next_at_top:
+                    return {'data': {'positions': rows}, 'next': url}
+                return {'data': {'positions': rows, 'next': url}}
             if self.page_positions:
                 rows = list(self.extra_positions)
             return {'data': {'positions': rows, 'next': None}}
@@ -781,8 +785,10 @@ def test_stale_quote_for_open_position_is_denied(scenario):
     assert fake.place_count == 0
 
 
-def test_positions_follow_next_pages(scenario):
+@pytest.mark.parametrize('top', [False, True])
+def test_positions_follow_next_pages(scenario, top):
     broker, fake, _ = scenario
+    fake.next_at_top = top
     fake.unrealized = '-350'  # one position: -100 + -350 = -450, allowed
     assert broker.submit_order(entry('a')).state is BrokerOrderState.ACCEPTED
     fake.page_positions = True  # a second page holds another losing position: -800

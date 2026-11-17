@@ -62,8 +62,8 @@ import asyncio
 import json
 import sqlite3
 import threading
-from collections.abc import Callable, Mapping
-from contextlib import closing, suppress
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -227,7 +227,8 @@ class LiveBroker:
                  kill_switch: Callable[[], bool] | None = None,
                  signal_gate: Callable[[str], str] | None = None,
                  clock: Callable[[], datetime] | None = None,
-                 timeout_seconds: float = 15.0) -> None:
+                 timeout_seconds: float = 15.0,
+                 loop: _LoopThread | None = None) -> None:
         if not account_number or not isinstance(account_number, str):
             raise ValueError('pin a specific dedicated MCP account number')
         if not 1 <= timeout_seconds <= 60:
@@ -244,21 +245,34 @@ class LiveBroker:
         if not self.path.is_file():
             raise LiveSafetyError('pre-create the durable journal; missing journal DENY')
         self._init_schema()
-        self._loop = _LoopThread()
+        # A caller may pass the loop its MCP client already lives on.
+        self._owns_loop = loop is None
+        self._loop = loop or _LoopThread()
 
     def run(self, coro: Any) -> Any:
         """Run a coroutine on this broker's loop (create/connect the MCP client here)."""
         return self._loop.run(coro)
 
     def close(self) -> None:
-        self._loop.close()
+        if self._owns_loop:
+            self._loop.close()
 
-    def _db(self) -> sqlite3.Connection:
+    def verify_account(self) -> bool:
+        """Read-only startup check: the pinned account exists and is agentic_allowed."""
+        self.run(self._account())
+        return True
+
+    @contextmanager
+    def _db(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(str(self.path), isolation_level=None, timeout=10)
-        conn.row_factory = sqlite3.Row
-        conn.execute('PRAGMA busy_timeout=10000')
-        conn.execute('PRAGMA synchronous=FULL')
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute('PRAGMA busy_timeout=10000')
+            conn.execute('PRAGMA synchronous=FULL')
+            with conn:
+                yield conn
+        finally:
+            conn.close()  # a leaked handle would keep the journal file locked on Windows
 
     def _init_schema(self) -> None:
         with self._db() as db:
@@ -977,6 +991,16 @@ class LiveBroker:
 
 def _read_only(db_path: Path) -> sqlite3.Connection:
     return sqlite3.connect(f'{Path(db_path).resolve().as_uri()}?mode=ro', uri=True, timeout=5)
+
+
+def read_kill_state(db_path: Path) -> bool:
+    """True when the engine kill switch is engaged; raises if it cannot be read."""
+    with closing(_read_only(db_path)) as db:
+        row = db.execute('SELECT paused, emergency_stop FROM paper_engine_control '
+                         'WHERE singleton=1').fetchone()
+    if row is None:
+        raise LiveSafetyError('engine control row missing')
+    return bool(row[0]) or bool(row[1])
 
 
 def engine_kill_switch(db_path: Path) -> Callable[[], bool]:
