@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from swift_autotrader.broker.base import BrokerFill, BrokerOrderState, BrokerOrderStatus
-from swift_autotrader.broker.paper import PaperBroker, iso
+from swift_autotrader.broker.paper import iso
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.engine import PaperOrderEngine

@@ -15,17 +15,14 @@ import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from swift_autotrader.broker.base import BrokerOrderStatus, BrokerOrderState, OrderIntent, OrderSide
-from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
 from swift_autotrader.broker.robinhood_mcp import MCPAccount, RobinhoodMCPBroker
 from swift_autotrader.config import Settings
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.database.repository import TelegramStore
-from swift_autotrader.live_dispatch import LiveDispatcher, LiveDispatchResult
+from swift_autotrader.live_dispatch import LiveDispatcher
 from swift_autotrader.orders.risk import Preflight, RiskCeilings
 from swift_autotrader.paper_dispatch import (
     MarketEvidenceUnavailable,

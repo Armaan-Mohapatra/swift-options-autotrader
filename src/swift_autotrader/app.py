@@ -5,11 +5,11 @@ import argparse
 import asyncio
 import importlib.util
 import json
-from pathlib import Path
 import sqlite3
 import sys
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from swift_autotrader import __version__
 from swift_autotrader.config import ConfigurationError, Settings

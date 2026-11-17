@@ -7,12 +7,12 @@ transport is opened by construction, and no method calls place/cancel tools.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid5
@@ -23,7 +23,10 @@ from swift_autotrader.broker.base import (
     BrokerOrderStatus,
     PrePlacementRefusal,
 )
-from swift_autotrader.broker.review_validation import exact_contract_quantity, reconciled_processed_quantity
+from swift_autotrader.broker.review_validation import (
+    exact_contract_quantity,
+    reconciled_processed_quantity,
+)
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.risk import Preflight
 from swift_autotrader.signals.identity import OptionContract
@@ -763,9 +766,9 @@ class RobinhoodMCPBroker:
         )["ref_id"]
         matches = []
         for row in rows:
-            if row.get("ref_id") and row.get("ref_id") == expected_ref:
-                matches.append(row)
-            elif broker_order_id and str(row.get("id")) == str(broker_order_id):
+            ref_match = bool(row.get("ref_id")) and row.get("ref_id") == expected_ref
+            id_match = bool(broker_order_id) and str(row.get("id")) == str(broker_order_id)
+            if ref_match or id_match:
                 matches.append(row)
         if len(matches) == 1:
             return self.normalize_order(

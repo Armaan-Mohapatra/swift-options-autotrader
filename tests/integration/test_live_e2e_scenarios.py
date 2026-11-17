@@ -12,22 +12,22 @@ Covers end-to-end operational workflows simulating production trading sessions:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 import json
-import re
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-import pytest
-
 from swift_autotrader.analytics.metrics import PaperAnalytics
-from swift_autotrader.broker.base import BrokerOrderStatus, BrokerOrderState, OrderIntent, OrderSide
-from swift_autotrader.broker.robinhood_mcp import MCPAccount, RobinhoodLiveBroker, RobinhoodMCPBroker
+from swift_autotrader.broker.robinhood_mcp import (
+    MCPAccount,
+    RobinhoodLiveBroker,
+    RobinhoodMCPBroker,
+)
 from swift_autotrader.config import Settings
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.database.repository import TelegramStore
-from swift_autotrader.live_dispatch import LiveDispatcher, LiveDispatchResult
+from swift_autotrader.live_dispatch import LiveDispatcher
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.risk import PaperPreflight, Preflight, RiskCeilings, rejection_reason
 from swift_autotrader.paper_dispatch import MarketEvidenceUnavailable, MarketSnapshot, VerifiedQuote
@@ -38,7 +38,6 @@ from tests.fixtures.live_mocks import (
     MockProcessManager,
     MockTelegramBotAPI,
     StatefulFakeMCP,
-    execute_flatten_positions,
 )
 from tests.integration.test_engine_flatten import seed_signal_and_entry
 

@@ -8,10 +8,10 @@ submits live buy/sell orders with durable reconciliation.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
-import sys
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -29,15 +29,12 @@ from swift_autotrader.broker.mcp_paper_data import (
 )
 from swift_autotrader.broker.mcp_transport import OAuthEnrollment, authenticated_mcp_client
 from swift_autotrader.broker.robinhood_mcp import (
-    MCPAccount,
-    RobinhoodLiveBroker,
     RobinhoodMCPBroker,
 )
 from swift_autotrader.config import ConfigurationError, Settings, validate_private_path
 from swift_autotrader.live_dispatch import LiveDispatcher, LiveDispatchResult
-from swift_autotrader.orders.risk import RiskCeilings
-from swift_autotrader.orders.exposure_state import has_active_exposure
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope, load_acceptance_scope
+from swift_autotrader.orders.exposure_state import has_active_exposure
 from swift_autotrader.orders.unattended_approval import (
     RECEIPT_NAME,
     UnattendedApproval,
@@ -97,10 +94,8 @@ def write_stop_marker_durable(root: Path, reason: str = "STOP", filename: str = 
         os.replace(tmp, target)
     except OSError as exc:
         log.critical("Failed to durably write stop marker %s: %s", target, exc)
-        try:
+        with contextlib.suppress(OSError):
             tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise RuntimeError(f"Failed to durably persist stop marker {filename}: {exc}") from exc
     return target
 
@@ -355,7 +350,7 @@ async def run_live_service(
                     )
                     if stop_event and stop_event.is_set():
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
         except BaseException:
             write_live_health(managed_root, "FAILED", result=last_result,

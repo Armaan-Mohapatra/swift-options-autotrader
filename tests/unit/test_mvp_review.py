@@ -1,10 +1,13 @@
-from decimal import Decimal as D
 import json
+from decimal import Decimal as D
+
 import pytest
+
 from swift_autotrader.app import main
-from tests.unit.test_live_risk import CONTRACT, make_ceilings, make_preflight
 from swift_autotrader.orders.risk import rejection_reason
+from tests.unit.test_live_risk import CONTRACT, make_ceilings, make_preflight
 from tests.unit.test_supervisor import make_supervisor
+
 
 @pytest.mark.parametrize('limit,qty',[(D('NaN'),1),(D('0'),1),(D('1'),0),(D('1'),True),(D('-1'),1)])
 def test_invalid_candidate_order(limit,qty):

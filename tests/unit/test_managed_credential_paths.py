@@ -1,6 +1,5 @@
 """Installed-directory regression; exclusively synthetic credentials and processes."""
 import json
-from pathlib import Path
 
 import pytest
 

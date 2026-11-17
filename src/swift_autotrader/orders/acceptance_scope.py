@@ -5,13 +5,13 @@ connects to a broker. The operator-approved scope must originate independently.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-import hashlib
-import hmac
-import json
 
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 

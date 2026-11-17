@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from swift_autotrader.config import Settings
-from swift_autotrader.windows_runtime import single_instance, validate_install_root
+from swift_autotrader.windows_runtime import single_instance
 
 logger = logging.getLogger(__name__)
 

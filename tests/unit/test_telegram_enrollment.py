@@ -18,9 +18,9 @@ from types import SimpleNamespace
 import pytest
 
 from swift_autotrader.config import ConfigurationError, Settings
-from swift_autotrader.telegram.client import LocalAuthorizationRequired, TelethonSource
+from swift_autotrader.telegram.client import TelethonSource
 from swift_autotrader.telegram.enrollment import enroll_telegram_session, verify_session
-from tests.fixtures.live_mocks import MockTelethonClient, SessionPasswordNeededError
+from tests.fixtures.live_mocks import MockTelethonClient
 
 CHANNEL_ID = -1001234567890
 

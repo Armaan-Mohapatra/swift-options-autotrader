@@ -17,10 +17,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from time import monotonic
 from typing import Any
 
-from swift_autotrader.broker.base import BrokerOrderState
 from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
@@ -29,20 +27,15 @@ from swift_autotrader.broker.robinhood_mcp import (
 )
 from swift_autotrader.config import Settings
 from swift_autotrader.notifications.alerts import NotificationCenter
-from swift_autotrader.orders.engine import PaperOrderEngine
-from swift_autotrader.orders.exposure_state import active_signal_ids
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
+from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.exit_policy import ExitQuote
-from swift_autotrader.orders.risk import Preflight, RiskCeilings
-from swift_autotrader.paper_dispatch import (
-    MarketEvidenceUnavailable,
-    MarketSnapshot,
-    VerifiedQuote,
-)
+from swift_autotrader.orders.exposure_state import active_signal_ids
+from swift_autotrader.orders.risk import RiskCeilings
 from swift_autotrader.parser.rules import SignalIntent, parse_message
 from swift_autotrader.signals.identity import OptionContract
-from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog, resolve_entry
+from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog
 
 log = logging.getLogger("swift_autotrader.live_dispatch")
 
@@ -202,6 +195,7 @@ class LiveDispatcher:
                 "LEFT JOIN signal_metadata m ON m.signal_id=o.signal_id"
             ).fetchall()
         from datetime import date
+
         from swift_autotrader.signals.identity import OptionRight
         buys = 0
         for row in rows:
@@ -397,6 +391,7 @@ class LiveDispatcher:
             ]
 
         from datetime import date
+
         from swift_autotrader.signals.identity import OptionRight
         active = [
             OptionContract(row[0], OptionRight(row[1]), Decimal(row[2]), date.fromisoformat(row[3]))
@@ -404,7 +399,7 @@ class LiveDispatcher:
         ]
         entries = []
         followup_rev_ids = []
-        for rid, mid, body, eligible, sent_at in pending:
+        for rid, mid, body, eligible, _sent_at in pending:
             alert = parse_message(body)
             if alert.intent is SignalIntent.ENTRY:
                 if not eligible:

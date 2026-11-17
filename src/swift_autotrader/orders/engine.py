@@ -17,7 +17,12 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from swift_autotrader.broker.base import Broker, BrokerOrderState, BrokerOrderStatus, PrePlacementRefusal
+from swift_autotrader.broker.base import (
+    Broker,
+    BrokerOrderState,
+    BrokerOrderStatus,
+    PrePlacementRefusal,
+)
 from swift_autotrader.broker.paper import PaperBroker, as_utc, dt, iso
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.exit_policy import ExitPolicy, ExitQuote
@@ -509,9 +514,9 @@ class PaperOrderEngine:
                     "WHERE side='BUY_TO_OPEN' ORDER BY logical_order_id"
                 ).fetchall()
             for row in entries:
-                if row["state"] in {"ACCEPTED", "PARTIALLY_FILLED"}:
-                    if self._attempt_cancel(str(row["logical_order_id"]), now_dt):
-                        cancels += 1
+                if row["state"] in {"ACCEPTED", "PARTIALLY_FILLED"} and self._attempt_cancel(
+                        str(row["logical_order_id"]), now_dt):
+                    cancels += 1
         return cancels
 
     def flatten_positions(self, now: datetime | None = None) -> list[OrderIntent]:

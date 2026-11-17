@@ -35,6 +35,16 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# review/ holds archived third-party candidate snapshots kept as audit evidence.
+extend-exclude = ["review"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+# Line length is not enforced: the codebase predates a formatter, and wrapping
+# safety-critical code purely for style is churn. Correctness rules stay on.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest fixtures are imported then requested by parameter name (F811), and
+# several scenario tests keep compact one-line arrange steps.
+"tests/**" = ["F811", "F841", "E701", "E702", "E402", "SIM117"]

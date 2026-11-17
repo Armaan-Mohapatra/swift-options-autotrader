@@ -15,36 +15,22 @@ Provides:
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
-import os
-import sqlite3
-import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import closing
-from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from swift_autotrader.broker.base import BrokerOrderState, OrderIntent, OrderSide
-from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
-from swift_autotrader.broker.paper import iso
+from swift_autotrader.broker.base import OrderIntent
 from swift_autotrader.broker.robinhood_mcp import (
+    _REQUIRED,
     READ_TOOLS,
     WRITE_TOOLS,
-    _REQUIRED,
-    MCPAccount,
-    MCPInstrument,
-    MCPQuote,
-    RobinhoodMCPBroker,
 )
 from swift_autotrader.notifications.kill_switch import TelegramKillSwitchBot
 from swift_autotrader.orders.engine import PaperOrderEngine
-from swift_autotrader.signals.identity import OptionContract, OptionRight
 from swift_autotrader.supervisor import ServiceSupervisor
 
 

@@ -10,9 +10,7 @@ import pytest
 
 from swift_autotrader.broker.base import (
     Broker,
-    BrokerFill,
     BrokerOrderState,
-    BrokerOrderStatus,
 )
 from swift_autotrader.broker.mcp_transport import (
     MCPTransportUnavailable,

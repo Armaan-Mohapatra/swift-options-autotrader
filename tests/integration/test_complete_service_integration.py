@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sqlite3
 import threading
 from contextlib import asynccontextmanager, contextmanager
@@ -32,15 +31,13 @@ from swift_autotrader.config import Settings
 from swift_autotrader.dashboard.app import build_handler
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.database.repository import TelegramStore
-from swift_autotrader.live_dispatch import LiveDispatcher
 from swift_autotrader.live_service import run_live_service
 from swift_autotrader.signals.lineage import SignalMatcher
-from swift_autotrader.supervisor import ServiceSupervisor, run_supervisor
+from swift_autotrader.supervisor import run_supervisor
 from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMessage
 from swift_autotrader.windows_runtime import single_instance
 from tests.fixtures.live_mocks import (
     FakeClock,
-    MockProcessHandle,
     MockProcessManager,
     StatefulFakeMCP,
 )
@@ -476,10 +473,9 @@ def test_single_instance_lock_prevents_duplicate_workers(managed_live_env) -> No
     root, _, _, _ = managed_live_env
     lock = root / "state" / "supervisor.lock"
 
-    with single_instance(lock):
-        with pytest.raises(RuntimeError, match="already running"):
-            with single_instance(lock):
-                pass
+    with single_instance(lock), pytest.raises(RuntimeError, match="already running"):
+        with single_instance(lock):
+            pass
 
 
 # ============================================================================

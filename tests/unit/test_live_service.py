@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 import dataclasses
+import json
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
-import json
 from pathlib import Path
+
 import pytest
 
 from swift_autotrader.broker.mcp_local_auth import LocalAuthNotConfigured

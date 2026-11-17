@@ -18,8 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import uuid
-from contextlib import asynccontextmanager, closing
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -28,12 +27,10 @@ from unittest.mock import patch
 
 import pytest
 
-from swift_autotrader.broker.base import BrokerOrderState, OrderIntent, OrderSide
 from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
     MCPReadError,
-    RobinhoodLiveBroker,
     RobinhoodMCPBroker,
 )
 from swift_autotrader.config import Settings
@@ -45,12 +42,10 @@ from swift_autotrader.live_service import (
     run_live_service,
     write_stop_marker_durable,
 )
-from swift_autotrader.orders.engine import PaperOrderEngine, ReconciliationError
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope
-from swift_autotrader.orders.risk import PaperPreflight, RiskCeilings
+from swift_autotrader.orders.engine import ReconciliationError
 from swift_autotrader.signals.identity import OptionContract, OptionRight
-from swift_autotrader.signals.lineage import SignalMatcher
-from swift_autotrader.supervisor import ServiceSupervisor, run_supervisor
+from swift_autotrader.supervisor import run_supervisor
 from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMessage
 from swift_autotrader.windows_runtime import PaperSupervisor, single_instance
 from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP
@@ -820,8 +815,8 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
 @pytest.mark.parametrize("mismatch", ["none", "strike", "expiry", "right", "limit", "expired"])
 def test_exact_supervised_receipt_enforced_before_broker_submission(managed_live_env, mismatch):
     """Exercise the real engine authorization callback through a fake provider only."""
-    from datetime import date
     from dataclasses import replace
+    from datetime import date
     _, settings, _, live_db = managed_live_env
     now = datetime(2026, 11, 16, 15, 0, tzinfo=UTC)
     store = TelegramStore(live_db, settings.telegram_channel_id)

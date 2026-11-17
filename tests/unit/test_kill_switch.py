@@ -8,14 +8,13 @@ Covers:
 """
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from swift_autotrader.broker.base import BrokerOrderStatus, BrokerOrderState, OrderIntent, OrderSide
+from swift_autotrader.broker.base import OrderSide
 from swift_autotrader.broker.paper import PaperBroker
 from swift_autotrader.notifications.kill_switch import TelegramKillSwitchBot
 from swift_autotrader.orders.engine import PaperOrderEngine
