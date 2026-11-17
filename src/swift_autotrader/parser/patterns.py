@@ -13,8 +13,8 @@ DATE = r"(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?)"
 CONTRACT = rf"(?P<strike>{STRIKE})\s*(?P<right>{RIGHT})\s+(?P<expiry>{DATE})"
 PREFIX = (
     rf"(?:(?:BUY|BTO|OPEN)\s+)?"
-    rf"(?:(?:LOTTO|SWING|SCALP|DAYTRADE)\s+)?"
-    rf"(?P<symbol>{SYMBOL})(?:\s+(?P<category>LOTTO|SWING|SCALP|DAYTRADE))?"
+    rf"(?:(?P<lead_category>LOTTO|SWING|SCALP|DAYTRADE)(?:\s*[:\-]\s*|\s+))?"
+    rf"\$?(?P<symbol>{SYMBOL})(?:\s+(?P<category>LOTTO|SWING|SCALP|DAYTRADE))?"
 )
 ENTRY = re.compile(
     rf"^\s*{PREFIX}\s+{CONTRACT}\s*@\s*\$?(?P<premium>{AMOUNT})\s*$",
