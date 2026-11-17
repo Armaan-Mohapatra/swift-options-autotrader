@@ -1,5 +1,10 @@
 """Static deployment assertions run on Linux/Windows, no OS or account changes."""
+import shutil
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 WINDOWS = ROOT / "deployment" / "windows"
@@ -65,3 +70,16 @@ def test_task_identity_prevents_collisions_and_reinstall_is_idempotent():
     assert "Task name collision" in manage
     assert "ALREADY_INSTALLED" in setup
     assert "--no-managed-python" in setup
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not shutil.which("powershell.exe"),
+                    reason="needs Windows PowerShell 5.1")
+def test_setup_dry_run_works_under_windows_powershell_5_1(tmp_path):
+    """PS 5.1 leaves $PSScriptRoot empty in param defaults of CmdletBinding scripts."""
+    r = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned",
+         "-File", str(WINDOWS / "setup.ps1"), "-DryRun", "-InstallRoot", str(tmp_path / "inst")],
+        capture_output=True, text=True, timeout=120)
+    assert "empty string" not in r.stderr, r.stderr
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (tmp_path / "inst").exists()

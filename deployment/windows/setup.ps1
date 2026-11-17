@@ -9,7 +9,7 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
-    [string]$SourceRoot = (Join-Path $PSScriptRoot '..\..'),
+    [string]$SourceRoot = '',
     [string]$InstallRoot = '',
     [ValidatePattern('^[0-9a-fA-F]{40}$')][string]$ExpectedCommit = '',
     [switch]$Apply,
@@ -21,6 +21,8 @@ param(
 )
 . (Join-Path $PSScriptRoot 'common.ps1')
 Assert-SwiftWindows
+# PS 5.1 leaves $PSScriptRoot empty inside param defaults when CmdletBinding is used.
+if ([string]::IsNullOrWhiteSpace($SourceRoot)) { $SourceRoot = Join-Path $PSScriptRoot '..\..' }
 $source = [System.IO.Path]::GetFullPath($SourceRoot)
 $packageMode = -not [string]::IsNullOrWhiteSpace($PackageZip)
 $root = Resolve-SwiftInstallRoot -InstallRoot $InstallRoot
