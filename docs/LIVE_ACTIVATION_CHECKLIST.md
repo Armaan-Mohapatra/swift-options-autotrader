@@ -1,5 +1,7 @@
 # Live activation is NOT AUTHORIZED
 
+> Update: the owner has authorized live trading through `LiveBroker` (see `AGENTS.md`). Live still starts only when every live setting is present, and only the owner's local configuration turns it on. Operating steps: [LIVE_OPERATIONS.md](LIVE_OPERATIONS.md). The checklist below stays a review aid.
+
 All boxes remain unchecked. This is a future review aid, not an activation mechanism.
 
 - [ ] Complete phases 0–7 with actual green Windows/Linux CI and reviewed changes.

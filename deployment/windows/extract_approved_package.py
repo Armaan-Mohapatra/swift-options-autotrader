@@ -63,9 +63,9 @@ def extract_approved_package(
         manifest = json.loads(bundle.read("PACKAGE_MANIFEST.json"))
         if (manifest.get("source_commit") != expected_commit
             or manifest.get("project") != "swift-options-autotrader"
-            or manifest.get("mode") != "PAPER_ONLY"
-            or manifest.get("live_enabled") is not False
-            or manifest.get("broker_writes_enabled") is not False):
+            or (manifest.get("mode"), manifest.get("live_enabled"),
+                manifest.get("broker_writes_enabled")) not in {
+                ("PAPER_ONLY", False, False), ("LIVE", True, True)}):
             raise RuntimeError("Unapproved source commit or unsafe release flags")
         entries = manifest.get("files")
         if not isinstance(entries, dict) or set(entries) != set(bundle.namelist()) - {

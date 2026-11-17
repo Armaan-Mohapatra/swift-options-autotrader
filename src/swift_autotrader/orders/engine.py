@@ -12,11 +12,13 @@ import sqlite3
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from swift_autotrader.broker.base import BrokerOrderState, BrokerOrderStatus
+from swift_autotrader.broker.live_broker import LiveBroker
 from swift_autotrader.broker.paper import PaperBroker, as_utc, dt, iso
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.exit_policy import ExitPolicy, ExitQuote
@@ -29,6 +31,8 @@ from swift_autotrader.orders.state_machine import (
 )
 from swift_autotrader.orders.watchdog import cancellation_due
 from swift_autotrader.signals.identity import OptionContract, OptionRight
+
+_MARKET_TZ = ZoneInfo("America/New_York")
 
 
 @contextmanager
@@ -85,22 +89,24 @@ class CycleResult:
 class PaperOrderEngine:
     """Serial, idempotent, explicitly invoked paper execution cycle.
 
-    Engine construction deliberately rejects anything except the local PaperBroker.
+    Engine construction rejects anything except the local PaperBroker or a LiveBroker
+    that was explicitly built with writes enabled (live mode needs every live setting).
     Caller supplies trustworthy preflight, fresh exit quotes, tested UTC clock and
     explicit ceilings. Default gateway rejects every entry; no hidden live path.
     """
 
     def __init__(
-        self, db_path: Path, broker: PaperBroker, *,
+        self, db_path: Path, broker: PaperBroker | LiveBroker, *,
         preflight: PreflightProvider, limits: RiskCeilings | None = None,
         exit_policy: ExitPolicy | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if type(broker) is not PaperBroker:
-            raise TypeError("Phase 3 engine accepts ONLY the concrete PaperBroker")
         self.db_path = Path(db_path)
-        if broker.db_path.resolve() != self.db_path.resolve():
-            raise ValueError("paper broker and order engine must share the same database")
+        if type(broker) is PaperBroker:
+            if broker.db_path.resolve() != self.db_path.resolve():
+                raise ValueError("paper broker and order engine must share the same database")
+        elif not (type(broker) is LiveBroker and broker.writes_enabled):
+            raise TypeError("engine accepts only the concrete PaperBroker or an enabled LiveBroker")
         self.broker = broker
         self.preflight = preflight
         self.limits = limits or RiskCeilings()
@@ -448,6 +454,49 @@ class PaperOrderEngine:
                     for r in rows), Decimal(0))
         return total, len({str(r["signal_id"]) for r in rows})
 
+    def _realized_net_pnl_today(self, now: datetime) -> Decimal:
+        """Realized net P&L (USD) from confirmed exit fills on the current US/Eastern day.
+
+        Basis is the signal's own confirmed weighted buy fills; only actual
+        SELL_TO_CLOSE fills count, never quotes or Swift's reported average. Fees
+        are not modeled. Returns NaN when a basis cannot be verified so the risk
+        gate blocks (fail closed) instead of assuming a profit.
+        """
+        local = as_utc(now).astimezone(_MARKET_TZ)
+        start = datetime.combine(local.date(), time.min, tzinfo=_MARKET_TZ).astimezone(UTC)
+        end = start + timedelta(days=1)
+        with self._db() as db:
+            sells = db.execute(
+                "SELECT o.signal_id,f.filled_quantity,f.filled_price,f.filled_at_utc "
+                "FROM order_fills f JOIN order_intents o "
+                "ON o.logical_order_id=f.logical_order_id WHERE o.side='SELL_TO_CLOSE'"
+            ).fetchall()
+            buys = db.execute(
+                "SELECT o.signal_id,SUM(f.filled_quantity) AS qty,"
+                "f.filled_price AS price FROM order_fills f JOIN order_intents o "
+                "ON o.logical_order_id=f.logical_order_id "
+                "WHERE o.side='BUY_TO_OPEN' GROUP BY o.signal_id,f.filled_price"
+            ).fetchall()
+        basis: dict[str, tuple[int, Decimal]] = {}
+        for row in buys:
+            qty, cost = basis.get(str(row["signal_id"]), (0, Decimal(0)))
+            basis[str(row["signal_id"])] = (
+                qty + int(row["qty"]), cost + int(row["qty"]) * Decimal(row["price"]),
+            )
+        total = Decimal(0)
+        for row in sells:
+            filled_at = dt(row["filled_at_utc"])
+            if filled_at is None:
+                return Decimal("NaN")
+            if not start <= as_utc(filled_at) < end:
+                continue
+            qty, cost = basis.get(str(row["signal_id"]), (0, Decimal(0)))
+            if qty <= 0:
+                return Decimal("NaN")
+            average = cost / Decimal(qty)
+            total += (Decimal(row["filled_price"]) - average) * int(row["filled_quantity"]) * 100
+        return total
+
     def _block(self, signal_id: str, reason: str, now: datetime) -> None:
         with self._db() as db:
             db.execute(
@@ -492,6 +541,7 @@ class PaperOrderEngine:
             contract, price, quantity, self.limits,
             self.preflight.check(contract), outstanding_usd=outstanding,
             active_signals=count,
+            realized_net_pnl_today_usd=self._realized_net_pnl_today(now),
         )
         if reason:
             self._block(sid, reason, now)
@@ -521,6 +571,7 @@ class PaperOrderEngine:
                 "SELECT * FROM order_intents WHERE signal_id=? AND side='SELL_TO_CLOSE'",
                 (sid,),
             ).fetchone()
+        did_cancel = False
         if entry is not None and entry["state"] in ACTIVE:
             did_cancel = self._attempt_cancel(str(entry["logical_order_id"]), now)
             with self._db() as db:
@@ -528,10 +579,15 @@ class PaperOrderEngine:
                     "SELECT * FROM order_intents WHERE logical_order_id=?",
                     (entry["logical_order_id"],),
                 ).fetchone()
-            if entry["state"] in ACTIVE:
-                # Wait for terminal confirmation; a fill can race the cancel.
-                self._signal_state(sid, "CLOSE_REQUESTED")
-                return False, did_cancel
+        if entry is not None and entry["state"] not in TERMINAL:
+            # An INTENT_RECORDED / unknown write is not proof that no contract
+            # exists at Robinhood. Never close a signal or resolve its exit
+            # merely because no fill has reached the journal yet. A late fill
+            # or cancellation confirmation must be reconciled first.
+            self._signal_state(sid, "CLOSE_REQUESTED")
+            self._alert(sid, str(entry["logical_order_id"]),
+                        "ENTRY_OUTCOME_UNCERTAIN_ON_CLOSE", now)
+            return False, did_cancel
         buys, sold = self._summary(sid)
         if sold > buys:
             raise ReconciliationError("sell fills exceed actual buy fills")
@@ -678,7 +734,8 @@ class PaperOrderEngine:
                 "WHERE resolved=0 GROUP BY code"
             ).fetchall()
         return {
-            "mode": "PAPER_ONLY", "broker_writes_enabled": False,
+            "mode": "LIVE" if type(self.broker) is LiveBroker else "PAPER_ONLY",
+            "broker_writes_enabled": type(self.broker) is LiveBroker,
             "paused": bool(controls[0]), "emergency_stop": bool(controls[1]),
             "orders_by_state": {str(x[0]): int(x[1]) for x in counts},
             "open_alerts": {str(x[0]): int(x[1]) for x in alerts},

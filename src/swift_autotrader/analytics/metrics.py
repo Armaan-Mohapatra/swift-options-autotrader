@@ -13,9 +13,18 @@ from decimal import Decimal
 from pathlib import Path
 
 from swift_autotrader.broker.paper import as_utc, dt, iso
+from swift_autotrader.config import ConfigurationError, Settings
 
 STANDARD_OPTION_MULTIPLIER = Decimal(100)
 ZERO = Decimal(0)
+
+
+def _live_mode() -> bool:
+    """Status reflects the configured mode; an unreadable config is reported as paper."""
+    try:
+        return Settings.from_env().live_mode
+    except ConfigurationError:
+        return False
 
 
 def amount(value: Decimal | None) -> str | None:
@@ -268,7 +277,8 @@ class PaperAnalytics:
             peak = max(peak, equity)
             max_dd = max(max_dd, peak - equity)
         return {
-            "mode": "PAPER_ONLY", "real_broker_writes_enabled": False,
+            "mode": "LIVE" if _live_mode() else "PAPER_ONLY",
+            "real_broker_writes_enabled": _live_mode(),
             "as_of_utc": iso(now), "data_quality": "SYNTHETIC_OR_UNVERIFIED_PAPER",
             "costs_assumed": {"fee_per_contract_side_usd": amount(fee),
                               "slippage_per_contract_premium": str(

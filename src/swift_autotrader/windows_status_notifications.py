@@ -26,8 +26,12 @@ def deliver_status_notifications(
     env = dict(os.environ if env is None else env)
     if env.get("ENABLE_TELEGRAM_STATUS_NOTIFICATIONS", "false").lower() != "true":
         return 0
-    if env.get("PAPER_ONLY") != "true" or env.get("ALLOW_BROKER_WRITES") != "false":
-        raise PermissionError("Status service requires locked paper-only mode")
+    paper_locked = env.get("PAPER_ONLY") == "true" and env.get("ALLOW_BROKER_WRITES") == "false"
+    live_complete = (env.get("PAPER_ONLY") == "false" and env.get("LIVE_ENABLED") == "true"
+                     and env.get("ALLOW_BROKER_WRITES") == "true"
+                     and env.get("BROKER_BACKEND") == "robinhood_live")
+    if not paper_locked and not live_complete:
+        raise PermissionError("Status service requires paper-locked or complete live settings")
     token = env.get("TELEGRAM_STATUS_BOT_TOKEN", "")
     chat_id = env.get("TELEGRAM_STATUS_CHAT_ID", "")
     source_channel = env.get("SWIFT_TELEGRAM_CHANNEL_ID")

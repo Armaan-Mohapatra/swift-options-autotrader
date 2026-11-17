@@ -14,7 +14,7 @@ from swift_autotrader.analytics.metrics import CostModel, PaperAnalytics
 HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Swift Paper Console</title><style>
+<title>Swift Local Monitor</title><style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;
 background:#0c1220;color:#e5ebfa}body{margin:0;max-width:1250px;padding:30px 28px 75px}
 h1{font-size:26px;letter-spacing:-.035em;margin:0}p,small{color:#a0b0d0}
@@ -31,8 +31,8 @@ th{color:#a0b0d0;font-weight:500}td{color:#e4e8f6}
 .flag{color:#f0b57b}.ok{color:#98e6c2}.missing{color:#a0b0d0}
 #status{font-size:12px;color:#a0b0d0}
 </style></head><body>
-<nav><div><h1>Swift / Paper Console</h1>
-<small>Local only · simulated fills · no broker orders</small></div>
+<nav><div><h1>Swift / Local Monitor</h1>
+<small>Local only · journal and simulated analytics; brokerage P/L not verified here</small></div>
 <div id="mode">PAPER ONLY</div></nav>
 <p id="status">Connecting to local read-only status …</p><div class="cards" id="cards"></div>
 <section><h2>Pending orders &amp; deadlines</h2><div id="orders"></div></section>
@@ -66,14 +66,28 @@ function card(label,value) {const e=document.createElement('div');e.className='c
 async function refresh() {try {
 const result = await fetch('/api/status',{cache:'no-store'});
 if (!result.ok) throw new Error('Unavailable'); const x=await result.json();
-if (x.mode!=='PAPER_ONLY'||x.real_broker_writes_enabled!==false) throw new Error('Unsafe status');
-const c=byId('cards');c.replaceChildren(
-card('Realized gross (sim USD)',x.realized_gross_usd),
-card('Realized net (sim USD)',x.realized_net_usd),
-card('Unrealized gross (sim USD)',x.unrealized_gross_usd),
-card('Completed trades',x.completed_positions),
-card('Win rate',x.win_rate),card('Closed-fill drawdown',x.realized_max_drawdown_usd),
-card('Emergency stop',x.emergency_stop?'ON':'OFF'),card('Telegram',x.telegram.status));
+const okPaper=x.mode==='PAPER_ONLY'&&x.real_broker_writes_enabled===false;
+const okLive=x.mode==='LIVE'&&x.real_broker_writes_enabled===true;
+if (!okPaper&&!okLive) throw new Error('Unsafe status');
+byId('mode').textContent=okLive?'LIVE CONFIGURED · BROKER P/L UNVERIFIED':'PAPER ONLY';
+const c=byId('cards');
+if (okLive) {
+  c.replaceChildren(
+    card('Broker realized P/L','Not verified by local monitor'),
+    card('Broker unrealized P/L','Not verified by local monitor'),
+    card('Emergency stop',x.emergency_stop?'ON':'OFF'),
+    card('Telegram',x.telegram.status));
+} else {
+  c.replaceChildren(
+    card('Realized gross (sim USD)',x.realized_gross_usd),
+    card('Realized net (sim USD)',x.realized_net_usd),
+    card('Unrealized gross (sim USD)',x.unrealized_gross_usd),
+    card('Completed paper trades',x.completed_positions),
+    card('Paper win rate',x.win_rate),
+    card('Paper closed-fill drawdown',x.realized_max_drawdown_usd),
+    card('Emergency stop',x.emergency_stop?'ON':'OFF'),
+    card('Telegram',x.telegram.status));
+}
 table('orders',['Order','Side','State','Limit','Open qty','Seconds left'],
 x.pending_orders.map(o=>[o.logical_order_id,o.side,o.state,o.limit_price,
 o.remaining_contracts,o.countdown_seconds]));
@@ -88,9 +102,11 @@ table('alerts',['Category','Code','Severity','UTC'],
 ...x.alerts.map(a=>['PAPER_ORDER',a.code,'ERROR',a.recorded_at_utc]),
 ...(x.telegram.status==='DEGRADED'||x.telegram.status==='DISCONNECTED' ?
 [['TELEGRAM_SERVICE','TELEGRAM_'+x.telegram.status,'ERROR',x.as_of_utc]] : [])]);
-byId('status').textContent='Updated '+x.as_of_utc+' · Fees: '+
-safe(x.costs_assumed.fee_per_contract_side_usd)+
-' · All figures simulated; missing quotes are unavailable.';
+byId('status').textContent='Updated '+x.as_of_utc+
+ (okLive
+ ? ' · LIVE is configured; journal data is not independent brokerage reconciliation.'
+ : ' · Fees assumed: '+safe(x.costs_assumed.fee_per_contract_side_usd)+
+   ' · All P/L figures are simulated; missing quotes are unavailable.');
 } catch (_) {byId('status').textContent='Local status unavailable. No data has been inferred.';}}
 refresh();setInterval(refresh,15000);"""
 

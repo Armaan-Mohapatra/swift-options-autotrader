@@ -19,6 +19,8 @@ from pathlib import Path
 from time import monotonic
 from typing import Protocol
 
+from swift_autotrader.broker.base import Broker
+from swift_autotrader.broker.live_broker import LiveBroker
 from swift_autotrader.broker.paper import PaperBroker, PaperMarketQuote, as_utc, iso
 from swift_autotrader.notifications.alerts import NotificationCenter
 from swift_autotrader.orders.engine import PaperOrderEngine
@@ -131,7 +133,7 @@ class PaperDispatcher:
     def __init__(
         self, db_path: Path, channel_id: int, provider: ReadOnlyOptionData,
         *, limits: RiskCeilings, clock: Callable[[], datetime] | None = None,
-        quote_max_age_seconds: int = 15,
+        quote_max_age_seconds: int = 15, broker: Broker | None = None,
     ) -> None:
         if provider is None:
             raise ValueError("Explicit read-only provider required")
@@ -143,7 +145,9 @@ class PaperDispatcher:
         self.limits = limits
         self.clock = clock or (lambda: datetime.now(UTC))
         self.quote_max_age_seconds = quote_max_age_seconds
-        self.broker = PaperBroker(self.db_path, clock=self.clock)
+        # Default is the simulated broker; live mode injects a LiveBroker explicitly.
+        self.broker = broker if broker is not None else PaperBroker(self.db_path, clock=self.clock)
+        self.live = type(self.broker) is not PaperBroker
         self.preflight = PaperPreflight()
         self.engine = PaperOrderEngine(
             self.db_path, self.broker, preflight=self.preflight,
@@ -151,6 +155,12 @@ class PaperDispatcher:
         )
         self.notifications = NotificationCenter(self.db_path)
         self._pending_rows: list[tuple[int, ParsedAlert, bool, datetime, int | None]] = []
+
+    async def _engine_cycle(self, **kwargs):
+        """LiveBroker blocks on its own loop, so a live cycle runs off the event loop."""
+        if self.live:
+            return await asyncio.to_thread(self.engine.run_cycle, **kwargs)
+        return self.engine.run_cycle(**kwargs)
 
     def _pending_and_active(self) -> tuple[list[ParsedAlert], list[OptionContract]]:
         """Select recent source events fairly; never use canceled zero-fill legs.
@@ -260,7 +270,7 @@ class PaperDispatcher:
         now = as_utc(self.clock())
         # Run the local order watchdog BEFORE optional external read-only data.
         # A long quote lookup must never postpone a due entry cancellation.
-        watchdog = self.engine.run_cycle(allow_entries=False, process_closes=False)
+        watchdog = await self._engine_cycle(allow_entries=False, process_closes=False)
         _all_entries, active = self._pending_and_active()
         rows = self._pending_rows
         matcher = SignalMatcher(self.db_path, self.channel_id)
@@ -402,11 +412,12 @@ class PaperDispatcher:
             check = instruments[contract]
             if not check.market_session_open:
                 continue
-            fill_count += self.broker.observe_quote(
-                PaperMarketQuote(quote.quote_id, contract, quote.bid, quote.ask,
-                                 quote.bid_size, quote.ask_size, quote.observed_at_utc),
-                max_age_seconds=self.quote_max_age_seconds,
-            )
+            if isinstance(self.broker, PaperBroker):  # simulated fills only; live has none
+                fill_count += self.broker.observe_quote(
+                    PaperMarketQuote(quote.quote_id, contract, quote.bid, quote.ask,
+                                     quote.bid_size, quote.ask_size, quote.observed_at_utc),
+                    max_age_seconds=self.quote_max_age_seconds,
+                )
             exit_quotes[contract] = ExitQuote(
                 contract, quote.bid, check.premium_tick, quote.observed_at_utc,
             )
@@ -419,13 +430,27 @@ class PaperDispatcher:
             if decision.intent == 'ENTRY' and decision.status == 'RECORDED'
             and decision.signal_id is not None
         )
-        cycle = self.engine.run_cycle(
+        cycle = await self._engine_cycle(
             quotes=exit_quotes, allow_entries=bool(verified_signal_ids),
             allowed_signal_ids=frozenset(verified_signal_ids),
         )
+        # Extra P/L monitoring runs AFTER the cancellation/exit cycle.
+        # A slow risk endpoint must never delay an actionable close. Every
+        # live entry already performs its own mandatory P/L check at preflight
+        # and again immediately before its write, so moving this poll cannot
+        # authorize a buy when the daily snapshot is unavailable.
+        if isinstance(self.broker, LiveBroker):
+            try:
+                stopped = await asyncio.to_thread(self.broker.refresh_daily_risk)
+            except Exception:
+                stopped = True
+            if stopped:
+                self.notifications.record("APPLICATION", "LIVE_RISK_UNVERIFIED_OR_STOPPED",
+                                          source_key="live-risk")
+        label = "LIVE" if self.live else "PAPER_ONLY"
         status = (
-            "PAPER_ONLY" if verified_signal_ids or (not failed and snapshots) or decisions
-            else ("PAUSED_DATA_UNAVAILABLE" if failed else "PAPER_ONLY")
+            label if verified_signal_ids or (not failed and snapshots) or decisions
+            else ("PAUSED_DATA_UNAVAILABLE" if failed else label)
         )
         return DispatchResult(status, len(decisions), cycle.entry_submissions,
                               cycle.close_submissions, fill_count,
