@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from swift_autotrader.risk_limits import MAX_CONTRACTS_PER_ALERT, PREMIUM_CEILING_USD
+
 
 class ConfigurationError(ValueError):
     """Invalid or unsafe program configuration."""
@@ -32,7 +34,7 @@ class Settings:
     broker_backend: str = "paper"
     telegram_enabled: bool = False
     db_path: Path = Path("data/swift_autotrader.sqlite3")
-    max_contracts_per_signal: int = 1
+    max_contracts_per_signal: int = MAX_CONTRACTS_PER_ALERT
     max_premium_per_signal_usd: Decimal = Decimal("0")
     entry_timeout_seconds: int = 3600
     log_level: str = "INFO"
@@ -49,12 +51,18 @@ class Settings:
             raise ConfigurationError("Paper-only mode is mandatory; broker writes are forbidden")
         if self.broker_backend != "paper":
             raise ConfigurationError("Only the paper broker backend is permitted")
-        if not 1 <= self.max_contracts_per_signal <= 100:
-            raise ConfigurationError("MAX_CONTRACTS_PER_SIGNAL must be between 1 and 100")
+        if not 1 <= self.max_contracts_per_signal <= MAX_CONTRACTS_PER_ALERT:
+            raise ConfigurationError(
+                f"MAX_CONTRACTS_PER_SIGNAL must be between 1 and {MAX_CONTRACTS_PER_ALERT}"
+            )
         if not self.max_premium_per_signal_usd.is_finite():
             raise ConfigurationError("MAX_PREMIUM_PER_SIGNAL_USD must be finite")
         if self.max_premium_per_signal_usd < 0:
             raise ConfigurationError("MAX_PREMIUM_PER_SIGNAL_USD cannot be negative")
+        if self.max_premium_per_signal_usd > PREMIUM_CEILING_USD:
+            raise ConfigurationError(
+                f"MAX_PREMIUM_PER_SIGNAL_USD cannot exceed {PREMIUM_CEILING_USD}"
+            )
         if self.entry_timeout_seconds != 3600:
             raise ConfigurationError("ENTRY_TIMEOUT_SECONDS must be 3600")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -87,7 +95,7 @@ class Settings:
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
         data = os.environ if env is None else env
         try:
-            contracts = int(data.get("MAX_CONTRACTS_PER_SIGNAL", "1"))
+            contracts = int(data.get("MAX_CONTRACTS_PER_SIGNAL", str(MAX_CONTRACTS_PER_ALERT)))
             premium = Decimal(data.get("MAX_PREMIUM_PER_SIGNAL_USD", "0"))
             timeout = int(data.get("ENTRY_TIMEOUT_SECONDS", "3600"))
             channel = _optional_int(data, "SWIFT_TELEGRAM_CHANNEL_ID")
