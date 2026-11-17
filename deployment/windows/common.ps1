@@ -110,6 +110,7 @@ function Set-SwiftEnvironment {
     $env:MAX_CONTRACTS_PER_SIGNAL = '1'
     $env:MAX_PREMIUM_PER_SIGNAL_USD = '0'
     $env:PAPER_MAX_TOTAL_EXPOSURE_USD = '0'
+    $env:PAPER_MAX_DAILY_NET_LOSS_USD = '750'
     $env:ENTRY_TIMEOUT_SECONDS = '3600'
     $env:LOG_LEVEL = 'INFO'
     $env:TELEGRAM_ENABLED = 'false'
@@ -161,6 +162,18 @@ function Set-SwiftEnvironment {
             [int]$cfg.paper_max_open_signals -le 0) {
             throw 'Explicit positive PAPER-only risk ceilings are required.'
         }
+        # Approved hard maxima; keep in sync with src/swift_autotrader/risk_limits.py.
+        $dailyLoss = if ($null -eq $cfg.paper_max_daily_net_loss_usd) { '750' } else { [string]$cfg.paper_max_daily_net_loss_usd }
+        if ($dailyLoss -notmatch '^[0-9]+(\.[0-9]{1,2})?$' -or [decimal]$dailyLoss -le 0 -or
+            [decimal]$dailyLoss -gt 750) {
+            throw 'Daily net loss ceiling must be above 0 and at most 750 USD.'
+        }
+        if ([decimal]$cfg.paper_max_premium_usd -gt 999 -or
+            [decimal]$cfg.paper_max_exposure_usd -gt 10000 -or
+            [int]$cfg.paper_max_contracts -gt 1) {
+            throw 'PAPER-only risk ceilings exceed approved maxima (999 premium, 10000 exposure, 1 contract).'
+        }
+        $env:PAPER_MAX_DAILY_NET_LOSS_USD = $dailyLoss
         $env:PAPER_DISPATCH_ENABLED = 'true'
         $env:PAPER_MARKET_DATA_SOURCE = 'robinhood_mcp_readonly'
         $env:MAX_CONTRACTS_PER_SIGNAL = [string]$cfg.paper_max_contracts
