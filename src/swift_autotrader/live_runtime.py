@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
+import sqlite3
 from collections.abc import Callable
-from contextlib import suppress
-from datetime import datetime
+from contextlib import closing, suppress
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +26,12 @@ from swift_autotrader.broker.live_broker import (
     read_kill_state,
 )
 from swift_autotrader.broker.paper import PaperBroker
+from swift_autotrader.broker.robinhood_mcp import READ_TOOLS, BrokerWritesDisabledError
 from swift_autotrader.config import Settings
+from swift_autotrader.orders.commands import OrderIntent, OrderSide
+from swift_autotrader.orders.engine import PaperOrderEngine
+from swift_autotrader.risk_limits import MAX_CONTRACTS_PER_ALERT
+from swift_autotrader.signals.identity import OptionContract, OptionRight
 
 
 class LiveStartupError(RuntimeError):
@@ -113,3 +121,73 @@ def startup_self_check(settings: Settings, control_db: Path, broker: Broker | No
     out(f"self-check ok: journal=present kill_switch={state} "
         f"account={settings.live_account_ending}")
     return {"mode": "LIVE", "account": str(settings.live_account_ending), "kill_switch": state}
+
+
+class ReadOnlyClient:
+    """Wraps an MCP client so only known READ tools can ever be called (rehearsal).
+
+    An allowlist, not a denylist: place_option_order, cancel_option_order and any tool
+    this code does not know are refused before they reach the wire.
+    """
+
+    ALLOWED = READ_TOOLS | {'get_realized_pnl'}
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    async def list_tools(self) -> Any:
+        return await self._inner.list_tools()
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        if name not in self.ALLOWED:
+            raise BrokerWritesDisabledError(f'rehearsal refuses tool {name!r}')
+        return await self._inner.call_tool(name, arguments)
+
+
+def recorded_entry_intents(control_db: Path, *, limit: int = 50) -> list[OrderIntent | str]:
+    """Order intents for recorded ENTRY signals, newest first (a str is a bad row's id)."""
+    with closing(sqlite3.connect(f'{Path(control_db).resolve().as_uri()}?mode=ro', uri=True,
+                                 timeout=5)) as db:
+        rows = db.execute(
+            'SELECT s.signal_id, s.underlying, s.option_right, s.strike, s.expiration_date, '
+            's.original_limit FROM option_signals s WHERE EXISTS (SELECT 1 FROM '
+            "signal_parser_decisions d WHERE d.signal_id=s.signal_id AND d.intent='ENTRY' "
+            "AND d.status='RECORDED') ORDER BY s.created_at_utc DESC LIMIT ?",
+            (limit,)).fetchall()
+    out: list[OrderIntent | str] = []
+    for sid, underlying, right, strike, expiry, price in rows:
+        try:
+            contract = OptionContract(underlying, OptionRight(right), Decimal(strike),
+                                      date.fromisoformat(expiry))
+            out.append(OrderIntent(
+                f'{sid}:entry', PaperOrderEngine._key(sid, OrderSide.BUY_TO_OPEN), contract,
+                OrderSide.BUY_TO_OPEN, MAX_CONTRACTS_PER_ALERT, Decimal(price)))
+        except (ValueError, ArithmeticError):
+            out.append(str(sid))
+    return out
+
+
+def rehearse_entries(broker: LiveBroker, control_db: Path, *, limit: int = 50,
+                     log_path: Path | None = None) -> list[dict[str, Any]]:
+    """Run the full entry preflight for every recorded ENTRY signal; write nothing live.
+
+    Each result is WOULD_SEND (with the exact place_option_order arguments, account masked)
+    or DENIED (with the reason). One JSON line per result goes to log_path if given.
+    """
+    if not broker.rehearsal or broker.writes_enabled:
+        raise LiveStartupError('rehearsal needs a broker built with rehearsal=True')
+    results: list[dict[str, Any]] = []
+    for item in recorded_entry_intents(control_db, limit=limit):
+        if isinstance(item, str):
+            result: dict[str, Any] = {'logical_order_id': f'{item}:entry', 'status': 'DENIED',
+                                      'reason': 'signal row malformed'}
+        else:
+            result = broker.rehearse(item)
+        result['at_utc'] = datetime.now(UTC).isoformat()
+        results.append(result)
+    if log_path is not None:
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        with Path(log_path).open('a', encoding='utf-8') as handle:
+            for result in results:
+                handle.write(json.dumps(result, sort_keys=True) + '\n')
+    return results

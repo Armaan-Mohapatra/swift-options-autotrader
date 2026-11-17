@@ -76,7 +76,9 @@ from swift_autotrader.broker.base import BrokerFill, BrokerOrderState, BrokerOrd
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
     MCPAsyncClient,
+    MCPContractError,
     MCPInstrument,
+    MCPReadError,
     RobinhoodMCPBroker,
     _data,
     _next_cursor,
@@ -228,7 +230,8 @@ class LiveBroker:
                  signal_gate: Callable[[str], str] | None = None,
                  clock: Callable[[], datetime] | None = None,
                  timeout_seconds: float = 15.0,
-                 loop: _LoopThread | None = None) -> None:
+                 loop: _LoopThread | None = None,
+                 rehearsal: bool = False) -> None:
         if not account_number or not isinstance(account_number, str):
             raise ValueError('pin a specific dedicated MCP account number')
         if not 1 <= timeout_seconds <= 60:
@@ -236,7 +239,9 @@ class LiveBroker:
         self.path = Path(db_path)
         self.client = client
         self.account_number = account_number
-        self.writes_enabled = writes_enabled
+        # Rehearsal never writes: the flag forces writes off and _call_write refuses.
+        self.rehearsal = rehearsal
+        self.writes_enabled = writes_enabled and not rehearsal
         self.kill_switch = kill_switch or (lambda: True)  # default: killed
         self.signal_gate = signal_gate  # default: deny entries without signal lineage
         self.clock = clock or (lambda: datetime.now(UTC))
@@ -256,6 +261,33 @@ class LiveBroker:
     def close(self) -> None:
         if self._owns_loop:
             self._loop.close()
+
+    def rehearse(self, intent: OrderIntent) -> dict[str, Any]:
+        """Full entry preflight, read-only: report what WOULD be sent. Never writes."""
+        if not isinstance(intent, OrderIntent):
+            raise TypeError('OrderIntent required')
+        return self.run(self._rehearse(intent))
+
+    async def _rehearse(self, intent: OrderIntent) -> dict[str, Any]:
+        contract = intent.contract
+        result: dict[str, Any] = {
+            'logical_order_id': intent.logical_order_id,
+            'contract': f'{contract.underlying} {contract.right.value} {contract.strike} '
+                        f'{contract.expiration.isoformat()}',
+            'quantity': intent.quantity, 'limit_price': str(intent.limit_price)}
+        try:
+            account, instrument, available = await self._preflight(intent, rehearsal=True)
+            payload = self.reader.future_order_payload(account, instrument, intent)
+        except Exception as exc:
+            known = isinstance(exc, (LiveSafetyError, MCPContractError, MCPReadError))
+            result.update(status='DENIED',
+                          reason=(f'{type(exc).__name__}: {exc}' if known
+                                  else type(exc).__name__)[:200])
+            return result
+        payload['account_number'] = f'...{account.account_number[-4:]}'  # never the full number
+        result.update(status='WOULD_SEND', buying_power=str(available),
+                      would_send={'tool': 'place_option_order', 'arguments': payload})
+        return result
 
     def verify_account(self) -> bool:
         """Read-only startup check: the pinned account exists and is agentic_allowed."""
@@ -391,21 +423,22 @@ class LiveBroker:
             raise LiveSafetyError('journal record vanished')
         return result, True
 
-    def _check_loss_latch(self, net_pnl: Decimal) -> None:
+    def _check_loss_latch(self, net_pnl: Decimal, *, persist: bool = True) -> None:
         session = self._session_date()
+        breached = net_pnl <= -DAILY_NET_LOSS_LIMIT_USD
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
-            if net_pnl <= -DAILY_NET_LOSS_LIMIT_USD:
+            if breached and persist:
                 db.execute('INSERT OR IGNORE INTO live_risk_latches '
                            '(session_date, triggered_at) VALUES(?, ?)',
                            (session, _now(self.clock()).isoformat()))
             stopped = db.execute('SELECT 1 FROM live_risk_latches WHERE session_date=?',
                                  (session,)).fetchone() is not None
-        if stopped:
+        if stopped or (breached and not persist):
             raise LiveSafetyError('daily realized+unrealized net loss stop latched')
 
-    def _check_write(self, *, entry: bool) -> None:
-        if not self.writes_enabled:
+    def _check_write(self, *, entry: bool, writes_required: bool = True) -> None:
+        if writes_required and not self.writes_enabled:
             raise LiveSafetyError('live writes disabled')
         if entry and self.kill_switch():
             raise LiveSafetyError('entry kill switch active')
@@ -603,8 +636,11 @@ class LiveBroker:
         return self._ny_date(self.clock())
 
     async def _preflight(
-            self, intent: OrderIntent) -> tuple[MCPAccount, MCPInstrument, Decimal | None]:
-        self._check_write(entry=intent.side is OrderSide.BUY_TO_OPEN)
+            self, intent: OrderIntent, *, rehearsal: bool = False,
+    ) -> tuple[MCPAccount, MCPInstrument, Decimal | None]:
+        # Rehearsal runs every check except "are writes enabled"; nothing is persisted.
+        self._check_write(entry=intent.side is OrderSide.BUY_TO_OPEN,
+                          writes_required=not rehearsal)
         account = await self._account()
         instrument = await self.reader.resolve_instrument(intent.contract)
         if instrument.multiplier is None or instrument.minimum_tick is None:
@@ -621,7 +657,7 @@ class LiveBroker:
             if intent.quantity != MAX_CONTRACTS_PER_ALERT:
                 raise LiveSafetyError('entries must be exactly one long contract')
             available = await self._portfolio()
-            self._check_loss_latch(await self._daily_pnl(account))
+            self._check_loss_latch(await self._daily_pnl(account), persist=not rehearsal)
             total = intent.limit_price * Decimal(instrument.multiplier)
             if total > PREMIUM_CEILING_USD:
                 raise LiveSafetyError(f'entry exceeds ${PREMIUM_CEILING_USD} maximum premium')
@@ -834,6 +870,8 @@ class LiveBroker:
         return self._status(record)
 
     async def _call_write(self, name: str, payload: dict[str, Any]) -> Any:
+        if self.rehearsal or not self.writes_enabled:
+            raise LiveSafetyError('writes are disabled; refusing to call a write tool')
         # Only invoked AFTER durable intent/cancel reservation and final entry kill check.
         return await asyncio.wait_for(self.client.call_tool(name, payload),
                                       timeout=self.timeout_seconds)

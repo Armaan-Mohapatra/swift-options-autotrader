@@ -53,6 +53,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "paper-dispatch-service", help="Opt-in Windows PAPER read-only data worker"
     )
     service.add_argument("--root", required=True)
+    for name, text in (("entries-pause", "Block NEW entries now (kill switch ON)"),
+                       ("entries-status", "Show whether entries are allowed or blocked"),
+                       ("entries-resume", "Allow entries again (not after an emergency stop)")):
+        commands.add_parser(name, help=text)
+    commands.add_parser("live-journal-init", help="Create the empty live journal once")
+    rehearsal = commands.add_parser(
+        "live-rehearsal", help="Real MCP, writes forced off: log what would be sent")
+    rehearsal.add_argument("--root", required=True)
+    rehearsal.add_argument("--limit", type=int, default=50)
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")
     args = parser.parse_args(argv)
@@ -87,6 +96,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "connection_attempted": False,
                     "real_broker_writes_enabled": False,
                 }
+        elif args.command in {"entries-pause", "entries-status", "entries-resume"}:
+            from swift_autotrader import entry_control
+
+            action = {"entries-pause": entry_control.pause_entries,
+                      "entries-status": entry_control.entries_status,
+                      "entries-resume": entry_control.resume_entries}[args.command]
+            payload = {"status": "ENTRY_CONTROL", "mode": config.mode,
+                       "live_account_ending": config.live_account_ending or "",
+                       **action(config.db_path)}
+        elif args.command == "live-journal-init":
+            from swift_autotrader.broker.live_broker import LiveBroker
+
+            if config.live_journal_path is None:
+                raise ConfigurationError("Set LIVE_JOURNAL_PATH first")
+            LiveBroker.create_journal(config.live_journal_path)  # never overwrites
+            payload = {"status": "LIVE_JOURNAL_CREATED"}
+        elif args.command == "live-rehearsal":
+            from pathlib import Path
+
+            from swift_autotrader.paper_service import run_live_rehearsal
+            results = run_live_rehearsal(config, Path(args.root), limit=args.limit)
+            payload = {"status": "LIVE_REHEARSAL_COMPLETE", "real_broker_writes": 0,
+                       "would_send": sum(r["status"] == "WOULD_SEND" for r in results),
+                       "denied": sum(r["status"] == "DENIED" for r in results),
+                       "results": results}
         elif args.command == "paper-dispatch-service":
             from pathlib import Path
 
