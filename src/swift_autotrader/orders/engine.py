@@ -18,6 +18,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from swift_autotrader.broker.base import BrokerOrderState, BrokerOrderStatus
+from swift_autotrader.broker.live_broker import LiveBroker
 from swift_autotrader.broker.paper import PaperBroker, as_utc, dt, iso
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.exit_policy import ExitPolicy, ExitQuote
@@ -88,22 +89,24 @@ class CycleResult:
 class PaperOrderEngine:
     """Serial, idempotent, explicitly invoked paper execution cycle.
 
-    Engine construction deliberately rejects anything except the local PaperBroker.
+    Engine construction rejects anything except the local PaperBroker or a LiveBroker
+    that was explicitly built with writes enabled (live mode needs every live setting).
     Caller supplies trustworthy preflight, fresh exit quotes, tested UTC clock and
     explicit ceilings. Default gateway rejects every entry; no hidden live path.
     """
 
     def __init__(
-        self, db_path: Path, broker: PaperBroker, *,
+        self, db_path: Path, broker: PaperBroker | LiveBroker, *,
         preflight: PreflightProvider, limits: RiskCeilings | None = None,
         exit_policy: ExitPolicy | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if type(broker) is not PaperBroker:
-            raise TypeError("Phase 3 engine accepts ONLY the concrete PaperBroker")
         self.db_path = Path(db_path)
-        if broker.db_path.resolve() != self.db_path.resolve():
-            raise ValueError("paper broker and order engine must share the same database")
+        if type(broker) is PaperBroker:
+            if broker.db_path.resolve() != self.db_path.resolve():
+                raise ValueError("paper broker and order engine must share the same database")
+        elif not (type(broker) is LiveBroker and broker.writes_enabled):
+            raise TypeError("engine accepts only the concrete PaperBroker or an enabled LiveBroker")
         self.broker = broker
         self.preflight = preflight
         self.limits = limits or RiskCeilings()
@@ -725,7 +728,8 @@ class PaperOrderEngine:
                 "WHERE resolved=0 GROUP BY code"
             ).fetchall()
         return {
-            "mode": "PAPER_ONLY", "broker_writes_enabled": False,
+            "mode": "LIVE" if type(self.broker) is LiveBroker else "PAPER_ONLY",
+            "broker_writes_enabled": type(self.broker) is LiveBroker,
             "paused": bool(controls[0]), "emergency_stop": bool(controls[1]),
             "orders_by_state": {str(x[0]): int(x[1]) for x in counts},
             "open_alerts": {str(x[0]): int(x[1]) for x in alerts},

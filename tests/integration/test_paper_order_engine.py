@@ -510,7 +510,7 @@ def test_synthetic_broker_not_network_adapter(rig):
     path, _, _, engine = rig
     class FakeBroker:
         db_path = path
-    with pytest.raises(TypeError, match="ONLY"):
+    with pytest.raises(TypeError, match="only the concrete PaperBroker"):
         PaperOrderEngine(path, FakeBroker(), preflight=engine.preflight)
 
 

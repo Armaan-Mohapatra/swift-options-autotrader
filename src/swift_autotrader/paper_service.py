@@ -6,7 +6,9 @@ market field or broker review leaves orders unexecuted and raises a local notice
 """
 from __future__ import annotations
 
+import asyncio
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 from swift_autotrader.broker.mcp_local_auth import (
@@ -17,6 +19,7 @@ from swift_autotrader.broker.mcp_paper_data import ExchangeCalendarsSession, MCP
 from swift_autotrader.broker.mcp_transport import OAuthEnrollment, authenticated_mcp_client
 from swift_autotrader.broker.robinhood_mcp import RobinhoodMCPBroker
 from swift_autotrader.config import Settings
+from swift_autotrader.live_runtime import LiveMCPSession, build_broker, startup_self_check
 from swift_autotrader.orders.risk import RiskCeilings
 from swift_autotrader.paper_dispatch import PaperDispatcher, supervise_dispatch
 from swift_autotrader.windows_runtime import validate_install_root
@@ -64,8 +67,25 @@ async def run_paper_service(config: Settings, root: Path) -> None:
             RobinhoodMCPBroker(client), calendar=ExchangeCalendarsSession(),
             contracts_per_signal=RiskCeilings.from_environment().contracts_per_signal,
         )
-        dispatcher = PaperDispatcher(
-            config.db_path, config.telegram_channel_id, provider,
-            limits=RiskCeilings.from_environment(),
-        )
-        await supervise_dispatch(dispatcher, interval_seconds=5)
+        broker = None
+        session = None
+        try:
+            if config.live_mode:
+                # The live broker's client lives on its own loop thread, so the blocking
+                # broker calls never run on this event loop.
+                session = LiveMCPSession(enrollment)
+                broker = build_broker(
+                    config, config.db_path, clock=lambda: datetime.now(UTC),
+                    client=await asyncio.to_thread(session.start), loop=session.loop)
+            # Prints MODE/account ending; refuses a live start if any check fails.
+            await asyncio.to_thread(startup_self_check, config, config.db_path, broker)
+            dispatcher = PaperDispatcher(
+                config.db_path, config.telegram_channel_id, provider,
+                limits=RiskCeilings.from_environment(), broker=broker,
+            )
+            await supervise_dispatch(dispatcher, interval_seconds=5)
+        finally:
+            if broker is not None and hasattr(broker, "close"):
+                broker.close()
+            if session is not None:
+                await asyncio.to_thread(session.close)
