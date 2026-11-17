@@ -10,7 +10,6 @@ import subprocess
 import zipfile
 from pathlib import Path
 
-
 BUILDER_PATH = Path(__file__).resolve().parents[2] / "scripts/build_windows_package.py"
 spec = importlib.util.spec_from_file_location("builder_from_reviewed_github_blob", BUILDER_PATH)
 assert spec and spec.loader
