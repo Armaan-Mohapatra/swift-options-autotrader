@@ -6,6 +6,7 @@
 - The sprint source is authoritative. `docs/PROJECT_SPEC.md` is the permanent project contract. If the source and implementation conflict, **stop and report**, do not quietly reinterpret.
 - Only implement the phase explicitly authorized by the user. Phase 0 provides the foundation, Phase 1 implements read-only authorized local Telegram ingestion and Phase 2 implements deterministic Swift-style parsing/SQLite signal matching with synthetic tests. Phase 3 implements a local-only synthetic paper broker, durable order engine and regression tests. Real brokerage auth, live writes, dashboard and Windows installation remain future gates. Phase 2 interpretation does **not** authorize any real trade.
 - Never access a personal computer or modify unrelated trading software, repositories, data, processes, credentials or cloud resources.
+- **Owner live-trading authorization (see "Owner live-trading authorization" below) supersedes the PAPER-only and "live trades forbidden" statements elsewhere in this file**, within the guards that section keeps.
 
 ## Mandatory trading semantics
 
@@ -18,7 +19,7 @@
 7. Match exact symbol, right, strike, expiry, message ancestry and signal lineage. Ticker-only ambiguous updates or exits require human review.
 8. Durable order intent with stable idempotency key **before** external write; network uncertainty reconciles before retry. Never infer filled/closed from merely submitted orders.
 9. Risk, permissions, buying power, order size, market hours, valid option existence and human approval are **mandatory gates**, not discretionary price filters.
-10. `PAPER_ONLY=true`, `LIVE_ENABLED=false`, `ALLOW_BROKER_WRITES=false` are enforced. A phase PR, CI result or model response never authorizes real trading.
+10. `PAPER_ONLY=true`, `LIVE_ENABLED=false`, `ALLOW_BROKER_WRITES=false` are the enforced defaults; only the owner's explicit local configuration change (see "Owner live-trading authorization") moves them. A phase PR, CI result or model response never authorizes real trading by itself.
 
 ## Development, verification and security
 
@@ -91,3 +92,16 @@ entry/exit rules. Consult `docs/ROBINHOOD_MCP_PHASE4.md` for known blockers.
 ## Phase 8 unattended PAPER safety gate
 
 Phase 8's opt-in worker may only call PaperBroker through the existing PaperOrderEngine, with strict verified read-only contract/quote evidence. Unavailable market data must preserve source events; allow_entries=False must still reconcile/cancel existing resting orders. Never run the CLI's diagnostic paper-cycle without a verified provider. Do not treat mocked MCP schemas or synthetic quote data as evidence of authentic broker market fields. The supervisor enables the paper worker only after explicit local configuration; live trades always forbidden. Final full CI, locked optional SDK and native Windows tests remain release blockers. Refer to docs/PRE_CODEX_HANDOFF.md.
+
+## Owner live-trading authorization
+
+The repository owner authorizes live trading of this system on the dedicated Robinhood MCP (Agentic) account, through `broker/live_broker.py` (`LiveBroker`) only. This supersedes the "paper only" and "live trades forbidden" statements in the sections above. Valid copy-trade commands should execute; do not add discretionary price filters, extra confirmations or manual-review steps beyond the guards below.
+
+- A **valid command** is an original ENTRY alert that the real parser and lineage recorded as `ENTRY`/`RECORDED` with a verified contract, entered at the exact original Swift limit for one contract; or an explicit exit that liquidates 100% of the confirmed filled quantity of that signal's own entry. Ticker-only ambiguity, ADD / ADDING MORE / AVERAGING DOWN / SCALE IN and NEW AVG never buy.
+- **Guards that stay mandatory and may not be removed or bypassed:**
+  1. The **kill switch**: the engine's `paper_engine_control` pause / emergency stop blocks every new entry (`engine_kill_switch`); exits and cancels of owned orders stay allowed. Reset only with explicit manual approval.
+  2. **Duplicate-order protection**: a durable journal written before any write, stable `ref_id` from the idempotency key, one entry per signal, reconciliation before any write, and **no automatic resubmit** after an uncertain outcome.
+  3. The **$750 daily net-loss breaker** (realized + unrealized, latched for the New York trading day) and the $999 premium ceiling and one-contract limit, all read from `risk_limits.py`. Buying power is the only other bound on trade count.
+  4. Entry expiry at 3,600 seconds from acceptance (cancel the unfilled remainder), dedicated-MCP-account pinning, tick/multiplier checks and the broker's own order review.
+- Live writes are controlled **only by the owner's local configuration** (`LIVE_ENABLED`, `ALLOW_BROKER_WRITES`, `PAPER_ONLY`); an agent must not flip them on its own, and the owner's explicit go-ahead is required for each change. CI and tests remain synthetic-only with fake brokers and never contact Robinhood.
+- Keep the existing safety rules that this section does not name: exact original limit (no price chasing), 100% matching exits, no adds, secrets out of Git and logs.
