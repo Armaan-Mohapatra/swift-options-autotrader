@@ -414,6 +414,40 @@ def test_cancel_after_60_minutes_once_and_preserve_fills(scenario):
     assert fake.cancel_count == 1
 
 
+def test_pending_order_with_no_execution_field_reconciles(scenario):
+    broker, fake, _ = scenario
+    broker.submit_order(entry())
+    fake.orders[0]['legs'][0].pop('executions')
+    assert broker.get_order('signal-1:entry').state is BrokerOrderState.ACCEPTED
+    fake.orders[0].update(state='cancelled', processed_quantity='0.0000')
+    assert broker.get_order('signal-1:entry').state is BrokerOrderState.CANCELED
+    assert fake.place_count == 1
+
+
+def test_filled_order_without_executions_stays_unknown(scenario):
+    broker, fake, _ = scenario
+    broker.submit_order(entry())
+    fake.orders[0].update(state='filled', processed_quantity='1.0000')
+    fake.orders[0]['legs'][0].pop('executions')
+    assert broker.get_order('signal-1:entry').state is BrokerOrderState.UNKNOWN
+    assert fake.place_count == 1
+
+
+def test_timeout_uses_broker_acceptance_not_local_reservation(scenario):
+    broker, fake, clock = scenario
+    broker.submit_order(entry())
+    # Broker acceptance occurs ten minutes after our durable reservation.
+    fake.orders[0]['created_at'] = (clock() + timedelta(minutes=10)).isoformat()
+    clock.advance(10)
+    assert broker.get_order('signal-1:entry').accepted_at_utc == clock()
+    clock.advance(51)  # reservation is 61m old; acceptance only 51m old
+    assert broker.review_expired_entries() == ()
+    assert fake.cancel_count == 0
+    clock.advance(10)
+    assert len(broker.review_expired_entries()) == 1
+    assert fake.cancel_count == 1
+
+
 def test_rejection_is_terminal_and_not_resubmitted(scenario):
     broker, fake, _ = scenario
     broker.submit_order(entry())

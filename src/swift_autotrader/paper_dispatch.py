@@ -20,6 +20,7 @@ from time import monotonic
 from typing import Protocol
 
 from swift_autotrader.broker.base import Broker
+from swift_autotrader.broker.live_broker import LiveBroker
 from swift_autotrader.broker.paper import PaperBroker, PaperMarketQuote, as_utc, iso
 from swift_autotrader.notifications.alerts import NotificationCenter
 from swift_autotrader.orders.engine import PaperOrderEngine
@@ -270,6 +271,19 @@ class PaperDispatcher:
         # Run the local order watchdog BEFORE optional external read-only data.
         # A long quote lookup must never postpone a due entry cancellation.
         watchdog = await self._engine_cycle(allow_entries=False, process_closes=False)
+        # Poll P/L on every supervised cycle, even when no new signals arrive.
+        # Once crossed, the journal latch persists through intraday recovery.
+        # Unavailable risk data blocks buys but cannot block exits/cancellations.
+        risk_blocks_entries = False
+        if isinstance(self.broker, LiveBroker):
+            try:
+                risk_blocks_entries = await asyncio.to_thread(
+                    self.broker.refresh_daily_risk)
+            except Exception:
+                risk_blocks_entries = True
+            if risk_blocks_entries:
+                self.notifications.record("APPLICATION", "LIVE_RISK_UNVERIFIED_OR_STOPPED",
+                                          source_key="live-risk")
         _all_entries, active = self._pending_and_active()
         rows = self._pending_rows
         matcher = SignalMatcher(self.db_path, self.channel_id)
@@ -430,7 +444,8 @@ class PaperDispatcher:
             and decision.signal_id is not None
         )
         cycle = await self._engine_cycle(
-            quotes=exit_quotes, allow_entries=bool(verified_signal_ids),
+            quotes=exit_quotes,
+            allow_entries=bool(verified_signal_ids) and not risk_blocks_entries,
             allowed_signal_ids=frozenset(verified_signal_ids),
         )
         label = "LIVE" if self.live else "PAPER_ONLY"

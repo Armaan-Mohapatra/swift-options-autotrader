@@ -46,7 +46,12 @@ response-shape mismatch to fix before going live.
 
 ## Deploy this branch to the installed Swift copy (stays PAPER)
 
-Default install root is `%LOCALAPPDATA%\SwiftAutoTraderPaper`. Run as your normal user.
+The previous handoff identifies a possible existing install at
+`E:\SwiftAutoTraderCertification\read-only-pilot\installed`; verify this on the
+actual Windows host before changing anything. The installer default is
+`%LOCALAPPDATA%\SwiftAutoTraderPaper` only if no explicit `-InstallRoot` is supplied.
+Run as your normal user and use the **same verified root** for every management,
+install, OAuth, backup, rehearsal and rollback action.
 
 1. Get the exact code in a source folder that is separate from the install:
    `git fetch origin; git checkout feat/live-broker-integration-20261117; git status --short`
@@ -95,8 +100,25 @@ You do the browser sign-in and approval yourself; nothing here handles a passwor
    (for example `C:\\Users\\YOU\\AppData\\Local\\SwiftAutoTraderPaper\\data\\live\\journal.sqlite`).
    Leave `"mode": "PAPER_ONLY"` and `"live_enabled": false` for now.
 6. Create the empty journal once: `.\deployment\windows\manage.ps1 -Action InitLiveJournal`
-7. Rehearse as above and read `logs\live_rehearsal.jsonl` until every `WOULD_SEND` and every
+7. Before running an unattended service, confirm that the Telegram source is
+   enrolled and `telegram_enabled=true`, `paper_dispatch_enabled=true`, and
+   `paper_data_source=robinhood_mcp_readonly` are configured. Explicitly set the
+   premium ceiling to a positive value no higher than $999; the underlying
+   `MAX_PREMIUM_PER_SIGNAL_USD` default is $0 and intentionally blocks every buy.
+   The Windows runtime fails to start LIVE when the dispatcher is disabled.
+   Do not copy credentials or full account numbers into logs or Git.
+8. Rehearse as above and read `logs\live_rehearsal.jsonl` until every `WOULD_SEND` and every
    `DENIED` makes sense.
+
+## Acceptance-timed cancellation and continuous risk polling
+
+The live broker now tolerates Robinhood orders that omit `executions` when
+`processed_quantity=0`; a positive fill quantity without executions still
+fails closed. Its timeout helper checks the reconciled broker acceptance time,
+not only the earlier local reservation time. The live dispatcher polls realized
+and unrealized P/L on each cycle, even with no new signals, and blocks new
+entries whenever the risk snapshot cannot be trusted. Exits and cancellations
+remain available. All these behaviors require local integration validation.
 
 ## Going live (only on your explicit go)
 

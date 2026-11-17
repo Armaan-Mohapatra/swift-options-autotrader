@@ -99,8 +99,26 @@ function Set-SwiftEnvironment {
         throw 'Managed non-secret settings file missing.'
     }
     $cfg = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    # Existing PAPER installations predate live/rehearsal fields. Under PowerShell
+    # StrictMode, accessing a missing property throws before safe defaults can run.
+    # Populate absent optional fields in memory only, never rewrite settings.json.
+    foreach ($name in @(
+        'broker_backend', 'live_account_number', 'live_journal_path',
+        'telegram_enabled', 'telegram_channel_id', 'telegram_api_id',
+        'paper_dispatch_enabled', 'paper_data_source', 'paper_max_premium_usd',
+        'paper_max_contracts', 'paper_max_exposure_usd',
+        'paper_max_open_signals', 'paper_max_daily_net_loss_usd',
+        'status_notifications_enabled', 'status_chat_id'
+    )) {
+        if ($null -eq $cfg.PSObject.Properties[$name]) {
+            $cfg | Add-Member -NotePropertyName $name -NotePropertyValue $null
+        }
+    }
     $env:SWIFT_INSTALL_ROOT = $InstallRoot
     if ($cfg.mode -eq 'LIVE') {
+        if ($cfg.paper_dispatch_enabled -ne $true) {
+            throw 'LIVE requires the explicitly enabled, authorized Telegram/market dispatcher.'
+        }
         # Live only when EVERY live setting is present; otherwise refuse (never half-live).
         if ($cfg.live_enabled -ne $true -or $cfg.broker_backend -ne 'robinhood_live' -or
             [string]::IsNullOrWhiteSpace([string]$cfg.live_account_number) -or

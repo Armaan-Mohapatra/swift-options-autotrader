@@ -743,6 +743,11 @@ class LiveBroker:
         if processed > intent.quantity:
             raise LiveSafetyError('unexpected overfill')
         executions = item['legs'][0].get('executions')
+        # The broker can omit executions on an unfilled pending/cancelled order.
+        # Zero processed quantity proves that an empty execution list is correct;
+        # positive processed quantity without executions must still fail closed.
+        if executions is None and processed == 0:
+            executions = []
         if not isinstance(executions, list):
             raise LiveSafetyError('order executions missing')
         fills = []
@@ -1015,7 +1020,12 @@ class LiveBroker:
         return False
 
     def review_expired_entries(self) -> tuple[BrokerOrderStatus, ...]:
-        """Scheduler hook: at >=60m cancel UNFILLED REMAINDER of all entry orders."""
+        """Cancel unfilled entry remainder after 60m from broker acceptance.
+
+        A provably unsent reservation can be released after 60m from reservation,
+        but a sent order must have a reconciled broker acceptance timestamp before
+        it may be timed out. Unknown acceptance never becomes an inferred cancel.
+        """
         threshold = _now(self.clock()) - timedelta(minutes=60)
         with self._db() as db:
             rows = db.execute('SELECT * FROM live_orders WHERE side=? AND created<=? '
@@ -1024,7 +1034,26 @@ class LiveBroker:
                                BrokerOrderState.UNKNOWN.value, BrokerOrderState.ACCEPTED.value,
                                BrokerOrderState.PARTIALLY_FILLED.value,
                                BrokerOrderState.CANCEL_PENDING.value)).fetchall()
-        return tuple(self.cancel_order(r['logical_id']) for r in rows)
+        due: list[BrokerOrderStatus] = []
+        for row in rows:
+            record = self._record(row)
+            logical = record.intent.logical_order_id
+            if not record.write_attempted:
+                # Never sent to Robinhood; release the abandoned signal slot.
+                due.append(self.cancel_order(logical))
+                continue
+            # Refresh acceptance and fill state before selecting an order to cancel.
+            # A network outage cannot imply acceptance or a terminal cancellation.
+            try:
+                status = self.get_order(logical)
+                refreshed = self._load(logical)
+            except Exception:
+                continue
+            if (status.state not in _TERMINAL and refreshed is not None
+                    and refreshed.accepted is not None
+                    and refreshed.accepted <= threshold):
+                due.append(self.cancel_order(logical))
+        return tuple(due)
 
 
 def _read_only(db_path: Path) -> sqlite3.Connection:

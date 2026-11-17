@@ -5,6 +5,16 @@ ROOT = Path(__file__).resolve().parents[2]
 WINDOWS = ROOT / "deployment" / "windows"
 
 
+def test_legacy_windows_settings_are_normalized_without_enabling_live():
+    # A fresh PAPER install has no live account/journal fields. PowerShell
+    # StrictMode must not crash simply because those optional keys are missing.
+    common = (WINDOWS / "common.ps1").read_text(encoding="utf-8")
+    assert "$cfg.PSObject.Properties[$name]" in common
+    assert "'live_account_number', 'live_journal_path'" in common
+    assert "$cfg.mode -eq 'LIVE'" in common
+    assert "LIVE requires the explicitly enabled" in common
+
+
 def test_required_scripts_are_present_and_readable():
     for script in ("common.ps1", "setup.ps1", "manage.ps1", "service.ps1",
                    "secrets.ps1", "healthcheck.ps1"):
