@@ -9,6 +9,7 @@ import asyncio
 import json
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -163,6 +164,31 @@ def test_engine_accepts_only_paper_or_an_enabled_live_broker(tmp_path):
         PaperOrderEngine(control, disabled, preflight=PaperPreflight())
     broker.close()
     disabled.close()
+
+
+def test_live_risk_monitor_runs_after_entry_exit_and_cancel_cycles(tmp_path, monkeypatch):
+    _, control, broker, _ = make_live(tmp_path)
+    dispatcher = PaperDispatcher(control, -1001234567890, provider=object(),
+                                 limits=RiskCeilings(), broker=broker)
+    order: list[str] = []
+
+    async def record_cycle(**_kwargs):
+        order.append('engine')
+        return SimpleNamespace(entry_submissions=0, close_submissions=0,
+                               cancellation_requests=0)
+
+    def record_risk():
+        order.append('risk')
+        return False
+
+    monkeypatch.setattr(dispatcher, '_engine_cycle', record_cycle)
+    monkeypatch.setattr(broker, 'refresh_daily_risk', record_risk)
+    try:
+        result = asyncio.run(dispatcher.run_once())
+        assert result.entry_orders == result.exit_orders == 0
+        assert order == ['engine', 'engine', 'risk']
+    finally:
+        broker.close()
 
 
 def test_dispatcher_cycles_a_live_broker_off_the_event_loop(tmp_path):
