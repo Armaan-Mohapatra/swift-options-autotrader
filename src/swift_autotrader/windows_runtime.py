@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import sqlite3
 import subprocess
@@ -162,7 +163,60 @@ def backup_database(root: Path, *, keep: int = 7, target: Path | None = None) ->
             "sha256": _sha256(target), "created_utc": _now(),
             "format": "SQLite backup API", "paper_only": True,
         })
-        candidates = sorted(backup_dir.glob("swift-*.sqlite3"), reverse=True)
+        candidates = sorted(backup_dir.glob("swift-[0-9]*.sqlite3"), reverse=True)
+        for old in candidates[keep:]:
+            old.unlink()
+            old.with_suffix(".sha256.json").unlink(missing_ok=True)
+        return target
+    finally:
+        partial.unlink(missing_ok=True)
+
+
+def backup_live_journal(root: Path, *, keep: int = 7) -> Path | None:
+    """Back up configured live order journal separately from the control DB.
+
+    The two databases must not be restored interchangeably. This routine uses
+    sqlite3.backup for live WAL safety, stores only local managed backups and
+    never uploads account identifiers or orders.
+    """
+    root = validate_install_root(root)
+    if not 1 <= keep <= 100:
+        raise ValueError("Invalid live backup retention")
+    settings_file = root / "config" / "settings.json"
+    if not settings_file.is_file():
+        if install_mode(root) == "LIVE":
+            raise RuntimeError("LIVE settings missing; live journal not backed up")
+        return None
+    settings = json.loads(settings_file.read_text(encoding="utf-8"))
+    raw = settings.get("live_journal_path")
+    if not isinstance(raw, str) or not raw.strip():
+        if install_mode(root) == "LIVE":
+            raise RuntimeError("LIVE journal path missing; backup refused")
+        return None
+    journal = Path(raw)
+    if not journal.is_absolute() or journal.is_symlink() or not journal.is_file():
+        raise RuntimeError("Configured live journal absent or redirected")
+    if journal.resolve() == (root / "data" / "swift.sqlite3").resolve():
+        raise RuntimeError("Live journal must not equal control database")
+    backup_dir = root / "backups"
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    target = backup_dir / f"swift-live-{stamp}.sqlite3"
+    partial = target.with_suffix(".partial")
+    try:
+        with (
+            closing(sqlite3.connect(
+                f"file:{journal.as_posix()}?mode=ro", uri=True, timeout=10
+            )) as source,
+            closing(sqlite3.connect(partial, timeout=10)) as destination,
+        ):
+            source.backup(destination, pages=128, sleep=0.01)
+        _integrity(partial)
+        os.replace(partial, target)
+        _atomic_json(target.with_suffix(".sha256.json"), {
+            "sha256": _sha256(target), "created_utc": _now(),
+            "format": "SQLite backup API", "database": "live_journal",
+        })
+        candidates = sorted(backup_dir.glob("swift-live-*.sqlite3"), reverse=True)
         for old in candidates[keep:]:
             old.unlink()
             old.with_suffix(".sha256.json").unlink(missing_ok=True)
@@ -179,8 +233,8 @@ def restore_database(root: Path, backup: Path, *, confirm_offline: bool = False)
     backup = Path(backup).resolve()
     if backup.parent != (root / "backups").resolve() or not backup.is_file():
         raise RuntimeError("Backup is not a file in the managed backup directory")
-    if not backup.name.startswith("swift-") or backup.suffix != ".sqlite3":
-        raise RuntimeError("Unexpected backup filename")
+    if not re.fullmatch(r"swift-\d{8}T\d{12}Z\.sqlite3", backup.name):
+        raise RuntimeError("Unexpected control database backup filename")
     evidence = backup.with_suffix(".sha256.json")
     if not evidence.is_file() or json.loads(evidence.read_text(encoding="utf-8")).get(
         "sha256"
@@ -361,6 +415,7 @@ class PaperSupervisor:
             return
         try:
             backup_database(self.root, keep=7)
+            backup_live_journal(self.root, keep=7)
             self._last_backup_at = self.now()
             self.log.info("daily_sqlite_backup_complete")
         except (OSError, sqlite3.Error, RuntimeError, ValueError):
@@ -461,7 +516,9 @@ def main(argv: list[str] | None = None) -> int:
             result: dict[str, object] = {"status": "STOPPED"}
         elif opts.command == "backup":
             saved = backup_database(opts.root, keep=opts.keep)
-            result = {"status": "BACKED_UP", "filename": saved.name}
+            live_saved = backup_live_journal(opts.root, keep=opts.keep)
+            result = {"status": "BACKED_UP", "filename": saved.name,
+                      "live_journal_filename": live_saved.name if live_saved else None}
         elif opts.command == "restore":
             restore_database(opts.root, opts.backup, confirm_offline=opts.confirm_offline)
             result = {"status": "RESTORED"}

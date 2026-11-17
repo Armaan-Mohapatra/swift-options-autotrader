@@ -13,6 +13,7 @@ from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.windows_runtime import (
     PaperSupervisor,
     backup_database,
+    backup_live_journal,
     restore_database,
     service_status,
     single_instance,
@@ -75,6 +76,41 @@ def test_online_sqlite_backup_restoration_and_checksum(install: Path) -> None:
     # Replaying the prior snapshot into the same state must not overwrite
     # existing immutable snapshots or erase the user's rollback evidence.
     assert len(list((install / "backups").glob("swift-*.sqlite3"))) >= 2
+
+
+def test_live_journal_has_separate_verified_backup_and_no_cross_restore(install: Path):
+    journal = install / 'data' / 'live-journal.sqlite3'
+    with sqlite3.connect(journal) as con:
+        con.execute('CREATE TABLE live_orders_test (value INTEGER)')
+        con.execute('INSERT INTO live_orders_test VALUES (17)')
+    (install / 'config').mkdir()
+    (install / 'config' / 'settings.json').write_text(
+        json.dumps({'live_journal_path': str(journal)}), encoding='utf-8')
+    saved = backup_live_journal(install, keep=1)
+    assert saved is not None and saved.name.startswith('swift-live-')
+    assert saved.with_suffix('.sha256.json').is_file()
+    with sqlite3.connect(saved) as snapshot:
+        assert snapshot.execute('SELECT value FROM live_orders_test').fetchone() == (17,)
+    # A live-journal snapshot can never overwrite the control database.
+    with pytest.raises(RuntimeError, match='control database backup'):
+        restore_database(install, saved, confirm_offline=True)
+    with sqlite3.connect(journal) as con:
+        con.execute('UPDATE live_orders_test SET value = 99')
+    second = backup_live_journal(install, keep=1)
+    assert second != saved and second.is_file()
+    assert not saved.exists()  # own-type retention only
+    control = backup_database(install, keep=1)
+    assert control.is_file() and second.exists()
+
+
+def test_live_backup_fails_closed_when_configured_journal_missing(install: Path):
+    assert backup_live_journal(install) is None  # PAPER without journal
+    (install / 'config').mkdir()
+    (install / 'config' / 'settings.json').write_text(
+        json.dumps({'live_journal_path': str(install / 'data' / 'missing.sqlite3')}),
+        encoding='utf-8')
+    with pytest.raises(RuntimeError, match='journal absent'):
+        backup_live_journal(install)
 
 
 def test_restore_requires_shutdown_valid_snapshot_and_no_wal(install: Path) -> None:

@@ -17,7 +17,9 @@ One line each (Windows install, from the source checkout):
 ```
 
 Or directly: `python -m swift_autotrader entries-pause | entries-status | entries-resume`
-(uses `DB_PATH`). The status line also shows the mode and the account ending.
+(uses `DB_PATH`). These entry controls show `CONTROL_ONLY` and intentionally
+avoid loading potentially broken live settings or OAuth credentials. Check
+`manage.ps1 -Action Status` separately for the configured service mode.
 
 - It sets `paused=1` in `paper_engine_control`, the same row the engine and `LiveBroker`
   read before **every** entry. It takes effect on the next entry; no restart is needed.
@@ -60,7 +62,10 @@ install, OAuth, backup, rehearsal and rollback action.
    `PAPER_TRADING_ONLY` user environment variables that hold values the app rejects.
    (The service itself overrides them.)
 3. Stop the service: `.\deployment\windows\manage.ps1 -Action Stop -Confirm:$false`
-4. Back up: `.\deployment\windows\manage.ps1 -Action Backup -Confirm:$false`
+4. Back up: `.\deployment\windows\manage.ps1 -Action Backup -Confirm:$false`.
+   The current backup command snapshots both the main SQLite control database
+   and, if configured, the separate live order journal. Verify both filenames and
+   SHA-256 metadata under `<install>\backups`; no backup leaves this machine.
 5. Preview: `.\deployment\windows\setup.ps1 -DryRun` (no changes; stop if it names
    Phoenix or Kalshi paths).
 6. Install the release over the existing install:
@@ -70,8 +75,8 @@ install, OAuth, backup, rehearsal and rollback action.
    task keeps working: its scripts are refreshed and it launches the active release. The
    installer adds a new release, keeps `data`, `secrets`, `config` and `deployment.json`, and
    saves the old release for `-Action Rollback`. It needs network access for the locked install.
-7. Confirm it is still paper: `.\deployment\windows\manage.ps1 -Action Status` shows
-   `PAPER_ONLY`; `-Action EntriesStatus` works.
+7. Confirm it is still paper: `.\deployment\windows\manage.ps1 -Action Status`
+   reports `configured_mode: PAPER_ONLY`; `-Action EntriesStatus` works.
 8. Start it again: `.\deployment\windows\manage.ps1 -Action Start -Confirm:$false`
    To undo: `.\deployment\windows\manage.ps1 -Action Rollback`.
 
@@ -119,6 +124,22 @@ not only the earlier local reservation time. The live dispatcher polls realized
 and unrealized P/L on each cycle, even with no new signals, and blocks new
 entries whenever the risk snapshot cannot be trusted. Exits and cancellations
 remain available. All these behaviors require local integration validation.
+
+## Backup and recovery boundary
+
+`manage.ps1 -Action Backup` and the supervised daily backup use SQLite's
+online backup API for both the control database and a configured live journal.
+They create separate timestamped, hashed files named `swift-*.sqlite3` and
+`swift-live-*.sqlite3`, respectively, under the managed local backup folder.
+The journal can contain sensitive account/order details: do not upload it
+to GitHub, chat, cloud storage, or share it with agents.
+
+Restoring the control database **never** restores the live order journal.
+A live-journal snapshot cannot be passed to the control restore command.
+A restore of the live journal requires an offline coordinated recovery and
+broker reconciliation, not a blind file swap: later broker writes or fills
+might have happened after the snapshot. If the journal is lost, keep live
+entries disabled and stop for manual reconciliation.
 
 ## Going live (only on your explicit go)
 
