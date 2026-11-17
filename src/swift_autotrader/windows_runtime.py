@@ -191,7 +191,7 @@ def restore_database(root: Path, backup: Path, *, confirm_offline: bool = False)
                 )) as source,
                 closing(sqlite3.connect(staged)) as dest,
             ):
-                source.backup(dest
+                source.backup(dest)
             _integrity(staged)
             os.replace(staged, db)
         finally:

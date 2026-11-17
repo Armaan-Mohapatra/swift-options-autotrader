@@ -5,8 +5,8 @@ retains option-premium precision. Standard US equity option multiplier is explic
 """
 from __future__ import annotations
 
-from contextlib import closing
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
