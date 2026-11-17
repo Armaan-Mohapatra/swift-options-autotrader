@@ -18,7 +18,12 @@ from swift_autotrader.broker.paper import PaperBroker
 from swift_autotrader.broker.robinhood_mcp import MCPContractError, _data, _next_cursor
 from swift_autotrader.config import ConfigurationError, Settings
 from swift_autotrader.database.migrate import apply_migrations
-from swift_autotrader.live_runtime import LiveStartupError, build_broker, startup_self_check
+from swift_autotrader.live_runtime import (
+    BorrowedMCPLoop,
+    LiveStartupError,
+    build_broker,
+    startup_self_check,
+)
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.risk import PaperPreflight, RiskCeilings
 from swift_autotrader.paper_dispatch import PaperDispatcher
@@ -27,7 +32,7 @@ from swift_autotrader.windows_runtime import (
     manifest_mode,
     validate_install_root,
 )
-from tests.unit.test_live_broker import Clock, FakeMCPClient
+from tests.unit.test_live_broker import Clock, FakeMCPClient, entry
 
 ACCOUNT = 'MCP-ONLY-123'  # synthetic; the fake client uses this number
 
@@ -82,6 +87,31 @@ def make_live(tmp_path: Path, *, account: str = ACCOUNT):
     LiveBroker.create_journal(settings.live_journal_path)
     broker = build_broker(settings, control, clock=clock, client=fake)
     return settings, control, broker, fake
+
+
+def test_one_borrowed_mcp_session_handles_live_calls_on_original_loop(tmp_path):
+    async def exercise():
+        settings = Settings.from_env(live_env(tmp_path))
+        control = tmp_path / 'swift.sqlite3'
+        apply_migrations(control)
+        clock = Clock()
+        fake = FakeMCPClient(clock)
+        LiveBroker.create_journal(settings.live_journal_path)
+        runner = BorrowedMCPLoop(asyncio.get_running_loop())
+        broker = build_broker(settings, control, clock=clock, client=fake, loop=runner)
+        try:
+            result = await asyncio.to_thread(broker.submit_order, entry())
+            assert result.state.value == 'ACCEPTED'
+            assert fake.place_count == 1
+            # The fake sees only the loop that owns the provider session.
+            assert fake.loops == {id(asyncio.get_running_loop())}
+            with pytest.raises(LiveStartupError, match='worker thread'):
+                broker.submit_order(entry('next'))
+            assert fake.place_count == 1
+        finally:
+            broker.close()
+
+    asyncio.run(exercise())
 
 
 def test_self_check_prints_paper_mode_and_why_live_was_not_used(tmp_path):

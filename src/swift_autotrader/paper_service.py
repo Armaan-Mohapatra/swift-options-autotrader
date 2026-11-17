@@ -21,6 +21,7 @@ from swift_autotrader.broker.mcp_transport import OAuthEnrollment, authenticated
 from swift_autotrader.broker.robinhood_mcp import RobinhoodMCPBroker
 from swift_autotrader.config import Settings
 from swift_autotrader.live_runtime import (
+    BorrowedMCPLoop,
     LiveMCPSession,
     ReadOnlyClient,
     build_broker,
@@ -75,15 +76,15 @@ async def run_paper_service(config: Settings, root: Path) -> None:
             contracts_per_signal=RiskCeilings.from_environment().contracts_per_signal,
         )
         broker = None
-        session = None
         try:
             if config.live_mode:
-                # The live broker's client lives on its own loop thread, so the blocking
-                # broker calls never run on this event loop.
-                session = LiveMCPSession(enrollment)
+                # Reuse the already-authenticated read-only provider's MCP client.
+                # A separate session sharing the same token file could race OAuth
+                # refresh. Blocking Broker calls run via asyncio.to_thread from
+                # PaperDispatcher, and are dispatched back to this live loop.
                 broker = build_broker(
                     config, config.db_path, clock=lambda: datetime.now(UTC),
-                    client=await asyncio.to_thread(session.start), loop=session.loop)
+                    client=client, loop=BorrowedMCPLoop(asyncio.get_running_loop()))
             # Prints MODE/account ending; refuses a live start if any check fails.
             await asyncio.to_thread(startup_self_check, config, config.db_path, broker)
             dispatcher = PaperDispatcher(
@@ -94,8 +95,6 @@ async def run_paper_service(config: Settings, root: Path) -> None:
         finally:
             if broker is not None and hasattr(broker, "close"):
                 broker.close()
-            if session is not None:
-                await asyncio.to_thread(session.close)
 
 
 def run_live_rehearsal(config: Settings, root: Path, *, limit: int = 50) -> list[dict[str, object]]:

@@ -38,6 +38,32 @@ class LiveStartupError(RuntimeError):
     """A live start precondition failed; the process must not run live."""
 
 
+class BorrowedMCPLoop:
+    """Run synchronous LiveBroker calls on the existing authenticated MCP loop.
+
+    The Telegram/market-data provider and live broker must share one OAuth
+    session. Never create a second client that can race the token refresh.
+    LiveBroker methods are invoked from a worker thread, not from this loop.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        if not loop.is_running():
+            raise LiveStartupError('MCP event loop must already be running')
+        self.loop = loop
+
+    def run(self, coro: Any) -> Any:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            if self.loop.is_running():
+                return asyncio.run_coroutine_threadsafe(coro, self.loop).result()
+        # Never deadlock an event loop by synchronously waiting on itself.
+        if hasattr(coro, 'close'):
+            coro.close()
+        raise LiveStartupError('live broker must run from a worker thread')
+
+
+
 class LiveMCPSession:
     """Keeps one authenticated MCP client alive on its own loop thread.
 
@@ -79,7 +105,7 @@ class LiveMCPSession:
 
 
 def build_broker(settings: Settings, db_path: Path, *, clock: Callable[[], datetime],
-                 client: Any = None, loop: _LoopThread | None = None) -> Broker:
+                 client: Any = None, loop: _LoopThread | BorrowedMCPLoop | None = None) -> Broker:
     """Paper broker unless live mode is complete; live then needs an MCP client."""
     if not settings.live_mode:
         return PaperBroker(db_path, clock=clock)
