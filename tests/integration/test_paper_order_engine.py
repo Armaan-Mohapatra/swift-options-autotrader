@@ -761,3 +761,44 @@ def test_unverifiable_exit_basis_fails_closed(rig):
     new = synthetic_signal(path, mid=11)
     assert engine.run_cycle().entry_submissions == 0
     assert decision(path, new) == ("BLOCKED", "DAILY_PNL_UNVERIFIED")
+
+
+# --- One contract per trade; trade count bounded only by buying power ---
+
+
+def uncapped_engine(rig, buying_power: str) -> PaperOrderEngine:
+    path, clock, _, _ = rig
+    checks = {CONTRACT: Preflight(
+        True, True, True, Decimal(buying_power), Decimal("0.01"), CONTRACT,
+    )}
+    return PaperOrderEngine(
+        path, PaperBroker(path, clock=clock), preflight=PaperPreflight(checks),
+        limits=RiskCeilings.from_environment({"MAX_PREMIUM_PER_SIGNAL_USD": "999"}),
+        clock=clock,
+    )
+
+
+def test_no_trade_count_cap_one_contract_each_with_ample_buying_power(rig):
+    path = rig[0]
+    engine = uncapped_engine(rig, "100000")
+    for mid in range(1, 13):
+        synthetic_signal(path, mid=mid)
+    assert engine.limits.open_signal_count is None
+    assert engine.limits.total_exposure_usd is None
+    assert engine.run_cycle().entry_submissions == 12
+    assert get(path, "SELECT COUNT(*) FROM order_intents")[0] == 12
+    assert get(path, "SELECT MAX(requested_quantity) FROM order_intents")[0] == 1
+
+
+def test_buying_power_alone_stops_further_trades(rig):
+    path = rig[0]
+    engine = uncapped_engine(rig, "300")  # $120 premium per trade: two fit, third does not
+    for mid in range(1, 6):
+        synthetic_signal(path, mid=mid)
+    assert engine.run_cycle().entry_submissions == 2
+    blocked = get(
+        path, "SELECT COUNT(*) FROM paper_engine_decisions "
+        "WHERE outcome='BLOCKED' AND reason='INSUFFICIENT_BUYING_POWER'",
+    )[0]
+    assert blocked == 3
+    assert get(path, "SELECT MAX(requested_quantity) FROM order_intents")[0] == 1
