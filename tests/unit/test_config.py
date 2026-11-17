@@ -52,6 +52,7 @@ def test_live_configuration_validation_success(tmp_path: Path) -> None:
     env = {
         "PAPER_ONLY": "false",
         "LIVE_ENABLED": "true",
+        "MAX_PREMIUM_PER_SIGNAL_USD": "999", "MAX_TOTAL_EXPOSURE_USD": "9999",
         "ALLOW_BROKER_WRITES": "true",
         "BROKER_BACKEND": "robinhood_mcp",
         "ROBINHOOD_MCP_ACCOUNT": "RH_ACC_123456",
@@ -82,6 +83,7 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
     base_env = {
         "PAPER_ONLY": "false",
         "LIVE_ENABLED": "true",
+        "MAX_PREMIUM_PER_SIGNAL_USD": "999", "MAX_TOTAL_EXPOSURE_USD": "9999",
         "ALLOW_BROKER_WRITES": "true",
         "BROKER_BACKEND": "robinhood_mcp",
         "ROBINHOOD_MCP_ACCOUNT": "RH_ACC_123456",
@@ -91,6 +93,23 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
         "TELEGRAM_API_HASH": "0123456789abcdef0123456789abcdef",
         "TELEGRAM_SESSION_PATH": str(session.resolve()),
     }
+
+    # Live never inherits an implicit premium or exposure ceiling.
+    for key in ("MAX_PREMIUM_PER_SIGNAL_USD", "MAX_TOTAL_EXPOSURE_USD"):
+        for value in (None, "0", "-1", "NaN"):
+            env = dict(base_env)
+            if value is None:
+                env.pop(key)
+            else:
+                env[key] = value
+            with pytest.raises(ConfigurationError):
+                Settings.from_env(env)
+    env = dict(base_env, MAX_PREMIUM_PER_SIGNAL_USD="10000", MAX_TOTAL_EXPOSURE_USD="9999")
+    with pytest.raises(ConfigurationError, match="cannot exceed MAX_TOTAL_EXPOSURE_USD"):
+        Settings.from_env(env)
+    configured = Settings.from_env(base_env)
+    assert (configured.max_premium_per_signal_usd, configured.max_total_exposure_usd) == (
+        Decimal("999"), Decimal("9999"))
 
     # Missing account
     env = dict(base_env, ROBINHOOD_MCP_ACCOUNT="")

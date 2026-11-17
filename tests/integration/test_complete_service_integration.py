@@ -80,6 +80,8 @@ def managed_live_env(tmp_path: Path):
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="RH_LIVE_ACC_REHEARSAL",
@@ -314,6 +316,8 @@ def test_dashboard_live_mode_availability_and_reporting(managed_live_env, monkey
     monkeypatch.setenv("TELEGRAM_API_ID", str(settings.telegram_api_id))
     monkeypatch.setenv("TELEGRAM_API_HASH", settings.telegram_api_hash)
     monkeypatch.setenv("TELEGRAM_SESSION_PATH", str(settings.telegram_session_path))
+    monkeypatch.setenv("MAX_PREMIUM_PER_SIGNAL_USD", "999")
+    monkeypatch.setenv("MAX_TOTAL_EXPOSURE_USD", "9999")
 
     with running_dashboard(live_db) as base_url:
         # 1. HTML Console

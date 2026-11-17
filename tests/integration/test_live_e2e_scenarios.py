@@ -175,6 +175,8 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="live-acc-sc1",
@@ -307,6 +309,8 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="live-acc-sc2",
@@ -378,6 +382,8 @@ def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="live-acc-sc3",
@@ -685,6 +691,8 @@ def test_scenario_7_concurrent_rapid_signals_position_cap_saturation(tmp_path: P
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="live-acc-sc7",

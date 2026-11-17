@@ -225,6 +225,7 @@ function Set-SwiftEnvironment {
         # Entries always use the exact alert limit; a slippage allowance is rejected by the app.
         Remove-Item Env:SLIPPAGE_TOLERANCE_PCT -ErrorAction SilentlyContinue
         $env:MAX_PREMIUM_PER_SIGNAL_USD = if ($cfg.max_premium_per_signal_usd) { [string]$cfg.max_premium_per_signal_usd } else { '0' }
+        $env:MAX_TOTAL_EXPOSURE_USD = if ($cfg.max_total_exposure_usd) { [string]$cfg.max_total_exposure_usd } else { '0' }
         $env:ENTRY_TIMEOUT_SECONDS = '3600'
         $env:LOG_LEVEL = if ($cfg.log_level) { [string]$cfg.log_level } else { 'INFO' }
         $env:TELEGRAM_ENABLED = 'true'

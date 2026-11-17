@@ -87,6 +87,7 @@ class Settings:
     db_path: Path = Path("data/swift.sqlite3")
     max_contracts_per_signal: int = 1
     max_premium_per_signal_usd: Decimal = Decimal("0")
+    max_total_exposure_usd: Decimal = Decimal("0")
     entry_timeout_seconds: int = 3600
     log_level: str = "INFO"
     telegram_channel_id: int | None = None
@@ -128,6 +129,15 @@ class Settings:
                 raise ConfigurationError("MAX_CONCURRENT_POSITIONS must be between 1 and 10")
             if not self.telegram_enabled:
                 raise ConfigurationError("Live mode requires TELEGRAM_ENABLED=true for signal source")
+            # Caps are owner decisions: never substitute a default ceiling.
+            for name, value in (("MAX_PREMIUM_PER_SIGNAL_USD", self.max_premium_per_signal_usd),
+                                ("MAX_TOTAL_EXPOSURE_USD", self.max_total_exposure_usd)):
+                if not value.is_finite() or value <= 0:
+                    raise ConfigurationError(f"Live mode requires an explicit positive {name}")
+            if self.max_premium_per_signal_usd > self.max_total_exposure_usd:
+                raise ConfigurationError(
+                    "MAX_PREMIUM_PER_SIGNAL_USD cannot exceed MAX_TOTAL_EXPOSURE_USD"
+                )
         else:
             # PAPER MODE VALIDATION (original safety invariant)
             if not self.paper_only or self.live_enabled or self.allow_broker_writes:
@@ -140,6 +150,8 @@ class Settings:
             raise ConfigurationError("MAX_PREMIUM_PER_SIGNAL_USD must be finite")
         if self.max_premium_per_signal_usd < 0:
             raise ConfigurationError("MAX_PREMIUM_PER_SIGNAL_USD cannot be negative")
+        if not self.max_total_exposure_usd.is_finite() or self.max_total_exposure_usd < 0:
+            raise ConfigurationError("MAX_TOTAL_EXPOSURE_USD must be finite and non-negative")
         if self.entry_timeout_seconds != 3600:
             raise ConfigurationError("ENTRY_TIMEOUT_SECONDS must be 3600")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -177,6 +189,7 @@ class Settings:
         try:
             contracts = int(data.get("MAX_CONTRACTS_PER_SIGNAL", "1"))
             premium = Decimal(data.get("MAX_PREMIUM_PER_SIGNAL_USD", "0"))
+            total_exposure = Decimal(data.get("MAX_TOTAL_EXPOSURE_USD", "0") or "0")
             timeout = int(data.get("ENTRY_TIMEOUT_SECONDS", "3600"))
             channel = _optional_int(data, "SWIFT_TELEGRAM_CHANNEL_ID")
             api_id = _optional_int(data, "TELEGRAM_API_ID")
@@ -208,6 +221,7 @@ class Settings:
             db_path=Path(data.get("DB_PATH", "data/swift.sqlite3")),
             max_contracts_per_signal=contracts,
             max_premium_per_signal_usd=premium,
+            max_total_exposure_usd=total_exposure,
             entry_timeout_seconds=timeout,
             log_level=data.get("LOG_LEVEL", "INFO").upper(),
             telegram_channel_id=channel,
@@ -238,6 +252,7 @@ class Settings:
             "telegram_max_live_age_seconds": self.telegram_max_live_age_seconds,
             "max_contracts_per_signal": self.max_contracts_per_signal,
             "max_premium_per_signal_usd": str(self.max_premium_per_signal_usd),
+            "max_total_exposure_usd": str(self.max_total_exposure_usd),
             "max_daily_loss_usd": str(self.max_daily_loss_usd),
             "max_concurrent_positions": self.max_concurrent_positions,
             "entry_price_policy": "EXACT_ALERT_LIMIT",

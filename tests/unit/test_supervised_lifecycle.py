@@ -94,6 +94,8 @@ def managed_live_env(tmp_path: Path):
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="RH_LIVE_ACC_SUPERVISED",

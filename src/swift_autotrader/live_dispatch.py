@@ -80,6 +80,10 @@ class LiveDispatcher:
     ):
         if not mcp_broker.allow_live_writes:
             raise PermissionError("LiveDispatcher requires mcp_broker.allow_live_writes=True")
+        # Explicit owner caps only; never substitute an implicit ceiling.
+        for cap in (settings.max_premium_per_signal_usd, settings.max_total_exposure_usd):
+            if not cap.is_finite() or cap <= 0:
+                raise PermissionError("Live dispatch requires explicit positive premium and exposure caps")
         self.db_path = Path(db_path)
         self.channel_id = channel_id
         self.mcp = mcp_broker
@@ -102,8 +106,8 @@ class LiveDispatcher:
         # Risk limits derived from settings
         self.limits = RiskCeilings(
             contracts_per_signal=settings.max_contracts_per_signal,
-            premium_per_signal_usd=settings.max_premium_per_signal_usd or Decimal("9999"),
-            total_exposure_usd=Decimal("10000"),
+            premium_per_signal_usd=settings.max_premium_per_signal_usd,
+            total_exposure_usd=settings.max_total_exposure_usd,
             open_signal_count=settings.max_concurrent_positions,
             entry_max_age_seconds=settings.telegram_max_live_age_seconds,
             max_daily_loss_usd=settings.max_daily_loss_usd,

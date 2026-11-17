@@ -107,6 +107,8 @@ def dispatch_rig(tmp_path: Path) -> tuple[Path, FakeClock, StatefulFakeMCP, Mock
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="test-live-acc",
@@ -394,3 +396,24 @@ def test_t3_live_dispatch_paused_engine_skips_entries(dispatch_rig: tuple) -> No
     result = asyncio.run(dispatcher.run_once())
     assert result.entry_orders_submitted == 0
     assert len(mcp.orders) == 0
+
+
+@pytest.mark.parametrize("field", ["max_premium_per_signal_usd", "max_total_exposure_usd"])
+def test_live_dispatch_refuses_missing_owner_caps(tmp_path: Path, live_settings: Settings, field: str) -> None:
+    """A zero cap is refused, never silently replaced by a default ceiling."""
+    from dataclasses import replace
+    mcp = StatefulFakeMCP()
+    broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
+    account = MCPAccount("acc", True, "option_level_2")
+    with pytest.raises(PermissionError, match="explicit positive premium and exposure caps"):
+        LiveDispatcher(
+            tmp_path / "data" / "swift.sqlite3", CHANNEL_ID, broker, account,
+            MockQuoteFeed(FakeClock()),  # type: ignore[arg-type]
+            replace(live_settings, **{field: Decimal("0")}),
+        )
+
+
+def test_live_dispatch_uses_configured_caps_exactly(dispatch_rig: tuple) -> None:
+    _, _, _, _, _, dispatcher = dispatch_rig
+    assert dispatcher.limits.premium_per_signal_usd == dispatcher.settings.max_premium_per_signal_usd
+    assert dispatcher.limits.total_exposure_usd == dispatcher.settings.max_total_exposure_usd
