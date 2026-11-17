@@ -8,12 +8,15 @@ INTEGRATION ASSUMPTIONS (MUST BE VERIFIED AGAINST THE LIVE MCP SCHEMAS):
    The former accepts ``ref_id`` (a stable client order UUID), ``account_number``,
    ``legs``, ``quantity``, ``price``, ``type``, ``time_in_force`` and
    ``market_hours``; the latter accepts ``account_number`` and ``order_id``.
-   The broker MUST support querying completed/working orders with ``ref_id``;
-   ``ref_id`` is NOT assumed to provide server-side exactly-once semantics.
-   This implementation NEVER automatically resubmits an uncertain write.
+   Real ``get_option_orders`` responses do NOT echo the submitted ``ref_id``;
+   they can return a different ref on the placed order. The journal therefore
+   reconciles by account-scoped contract/side/quantity/price/agent-created
+   timestamp and refuses ambiguous matches. ``ref_id`` alone is NOT assumed
+   to provide server-side exactly-once semantics. No uncertain write is resent.
 3. ``get_accounts`` returns ``accounts`` with ``account_number``, boolean
-   ``agentic_allowed`` and ``option_level``. There is NO account_type: identity is
-   the pinned constructor account number plus ``agentic_allowed`` true.
+   ``agentic_allowed`` and ``option_level``. The service may also report
+   ``type`` / ``brokerage_account_type``, but neither alone proves the dedicated
+   account identity. The pinned number plus ``agentic_allowed`` is required.
 4. ``get_portfolio`` (scoped to account_number) supplies ONLY
    ``buying_power: {buying_power: 'USD'}``. Daily P/L (New York day) is computed:
    realized = ``data.total_returns`` of ``get_realized_pnl`` (a null ``realized_gain``
@@ -23,7 +26,9 @@ INTEGRATION ASSUMPTIONS (MUST BE VERIFIED AGAINST THE LIVE MCP SCHEMAS):
    ``get_option_quotes`` (``results[].quote`` mark_price/updated_at <=30s,
    ``results[].close.price`` prior close). Prior-day holds: (mark - prior close) x
    multiplier x quantity; opened today: (mark - fill) x multiplier x quantity. Any
-   missing or stale input is DENY.
+   missing or stale input is DENY. Same-day execution timestamps, not
+   order-created timestamps, determine activity; overnight realized-basis
+   ambiguity and mixed lots deny new entries.
 5. ``get_option_orders`` returns paginated ``orders`` with ``id``, ``state``, ``type``,
    ``quantity``, ``price`` (per share), ``processed_quantity``, ``agent_initiated``,
    ``created_at`` and ``legs[]`` (option_id, side, position_effect, executions[]); it
