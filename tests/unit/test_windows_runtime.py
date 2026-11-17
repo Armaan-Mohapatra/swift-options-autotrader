@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -80,7 +81,7 @@ def test_online_sqlite_backup_restoration_and_checksum(install: Path) -> None:
 
 def test_live_journal_has_separate_verified_backup_and_no_cross_restore(install: Path):
     journal = install / 'data' / 'live-journal.sqlite3'
-    with sqlite3.connect(journal) as con:
+    with closing(sqlite3.connect(journal)) as con, con:
         con.execute('CREATE TABLE live_orders_test (value INTEGER)')
         con.execute('INSERT INTO live_orders_test VALUES (17)')
     (install / 'config').mkdir()
@@ -89,12 +90,12 @@ def test_live_journal_has_separate_verified_backup_and_no_cross_restore(install:
     saved = backup_live_journal(install, keep=1)
     assert saved is not None and saved.name.startswith('swift-live-')
     assert saved.with_suffix('.sha256.json').is_file()
-    with sqlite3.connect(saved) as snapshot:
+    with closing(sqlite3.connect(saved)) as snapshot:
         assert snapshot.execute('SELECT value FROM live_orders_test').fetchone() == (17,)
     # A live-journal snapshot can never overwrite the control database.
     with pytest.raises(RuntimeError, match='control database backup'):
         restore_database(install, saved, confirm_offline=True)
-    with sqlite3.connect(journal) as con:
+    with closing(sqlite3.connect(journal)) as con, con:
         con.execute('UPDATE live_orders_test SET value = 99')
     second = backup_live_journal(install, keep=1)
     assert second != saved and second.is_file()

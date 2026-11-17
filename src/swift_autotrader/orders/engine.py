@@ -571,6 +571,7 @@ class PaperOrderEngine:
                 "SELECT * FROM order_intents WHERE signal_id=? AND side='SELL_TO_CLOSE'",
                 (sid,),
             ).fetchone()
+        did_cancel = False
         if entry is not None and entry["state"] in ACTIVE:
             did_cancel = self._attempt_cancel(str(entry["logical_order_id"]), now)
             with self._db() as db:
@@ -578,10 +579,15 @@ class PaperOrderEngine:
                     "SELECT * FROM order_intents WHERE logical_order_id=?",
                     (entry["logical_order_id"],),
                 ).fetchone()
-            if entry["state"] in ACTIVE:
-                # Wait for terminal confirmation; a fill can race the cancel.
-                self._signal_state(sid, "CLOSE_REQUESTED")
-                return False, did_cancel
+        if entry is not None and entry["state"] not in TERMINAL:
+            # An INTENT_RECORDED / unknown write is not proof that no contract
+            # exists at Robinhood. Never close a signal or resolve its exit
+            # merely because no fill has reached the journal yet. A late fill
+            # or cancellation confirmation must be reconciled first.
+            self._signal_state(sid, "CLOSE_REQUESTED")
+            self._alert(sid, str(entry["logical_order_id"]),
+                        "ENTRY_OUTCOME_UNCERTAIN_ON_CLOSE", now)
+            return False, did_cancel
         buys, sold = self._summary(sid)
         if sold > buys:
             raise ReconciliationError("sell fills exceed actual buy fills")

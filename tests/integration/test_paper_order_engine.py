@@ -371,6 +371,30 @@ def test_crash_after_persisted_intent_never_retries_unknown(rig):
     assert get(path, "SELECT COUNT(*) FROM paper_broker_orders")[0] == 0
 
 
+def test_close_alert_never_closes_a_signal_with_unknown_entry_outcome(rig):
+    path, _, broker, engine = rig
+    sid = synthetic_signal(path)
+    with connect(path) as db:
+        signal = db.execute("SELECT * FROM option_signals WHERE signal_id=?", (sid,)).fetchone()
+    # Simulate a crash after durable intent but before broker state is known.
+    engine._intent(signal, OrderSide.BUY_TO_OPEN, 3, Decimal("1.20"), NOW)
+    close_signal(path, sid)
+    result = engine.run_cycle(quotes=quote(), allow_entries=False)
+    assert result.close_submissions == 0
+    assert broker.get_order(entry_id(sid)).state is BrokerOrderState.UNKNOWN
+    assert get(path, "SELECT state FROM option_signals WHERE signal_id=?", (sid,))[0] == (
+        "CLOSE_REQUESTED"
+    )
+    assert get(path, "SELECT COUNT(*) FROM order_intents WHERE side='SELL_TO_CLOSE'")[0] == 0
+    assert get(path, "SELECT COUNT(*) FROM paper_engine_alerts "
+               "WHERE code='ENTRY_OUTCOME_UNCERTAIN_ON_CLOSE'")[0] >= 1
+    # No number of retries/elapsed minutes converts unknown into a safe close.
+    engine.run_cycle(quotes=quote(), allow_entries=False)
+    assert get(path, "SELECT state FROM option_signals WHERE signal_id=?", (sid,))[0] == (
+        "CLOSE_REQUESTED"
+    )
+
+
 def test_broker_duplicate_submission_same_key_returns_same_order(rig):
     path, _, broker, engine = rig
     synthetic_signal(path)
