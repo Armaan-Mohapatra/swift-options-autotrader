@@ -38,6 +38,12 @@ from swift_autotrader.live_dispatch import LiveDispatcher, LiveDispatchResult
 from swift_autotrader.orders.risk import RiskCeilings
 from swift_autotrader.orders.exposure_state import has_active_exposure
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope, load_acceptance_scope
+from swift_autotrader.orders.unattended_approval import (
+    RECEIPT_NAME,
+    UnattendedApproval,
+    UnattendedApprovalError,
+    load_unattended_approval,
+)
 
 log = logging.getLogger("swift_autotrader.live_service")
 
@@ -189,6 +195,7 @@ async def run_live_service(
     # flags alone to turn a paper journal or credential store into a live one.
     # Mock-client tests exercise the service without reaching local credentials.
     approved_account = config.robinhood_mcp_account
+    unattended_approval: UnattendedApproval | None = None
     if client_override is None:
         document = json.loads((managed_root / "deployment.json").read_text(encoding="utf-8"))
         if (document.get("mode") != "LIVE" or document.get("live_enabled") is not True
@@ -215,6 +222,24 @@ async def run_live_service(
                 allowed_modes=("LIVE",),
             )
             acceptance_scope = load_acceptance_scope(receipt, account=pinned_account)
+        else:
+            # Unrestricted multi-entry execution needs a separate, expiring owner
+            # receipt that caps every configured ceiling. Flags alone never suffice.
+            try:
+                approval_path = validate_private_path(
+                    managed_root / "secrets" / RECEIPT_NAME,
+                    install_root=managed_root, managed_name=RECEIPT_NAME,
+                    allowed_modes=("LIVE",),
+                )
+                unattended_approval = load_unattended_approval(
+                    approval_path, account=pinned_account, settings=config,
+                    now=(clock or (lambda: datetime.now(UTC)))(),
+                )
+            except (ConfigurationError, UnattendedApprovalError) as exc:
+                write_live_health(managed_root, "FAILED")
+                raise LocalAuthNotConfigured(
+                    f"Unattended live execution is not approved: {exc}"
+                ) from exc
     if acceptance_scope is not None and not single_entry:
         raise ConfigurationError("Acceptance scope requires single-entry mode")
 
@@ -294,6 +319,10 @@ async def run_live_service(
 
                 if any(os.path.lexists(managed_root / "state" / marker)
                        for marker in ("stop.request", "SWIFT_REVIEWED_STOP")):
+                    break
+                if unattended_approval is not None and not unattended_approval.active(
+                        (clock or (lambda: datetime.now(UTC)))()):
+                    log.warning("Unattended live approval expired; stopping before new cycles")
                     break
                 last_result = await dispatcher.run_once()
                 write_live_health(managed_root, "RUNNING", result=last_result,
