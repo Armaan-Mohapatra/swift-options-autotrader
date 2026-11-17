@@ -121,6 +121,13 @@ function Set-SwiftEnvironment {
     } else {
         throw 'Forbidden configuration: mode must be PAPER_ONLY or a complete LIVE setup.'
     }
+    # Rehearsal needs these even in PAPER_ONLY; on their own they do NOT enable live.
+    if (-not [string]::IsNullOrWhiteSpace([string]$cfg.live_account_number)) {
+        $env:LIVE_ACCOUNT_NUMBER = [string]$cfg.live_account_number
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$cfg.live_journal_path)) {
+        $env:LIVE_JOURNAL_PATH = [string]$cfg.live_journal_path
+    }
     $env:DB_PATH = Join-Path $InstallRoot 'data\swift.sqlite3'
     $env:MAX_CONTRACTS_PER_SIGNAL = '1'
     $env:MAX_PREMIUM_PER_SIGNAL_USD = '0'

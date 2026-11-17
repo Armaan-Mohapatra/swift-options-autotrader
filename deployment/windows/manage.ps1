@@ -4,7 +4,8 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start','Stop','Restart','Status','Health','Backup','Restore','Rollback','Uninstall','Logs')]
+    [ValidateSet('Start','Stop','Restart','Status','Health','Backup','Restore','Rollback','Uninstall','Logs',
+        'PauseEntries','ResumeEntries','EntriesStatus','Rehearse','InitLiveJournal')]
     [string]$Action,
     [string]$InstallRoot = '',
     [string]$BackupFile = '',
@@ -57,7 +58,28 @@ function Invoke-PythonRuntime {
     & $exe -m swift_autotrader.windows_runtime @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Windows runtime command failed; see local logs.' }
 }
+function Invoke-SwiftCli {
+    param([string[]]$Arguments)
+    Set-SwiftEnvironment -InstallRoot $root
+    & (Get-SwiftPython $root) -m swift_autotrader @Arguments
+    if ($LASTEXITCODE -ne 0) { throw 'Swift command failed; see the JSON error above.' }
+}
 switch ($Action) {
+    # Entry kill switch: takes effect on the next entry, no restart. Exits are never blocked.
+    'PauseEntries' { Invoke-SwiftCli -Arguments @('entries-pause') }
+    'EntriesStatus' { Invoke-SwiftCli -Arguments @('entries-status') }
+    'ResumeEntries' {
+        if ($PSCmdlet.ShouldProcess($root, 'Allow new entries again')) {
+            Invoke-SwiftCli -Arguments @('entries-resume')
+        }
+    }
+    # One-time: create the empty live journal at live_journal_path (never overwrites).
+    'InitLiveJournal' { Invoke-SwiftCli -Arguments @('live-journal-init') }
+    # Real MCP, writes forced off: logs what WOULD be sent. Never places or cancels.
+    'Rehearse' {
+        $env:LIVE_REHEARSAL = 'true'
+        Invoke-SwiftCli -Arguments @('live-rehearsal', '--root', $root)
+    }
     'Start' {
         if ($null -eq $task) { throw 'No scheduled task. Install with scheduling enabled.' }
         if ($PSCmdlet.ShouldProcess($taskName, 'Start isolated PAPER service')) {
