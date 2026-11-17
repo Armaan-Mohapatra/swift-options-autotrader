@@ -37,8 +37,17 @@ def test_migrate_is_explicit(monkeypatch, capsys, tmp_path):
     assert json.loads(capsys.readouterr().out)["applied_versions"] == []
 
 
-def test_cli_rejects_broker_write_flag(monkeypatch, capsys):
+def test_cli_incomplete_live_request_defaults_to_paper(monkeypatch, capsys):
     monkeypatch.setenv("ALLOW_BROKER_WRITES", "true")
+    assert main(["dry-run"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["configuration"]["mode"] == "PAPER"
+    assert payload["configuration"]["allow_broker_writes"] is False
+    assert "LIVE_ACCOUNT_NUMBER" in payload["configuration"]["live_fallback"]
+
+
+def test_cli_rejects_malformed_broker_flag(monkeypatch, capsys):
+    monkeypatch.setenv("ALLOW_BROKER_WRITES", "yes")
     assert main(["dry-run"]) == 2
     assert json.loads(capsys.readouterr().err)["status"] == "ERROR"
 

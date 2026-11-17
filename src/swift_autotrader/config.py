@@ -1,4 +1,7 @@
-"""Fail-closed paper-only settings. Secret fields excluded from representations."""
+"""Fail-closed settings: PAPER by default; LIVE only when every live setting is present.
+
+Secret fields are excluded from representations.
+"""
 from __future__ import annotations
 
 import os
@@ -13,6 +16,9 @@ from swift_autotrader.risk_limits import MAX_CONTRACTS_PER_ALERT, PREMIUM_CEILIN
 
 class ConfigurationError(ValueError):
     """Invalid or unsafe program configuration."""
+
+
+LIVE_BACKEND = "robinhood_live"
 
 
 def _bool(name: str, value: str) -> bool:
@@ -45,12 +51,39 @@ class Settings:
     telegram_queue_capacity: int = 512
     telegram_max_live_age_seconds: int = 120
     telegram_reconnect_attempts: int = 5
+    live_account_number: str = field(default="", repr=False)
+    live_journal_path: Path | None = None
+    # Live settings that were requested but incomplete: the run fell back to PAPER.
+    live_fallback: tuple[str, ...] = ()
+
+    @property
+    def live_mode(self) -> bool:
+        """True only when ALL live settings are present; anything less is paper."""
+        return (not self.paper_only and self.live_enabled and self.allow_broker_writes
+                and self.broker_backend == LIVE_BACKEND
+                and bool(self.live_account_number.strip())
+                and self.live_journal_path is not None)
+
+    @property
+    def mode(self) -> str:
+        return "LIVE" if self.live_mode else "PAPER"
+
+    @property
+    def live_account_ending(self) -> str | None:
+        number = self.live_account_number.strip()
+        return f"...{number[-4:]}" if self.live_mode and len(number) >= 4 else None
 
     def validate(self) -> Settings:
-        if not self.paper_only or self.live_enabled or self.allow_broker_writes:
-            raise ConfigurationError("Paper-only mode is mandatory; broker writes are forbidden")
-        if self.broker_backend != "paper":
-            raise ConfigurationError("Only the paper broker backend is permitted")
+        paper = (self.paper_only and not self.live_enabled and not self.allow_broker_writes
+                 and self.broker_backend == "paper")
+        if not paper and not self.live_mode:
+            raise ConfigurationError(
+                "Settings are neither paper mode nor a complete live configuration")
+        if self.live_mode:
+            if len(self.live_account_number.strip()) < 4:
+                raise ConfigurationError("LIVE_ACCOUNT_NUMBER is malformed")
+            if not self.live_journal_path.is_absolute():  # type: ignore[union-attr]
+                raise ConfigurationError("LIVE_JOURNAL_PATH must be an absolute local path")
         if not 1 <= self.max_contracts_per_signal <= MAX_CONTRACTS_PER_ALERT:
             raise ConfigurationError(
                 f"MAX_CONTRACTS_PER_SIGNAL must be between 1 and {MAX_CONTRACTS_PER_ALERT}"
@@ -106,13 +139,32 @@ class Settings:
         except (ValueError, InvalidOperation) as exc:
             raise ConfigurationError("Invalid numeric configuration") from exc
         session = data.get("TELEGRAM_SESSION_PATH", "").strip()
+        paper_only = _bool("PAPER_ONLY", data.get("PAPER_ONLY", "true"))
+        live_enabled = _bool("LIVE_ENABLED", data.get("LIVE_ENABLED", "false"))
+        allow_writes = _bool("ALLOW_BROKER_WRITES", data.get("ALLOW_BROKER_WRITES", "false"))
+        backend = data.get("BROKER_BACKEND", "paper").lower()
+        account = data.get("LIVE_ACCOUNT_NUMBER", "").strip()
+        journal = data.get("LIVE_JOURNAL_PATH", "").strip()
+        missing = [name for name, ok in (
+            ("PAPER_ONLY=false", not paper_only), ("LIVE_ENABLED=true", live_enabled),
+            ("ALLOW_BROKER_WRITES=true", allow_writes),
+            (f"BROKER_BACKEND={LIVE_BACKEND}", backend == LIVE_BACKEND),
+            ("LIVE_ACCOUNT_NUMBER", bool(account)), ("LIVE_JOURNAL_PATH", bool(journal)),
+        ) if not ok]
+        requested = (not paper_only) or live_enabled or allow_writes or backend != "paper"
+        fallback: tuple[str, ...] = ()
+        if requested and missing:
+            # Incomplete live request: never half-live. Default to paper and say why.
+            paper_only, live_enabled, allow_writes, backend = True, False, False, "paper"
+            account, journal, fallback = "", "", tuple(missing)
         return cls(
-            paper_only=_bool("PAPER_ONLY", data.get("PAPER_ONLY", "true")),
-            live_enabled=_bool("LIVE_ENABLED", data.get("LIVE_ENABLED", "false")),
-            allow_broker_writes=_bool(
-                "ALLOW_BROKER_WRITES", data.get("ALLOW_BROKER_WRITES", "false")
-            ),
-            broker_backend=data.get("BROKER_BACKEND", "paper").lower(),
+            paper_only=paper_only,
+            live_enabled=live_enabled,
+            allow_broker_writes=allow_writes,
+            broker_backend=backend,
+            live_account_number=account,
+            live_journal_path=Path(journal) if journal else None,
+            live_fallback=fallback,
             telegram_enabled=_bool("TELEGRAM_ENABLED", data.get("TELEGRAM_ENABLED", "false")),
             db_path=Path(data.get("DB_PATH", "data/swift_autotrader.sqlite3")),
             max_contracts_per_signal=contracts,
@@ -130,6 +182,9 @@ class Settings:
 
     def public_summary(self) -> dict[str, str | int | bool]:
         return {
+            "mode": self.mode,
+            "live_account_ending": self.live_account_ending or "",
+            "live_fallback": ",".join(self.live_fallback),
             "paper_only": self.paper_only,
             "live_enabled": self.live_enabled,
             "allow_broker_writes": self.allow_broker_writes,
