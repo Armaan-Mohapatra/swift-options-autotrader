@@ -118,7 +118,8 @@ class Settings:
             if self.telegram_session_path is None or not self.telegram_session_path.is_absolute():
                 raise ConfigurationError("Session path must be an absolute local path")
             path = self.telegram_session_path.resolve()
-            if path.is_relative_to(Path.cwd().resolve()):
+            # cwd is the install root under the service, so detect a source checkout by .git.
+            if any((p / ".git").exists() for p in (path.parent, *path.parent.parents)):
                 raise ConfigurationError("Session path cannot be inside the checkout")
             if path.suffix != ".session" or not path.is_file():
                 raise ConfigurationError("A pre-authorized local .session file is required")

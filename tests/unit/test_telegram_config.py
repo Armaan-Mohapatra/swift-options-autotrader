@@ -62,3 +62,30 @@ def test_relative_session_path_denied():
             "TELEGRAM_API_HASH": "a" * 32,
             "TELEGRAM_SESSION_PATH": str(Path("relative.session")),
         })
+
+
+def _session_env(path):
+    return {
+        "TELEGRAM_ENABLED": "true",
+        "SWIFT_TELEGRAM_CHANNEL_ID": "-1001234567890",
+        "TELEGRAM_API_ID": "1234",
+        "TELEGRAM_API_HASH": "a" * 32,
+        "TELEGRAM_SESSION_PATH": str(path),
+    }
+
+
+def test_session_in_cwd_without_git_is_allowed(tmp_path, monkeypatch):
+    """The service runs with cwd=<install root>, where secrets/telegram.session lives."""
+    session = tmp_path / "secrets" / "telegram.session"
+    session.parent.mkdir()
+    session.write_text("x", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert Settings.from_env(_session_env(session)).telegram_enabled
+
+
+def test_session_inside_git_checkout_denied(tmp_path):
+    (tmp_path / ".git").mkdir()
+    session = tmp_path / "telegram.session"
+    session.write_text("x", encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="checkout"):
+        Settings.from_env(_session_env(session))
