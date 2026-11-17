@@ -18,8 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import uuid
-from contextlib import asynccontextmanager, closing
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -28,12 +27,10 @@ from unittest.mock import patch
 
 import pytest
 
-from swift_autotrader.broker.base import BrokerOrderState, OrderIntent, OrderSide
 from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
     MCPReadError,
-    RobinhoodLiveBroker,
     RobinhoodMCPBroker,
 )
 from swift_autotrader.config import Settings
@@ -45,12 +42,10 @@ from swift_autotrader.live_service import (
     run_live_service,
     write_stop_marker_durable,
 )
-from swift_autotrader.orders.engine import PaperOrderEngine, ReconciliationError
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope
-from swift_autotrader.orders.risk import PaperPreflight, RiskCeilings
+from swift_autotrader.orders.engine import ReconciliationError
 from swift_autotrader.signals.identity import OptionContract, OptionRight
-from swift_autotrader.signals.lineage import SignalMatcher
-from swift_autotrader.supervisor import ServiceSupervisor, run_supervisor
+from swift_autotrader.supervisor import run_supervisor
 from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMessage
 from swift_autotrader.windows_runtime import PaperSupervisor, single_instance
 from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP
@@ -94,6 +89,8 @@ def managed_live_env(tmp_path: Path):
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="RH_LIVE_ACC_SUPERVISED",
@@ -106,7 +103,6 @@ def managed_live_env(tmp_path: Path):
         managed_install_root=root,
         max_daily_loss_usd=Decimal("750"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
     )
     return root, settings, paper_db, live_db
 
@@ -771,7 +767,7 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
         "direction": "buy",
         "quantity": "1",
         "filled_quantity": "0",
-        "price": "1.22",
+        "price": "1.20",
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
         "accepted_at": now.isoformat(),
@@ -819,8 +815,8 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
 @pytest.mark.parametrize("mismatch", ["none", "strike", "expiry", "right", "limit", "expired"])
 def test_exact_supervised_receipt_enforced_before_broker_submission(managed_live_env, mismatch):
     """Exercise the real engine authorization callback through a fake provider only."""
-    from datetime import date
     from dataclasses import replace
+    from datetime import date
     _, settings, _, live_db = managed_live_env
     now = datetime(2026, 11, 16, 15, 0, tzinfo=UTC)
     store = TelegramStore(live_db, settings.telegram_channel_id)

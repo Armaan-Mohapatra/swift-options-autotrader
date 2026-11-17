@@ -87,6 +87,7 @@ class Settings:
     db_path: Path = Path("data/swift.sqlite3")
     max_contracts_per_signal: int = 1
     max_premium_per_signal_usd: Decimal = Decimal("0")
+    max_total_exposure_usd: Decimal = Decimal("0")
     entry_timeout_seconds: int = 3600
     log_level: str = "INFO"
     telegram_channel_id: int | None = None
@@ -100,7 +101,6 @@ class Settings:
     robinhood_mcp_account: str = field(default="", repr=False)
     max_daily_loss_usd: Decimal = Decimal("750")
     max_concurrent_positions: int = 3
-    slippage_tolerance_pct: Decimal = Decimal("10")
     kill_switch_enabled: bool = False
     kill_switch_telegram_bot_token: str = field(default="", repr=False)
     kill_switch_telegram_chat_id: int | None = None
@@ -127,10 +127,17 @@ class Settings:
                 raise ConfigurationError("MAX_DAILY_LOSS_USD cannot exceed 10000 for safety")
             if not 1 <= self.max_concurrent_positions <= 10:
                 raise ConfigurationError("MAX_CONCURRENT_POSITIONS must be between 1 and 10")
-            if not Decimal("0") <= self.slippage_tolerance_pct <= Decimal("25"):
-                raise ConfigurationError("SLIPPAGE_TOLERANCE_PCT must be between 0 and 25 percent")
             if not self.telegram_enabled:
                 raise ConfigurationError("Live mode requires TELEGRAM_ENABLED=true for signal source")
+            # Caps are owner decisions: never substitute a default ceiling.
+            for name, value in (("MAX_PREMIUM_PER_SIGNAL_USD", self.max_premium_per_signal_usd),
+                                ("MAX_TOTAL_EXPOSURE_USD", self.max_total_exposure_usd)):
+                if not value.is_finite() or value <= 0:
+                    raise ConfigurationError(f"Live mode requires an explicit positive {name}")
+            if self.max_premium_per_signal_usd > self.max_total_exposure_usd:
+                raise ConfigurationError(
+                    "MAX_PREMIUM_PER_SIGNAL_USD cannot exceed MAX_TOTAL_EXPOSURE_USD"
+                )
         else:
             # PAPER MODE VALIDATION (original safety invariant)
             if not self.paper_only or self.live_enabled or self.allow_broker_writes:
@@ -143,6 +150,8 @@ class Settings:
             raise ConfigurationError("MAX_PREMIUM_PER_SIGNAL_USD must be finite")
         if self.max_premium_per_signal_usd < 0:
             raise ConfigurationError("MAX_PREMIUM_PER_SIGNAL_USD cannot be negative")
+        if not self.max_total_exposure_usd.is_finite() or self.max_total_exposure_usd < 0:
+            raise ConfigurationError("MAX_TOTAL_EXPOSURE_USD must be finite and non-negative")
         if self.entry_timeout_seconds != 3600:
             raise ConfigurationError("ENTRY_TIMEOUT_SECONDS must be 3600")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -180,6 +189,7 @@ class Settings:
         try:
             contracts = int(data.get("MAX_CONTRACTS_PER_SIGNAL", "1"))
             premium = Decimal(data.get("MAX_PREMIUM_PER_SIGNAL_USD", "0"))
+            total_exposure = Decimal(data.get("MAX_TOTAL_EXPOSURE_USD", "0") or "0")
             timeout = int(data.get("ENTRY_TIMEOUT_SECONDS", "3600"))
             channel = _optional_int(data, "SWIFT_TELEGRAM_CHANNEL_ID")
             api_id = _optional_int(data, "TELEGRAM_API_ID")
@@ -188,10 +198,14 @@ class Settings:
             reconnect = int(data.get("TELEGRAM_RECONNECT_ATTEMPTS", "5"))
             daily_loss = Decimal(data.get("MAX_DAILY_LOSS_USD", "750"))
             max_concurrent = int(data.get("MAX_CONCURRENT_POSITIONS", "3"))
-            slippage_pct = Decimal(data.get("SLIPPAGE_TOLERANCE_PCT", "10"))
+            slippage_pct = Decimal(data.get("SLIPPAGE_TOLERANCE_PCT", "0") or "0")
             kill_chat_id = _optional_int(data, "KILL_SWITCH_TELEGRAM_CHAT_ID")
         except (ValueError, InvalidOperation) as exc:
             raise ConfigurationError("Invalid numeric configuration") from exc
+        if not slippage_pct.is_finite() or slippage_pct != 0:
+            raise ConfigurationError(
+                "SLIPPAGE_TOLERANCE_PCT is unsupported: entries use the exact alert limit"
+            )
         install_root = data.get("SWIFT_INSTALL_ROOT", "").strip()
         session = data.get("TELEGRAM_SESSION_PATH", "").strip()
         account = data.get("ROBINHOOD_MCP_ACCOUNT", "").strip()
@@ -207,6 +221,7 @@ class Settings:
             db_path=Path(data.get("DB_PATH", "data/swift.sqlite3")),
             max_contracts_per_signal=contracts,
             max_premium_per_signal_usd=premium,
+            max_total_exposure_usd=total_exposure,
             entry_timeout_seconds=timeout,
             log_level=data.get("LOG_LEVEL", "INFO").upper(),
             telegram_channel_id=channel,
@@ -219,7 +234,6 @@ class Settings:
             robinhood_mcp_account=account,
             max_daily_loss_usd=daily_loss,
             max_concurrent_positions=max_concurrent,
-            slippage_tolerance_pct=slippage_pct,
             kill_switch_enabled=_bool("KILL_SWITCH_ENABLED", data.get("KILL_SWITCH_ENABLED", "false")),
             kill_switch_telegram_bot_token=kill_bot_token,
             kill_switch_telegram_chat_id=kill_chat_id,
@@ -238,9 +252,10 @@ class Settings:
             "telegram_max_live_age_seconds": self.telegram_max_live_age_seconds,
             "max_contracts_per_signal": self.max_contracts_per_signal,
             "max_premium_per_signal_usd": str(self.max_premium_per_signal_usd),
+            "max_total_exposure_usd": str(self.max_total_exposure_usd),
             "max_daily_loss_usd": str(self.max_daily_loss_usd),
             "max_concurrent_positions": self.max_concurrent_positions,
-            "slippage_tolerance_pct": str(self.slippage_tolerance_pct),
+            "entry_price_policy": "EXACT_ALERT_LIMIT",
             "kill_switch_enabled": self.kill_switch_enabled,
             "entry_timeout_seconds": self.entry_timeout_seconds,
         }

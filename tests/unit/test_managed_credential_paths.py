@@ -1,6 +1,5 @@
 """Installed-directory regression; exclusively synthetic credentials and processes."""
 import json
-from pathlib import Path
 
 import pytest
 
@@ -117,6 +116,7 @@ def test_live_manifest_accepted_for_live_settings(installed):
         env,
         PAPER_ONLY="false",
         LIVE_ENABLED="true",
+        MAX_PREMIUM_PER_SIGNAL_USD="999", MAX_TOTAL_EXPOSURE_USD="9999",
         ALLOW_BROKER_WRITES="true",
         BROKER_BACKEND="robinhood_mcp",
         ROBINHOOD_MCP_ACCOUNT="RH_LIVE_ACC_123",
@@ -137,6 +137,7 @@ def test_paper_manifest_rejected_for_live_settings(installed):
         env,
         PAPER_ONLY="false",
         LIVE_ENABLED="true",
+        MAX_PREMIUM_PER_SIGNAL_USD="999", MAX_TOTAL_EXPOSURE_USD="9999",
         ALLOW_BROKER_WRITES="true",
         BROKER_BACKEND="robinhood_mcp",
         ROBINHOOD_MCP_ACCOUNT="RH_LIVE_ACC_123",

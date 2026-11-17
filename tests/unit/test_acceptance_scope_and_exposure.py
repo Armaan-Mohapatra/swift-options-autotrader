@@ -1,16 +1,18 @@
 """Offline, hermetic checks; no brokerage transport or credentials."""
-from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
 import hashlib
 import json
 import sqlite3
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope, load_acceptance_scope
 from swift_autotrader.orders.exposure_state import (
-    active_signal_ids, has_active_exposure, has_owned_or_pending_entry,
+    active_signal_ids,
+    has_active_exposure,
+    has_owned_or_pending_entry,
 )
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 

@@ -3,7 +3,7 @@
 Covers:
 - Acceptance of non-PaperBroker when live_mode=True (and rejection when live_mode=False).
 - Slippage-adjusted limit price calculation from live entry quotes.
-- SlippageExceededError leading to BLOCKED entry with SLIPPAGE_EXCEEDED.
+- Exact alert-premium entry limits regardless of the current ask.
 - Cumulative realized daily loss calculation via FIFO matching of closed positions.
 - Daily loss limit enforcement triggering DAILY_LOSS_LIMIT_REACHED rejection.
 - Isolation of previous days' realized losses from today's ceiling.
@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from swift_autotrader.broker.base import BrokerFill, BrokerOrderState, BrokerOrderStatus
-from swift_autotrader.broker.paper import PaperBroker, iso
+from swift_autotrader.broker.paper import iso
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.engine import PaperOrderEngine
@@ -251,7 +251,6 @@ def engine_rig(tmp_path: Path):
         entry_max_age_seconds=120,
         max_daily_loss_usd=Decimal("500"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
     )
     engine = PaperOrderEngine(
         db_path,
@@ -279,60 +278,47 @@ def test_live_mode_broker_validation(tmp_path: Path):
     assert engine.live_mode is True
 
 
-def test_live_engine_slippage_tolerance_adjustment(engine_rig):
+@pytest.mark.parametrize("ask", ["1.10", "1.25", "1.40", "9.99"])
+def test_live_engine_entry_limit_is_exact_alert_premium_for_any_ask(engine_rig, ask):
+    """The quote never moves the entry: the limit is the original alert premium."""
     db_path, clock, broker, engine, _, _ = engine_rig
-    # Ingest signal with alert limit 1.20
-    insert_test_signal(db_path, mid=101, contract=CONTRACT, price="1.20", sent=clock())
+    sid = insert_test_signal(db_path, mid=101, contract=CONTRACT, price="1.20", sent=clock())
 
-    # Current ask is 1.25 (+4.17%, within 10% tolerance)
-    quote = make_quote(CONTRACT, ask="1.25", at=clock())
+    quote = make_quote(CONTRACT, ask=ask, at=clock())
     result = engine.run_cycle(entry_quotes={CONTRACT: quote})
 
     assert result.entry_submissions == 1
     assert result.blocked_entries == 0
     assert len(broker.submitted_orders) == 1
-
-    # Verify order submitted with slippage-adjusted limit price 1.25
     submitted = broker.submitted_orders[0]
-    assert submitted.limit_price == Decimal("1.25")
+    assert submitted.limit_price == Decimal("1.20")
 
-    # Verify persisted order intent in SQLite
     with sqlite3.connect(str(db_path)) as db:
         row = db.execute(
             "SELECT limit_price, state FROM order_intents WHERE logical_order_id=?",
             (submitted.logical_order_id,),
         ).fetchone()
-        assert row[0] == "1.25"
-        assert row[1] == "ACCEPTED"
+        assert row == ("1.20", "ACCEPTED")
+        assert db.execute(
+            "SELECT count(*) FROM paper_engine_alerts WHERE signal_id=?", (sid,),
+        ).fetchone()[0] == 0
 
 
-def test_live_engine_slippage_exceeded_rejection(engine_rig):
+def test_live_engine_off_tick_alert_premium_is_rejected_not_rounded(engine_rig):
+    """An alert premium off the tick grid is refused; it is never rounded up or down."""
     db_path, clock, broker, engine, _, _ = engine_rig
-    # Ingest signal with alert limit 1.20
-    sid = insert_test_signal(db_path, mid=102, contract=CONTRACT, price="1.20", sent=clock())
+    sid = insert_test_signal(db_path, mid=102, contract=CONTRACT, price="1.203", sent=clock())
 
-    # Current ask is 1.40 (+16.7%, exceeds 10% tolerance of 1.32)
-    quote = make_quote(CONTRACT, ask="1.40", at=clock())
+    quote = make_quote(CONTRACT, ask="1.21", at=clock())
     result = engine.run_cycle(entry_quotes={CONTRACT: quote})
 
     assert result.entry_submissions == 0
-    assert result.blocked_entries == 1
     assert len(broker.submitted_orders) == 0
-
-    # Verify decision recorded in SQLite with SLIPPAGE_EXCEEDED
     with sqlite3.connect(str(db_path)) as db:
         decision = db.execute(
-            "SELECT outcome, reason FROM paper_engine_decisions WHERE signal_id=?",
-            (sid,),
+            "SELECT outcome, reason FROM paper_engine_decisions WHERE signal_id=?", (sid,),
         ).fetchone()
-        assert decision[0] == "BLOCKED"
-        assert decision[1] == "SLIPPAGE_EXCEEDED"
-
-        # Verify alert recorded
-        alert = db.execute(
-            "SELECT code FROM paper_engine_alerts WHERE signal_id=?", (sid,),
-        ).fetchone()
-        assert alert[0] == "SLIPPAGE_EXCEEDED"
+    assert decision == ("BLOCKED", "INVALID_PREMIUM_TICK")
 
 
 def test_live_engine_cumulative_daily_loss_calculation(engine_rig):

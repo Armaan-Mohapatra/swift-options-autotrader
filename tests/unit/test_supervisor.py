@@ -79,10 +79,9 @@ def test_supervisor_multi_worker_lifecycle(managed_root: Path) -> None:
 def test_single_instance_lock_mutex(managed_root: Path) -> None:
     """T1-F7-02: Enforce nonblocking single-instance lock on service.lock."""
     lock_file = managed_root / "state" / "service.lock"
-    with single_instance(lock_file):
-        with pytest.raises(RuntimeError, match="already running"):
-            with single_instance(lock_file):
-                pass
+    with single_instance(lock_file), pytest.raises(RuntimeError, match="already running"):
+        with single_instance(lock_file):
+            pass
 
     # Lock is re-acquirable once exited
     with single_instance(lock_file):
@@ -278,10 +277,8 @@ def test_manifest_validation_rejects_unmanaged_paths(managed_root: Path, tmp_pat
 def test_supervisor_lock_method(managed_root: Path) -> None:
     """T2-F7-07: ServiceSupervisor.lock() enforces single-instance lock."""
     manager = make_supervisor(managed_root)
-    with manager.lock():
-        with pytest.raises(RuntimeError, match="already running"):
-            with manager.lock():
-                pass
+    with manager.lock(), pytest.raises(RuntimeError, match="already running"), manager.lock():
+        pass
 
 
 def test_supervisor_setup_default_workers_paper_vs_live(managed_root: Path) -> None:

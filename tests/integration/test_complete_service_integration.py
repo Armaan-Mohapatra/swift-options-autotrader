@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sqlite3
 import threading
 from contextlib import asynccontextmanager, contextmanager
@@ -32,15 +31,13 @@ from swift_autotrader.config import Settings
 from swift_autotrader.dashboard.app import build_handler
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.database.repository import TelegramStore
-from swift_autotrader.live_dispatch import LiveDispatcher
 from swift_autotrader.live_service import run_live_service
 from swift_autotrader.signals.lineage import SignalMatcher
-from swift_autotrader.supervisor import ServiceSupervisor, run_supervisor
+from swift_autotrader.supervisor import run_supervisor
 from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMessage
 from swift_autotrader.windows_runtime import single_instance
 from tests.fixtures.live_mocks import (
     FakeClock,
-    MockProcessHandle,
     MockProcessManager,
     StatefulFakeMCP,
 )
@@ -80,6 +77,8 @@ def managed_live_env(tmp_path: Path):
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="RH_LIVE_ACC_REHEARSAL",
@@ -92,7 +91,6 @@ def managed_live_env(tmp_path: Path):
         managed_install_root=root,
         max_daily_loss_usd=Decimal("750"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
     )
     return root, settings, paper_db, live_db
 
@@ -315,6 +313,8 @@ def test_dashboard_live_mode_availability_and_reporting(managed_live_env, monkey
     monkeypatch.setenv("TELEGRAM_API_ID", str(settings.telegram_api_id))
     monkeypatch.setenv("TELEGRAM_API_HASH", settings.telegram_api_hash)
     monkeypatch.setenv("TELEGRAM_SESSION_PATH", str(settings.telegram_session_path))
+    monkeypatch.setenv("MAX_PREMIUM_PER_SIGNAL_USD", "999")
+    monkeypatch.setenv("MAX_TOTAL_EXPOSURE_USD", "9999")
 
     with running_dashboard(live_db) as base_url:
         # 1. HTML Console
@@ -473,10 +473,9 @@ def test_single_instance_lock_prevents_duplicate_workers(managed_live_env) -> No
     root, _, _, _ = managed_live_env
     lock = root / "state" / "supervisor.lock"
 
-    with single_instance(lock):
-        with pytest.raises(RuntimeError, match="already running"):
-            with single_instance(lock):
-                pass
+    with single_instance(lock), pytest.raises(RuntimeError, match="already running"):
+        with single_instance(lock):
+            pass
 
 
 # ============================================================================

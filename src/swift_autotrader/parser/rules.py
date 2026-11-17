@@ -27,6 +27,17 @@ FULL_CLOSE_MARKERS = frozenset(
 )
 
 
+# First words of exit/add/average phrases and ordinary filler. A follow-up that
+# starts with one of these names no ticker; treating it as one made a reply such
+# as "SCALED OUT" fail its lineage check and left the position open.
+NON_TICKER_LEADING_WORDS = frozenset({
+    "SOLD", "ALL", "RUNNERS", "NEW", "ADD", "ADDING", "ADDED", "TRIM", "TRIMMED",
+    "SCALED", "SCALE", "CLOSED", "FULL", "OUT", "REVISED", "AVG", "AVERAGING",
+    "DOUBLE", "BUY", "NO", "THE", "WE", "JUST", "I", "A", "AND", "NOW", "OK",
+    "FINALLY", "NICE", "GREAT", "DONE", "TOOK", "TAKING", "STILL", "HALF",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class ExpirationHint:
     month: int
@@ -88,8 +99,10 @@ def _symbol_prefix(text: str) -> str | None:
     tokens = text.upper().split()
     if tokens and tokens[0] in {"BUY", "BTO", "OPEN", "LOTTO"}:
         tokens.pop(0)
+    if tokens and tokens[0].startswith("$"):
+        tokens[0] = tokens[0][1:]
     if tokens and re.fullmatch(patterns.SYMBOL, tokens[0]):
-        if tokens[0] in {"SOLD", "ALL", "RUNNERS", "NEW", "ADD", "ADDING", "TRIM"}:
+        if tokens[0] in NON_TICKER_LEADING_WORDS:
             return None
         return tokens[0]
     return None
@@ -98,7 +111,10 @@ def _symbol_prefix(text: str) -> str | None:
 def parse_message(text: str) -> ParsedAlert:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    normalized = re.sub(r"\s+", " ", text.strip())
+    # Emoji and other non-ASCII decoration carry no trade meaning. Replace each
+    # run with a space (never join the characters around it) so a decorated
+    # alert parses identically to its plain text and anything else stays unmatched.
+    normalized = re.sub(r"\s+", " ", re.sub(r"[^\x00-\x7F]+", " ", text).strip())
     if not normalized:
         return ParsedAlert(SignalIntent.IGNORE_NON_OPTION, reason="EMPTY")
     if len(normalized) > 1000:
@@ -133,7 +149,7 @@ def parse_message(text: str) -> ParsedAlert:
         intent = SignalIntent.CLOSE_100_PERCENT if close else SignalIntent.METADATA_ONLY
         match = patterns.EXPLICIT_CONTRACT.search(uppercase)
         symbol = match.group("symbol").upper() if match else _symbol_prefix(uppercase)
-        if symbol is not None and symbol in {"NO", "THE", "WE", "JUST"}:
+        if symbol is not None and symbol in NON_TICKER_LEADING_WORDS:
             symbol = None
         try:
             return ParsedAlert(
@@ -154,9 +170,9 @@ def parse_message(text: str) -> ParsedAlert:
             premium = _decimal(matched.group("premium"))
         except (ValueError, OverflowError):
             return ParsedAlert(SignalIntent.REVIEW_REQUIRED, reason="INVALID_ENTRY_VALUES")
-        category = (matched.group("category") or "STANDARD").upper()
-        if uppercase.startswith("LOTTO "):
-            category = "LOTTO"
+        category = (
+            matched.group("category") or matched.group("lead_category") or "STANDARD"
+        ).upper()
         return ParsedAlert(
             SignalIntent.ENTRY, matched.group("symbol").upper(),
             _right(matched.group("right")), strike, expiry, premium,

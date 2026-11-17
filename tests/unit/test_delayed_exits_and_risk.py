@@ -1,22 +1,19 @@
 """Unit tests for delayed exit handling, entry staleness, and engine risk safeguards."""
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
-import sqlite3
 
 import pytest
 
-from swift_autotrader.broker.base import BrokerOrderState
 from swift_autotrader.broker.paper import PaperBroker
 from swift_autotrader.database.migrate import apply_migrations
-from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.engine import PaperOrderEngine
-from swift_autotrader.orders.risk import PaperPreflight, RiskCeilings
+from swift_autotrader.orders.risk import PaperPreflight
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog
-
 
 CHANNEL = -1001234000001
 SENT = "2026-11-16T15:30:00.000000Z"

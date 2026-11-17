@@ -3,7 +3,7 @@
 Coordinates the end-to-end pipeline:
 1. Ingests Telegram signals from the local SQLite store.
 2. Resolves option contracts, expirations, and live quotes from Robinhood.
-3. Applies slippage-tolerant limit pricing within configured bounds.
+3. Keeps the exact original alert premium as the entry limit (no price chasing).
 4. Checks all risk and safety gates (buying power, concurrent positions, daily loss cap).
 5. Submits buy-to-open and sell-to-close orders through Robinhood Agentic MCP.
 6. Reconciles broker order states, fills, and cancellations.
@@ -17,9 +17,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from time import monotonic
+from typing import Any
 
-from swift_autotrader.broker.base import BrokerOrderState
 from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
@@ -28,21 +27,15 @@ from swift_autotrader.broker.robinhood_mcp import (
 )
 from swift_autotrader.config import Settings
 from swift_autotrader.notifications.alerts import NotificationCenter
-from swift_autotrader.orders.engine import PaperOrderEngine
-from swift_autotrader.orders.exposure_state import active_signal_ids
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
+from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.exit_policy import ExitQuote
-from swift_autotrader.orders.risk import Preflight, RiskCeilings
-from swift_autotrader.orders.slippage import resolve_live_entry_limit, SlippageExceededError
-from swift_autotrader.paper_dispatch import (
-    MarketEvidenceUnavailable,
-    MarketSnapshot,
-    VerifiedQuote,
-)
+from swift_autotrader.orders.exposure_state import active_signal_ids
+from swift_autotrader.orders.risk import RiskCeilings
 from swift_autotrader.parser.rules import SignalIntent, parse_message
 from swift_autotrader.signals.identity import OptionContract
-from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog, resolve_entry
+from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog
 
 log = logging.getLogger("swift_autotrader.live_dispatch")
 
@@ -80,6 +73,10 @@ class LiveDispatcher:
     ):
         if not mcp_broker.allow_live_writes:
             raise PermissionError("LiveDispatcher requires mcp_broker.allow_live_writes=True")
+        # Explicit owner caps only; never substitute an implicit ceiling.
+        for cap in (settings.max_premium_per_signal_usd, settings.max_total_exposure_usd):
+            if not cap.is_finite() or cap <= 0:
+                raise PermissionError("Live dispatch requires explicit positive premium and exposure caps")
         self.db_path = Path(db_path)
         self.channel_id = channel_id
         self.mcp = mcp_broker
@@ -102,13 +99,12 @@ class LiveDispatcher:
         # Risk limits derived from settings
         self.limits = RiskCeilings(
             contracts_per_signal=settings.max_contracts_per_signal,
-            premium_per_signal_usd=settings.max_premium_per_signal_usd or Decimal("9999"),
-            total_exposure_usd=Decimal("10000"),
+            premium_per_signal_usd=settings.max_premium_per_signal_usd,
+            total_exposure_usd=settings.max_total_exposure_usd,
             open_signal_count=settings.max_concurrent_positions,
             entry_max_age_seconds=settings.telegram_max_live_age_seconds,
             max_daily_loss_usd=settings.max_daily_loss_usd,
             max_concurrent_positions=settings.max_concurrent_positions,
-            slippage_tolerance_pct=settings.slippage_tolerance_pct,
         )
 
         # Build live broker adapter
@@ -199,6 +195,7 @@ class LiveDispatcher:
                 "LEFT JOIN signal_metadata m ON m.signal_id=o.signal_id"
             ).fetchall()
         from datetime import date
+
         from swift_autotrader.signals.identity import OptionRight
         buys = 0
         for row in rows:
@@ -394,6 +391,7 @@ class LiveDispatcher:
             ]
 
         from datetime import date
+
         from swift_autotrader.signals.identity import OptionRight
         active = [
             OptionContract(row[0], OptionRight(row[1]), Decimal(row[2]), date.fromisoformat(row[3]))
@@ -401,7 +399,7 @@ class LiveDispatcher:
         ]
         entries = []
         followup_rev_ids = []
-        for rid, mid, body, eligible, sent_at in pending:
+        for rid, mid, body, eligible, _sent_at in pending:
             alert = parse_message(body)
             if alert.intent is SignalIntent.ENTRY:
                 if not eligible:

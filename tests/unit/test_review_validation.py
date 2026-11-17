@@ -1,6 +1,12 @@
 from decimal import Decimal
+
 import pytest
-from swift_autotrader.broker.review_validation import exact_contract_quantity, reconciled_processed_quantity
+
+from swift_autotrader.broker.review_validation import (
+    exact_contract_quantity,
+    reconciled_processed_quantity,
+)
+
 
 @pytest.mark.parametrize('value', ['0.0000', 0, '1.0000', Decimal('10'), '0002'])
 def test_whole_quantity(value):
@@ -28,6 +34,7 @@ def test_bad_processed_quantity(order):
 def test_review_order_underlying_type_mapping():
     import asyncio
     from datetime import date
+
     from swift_autotrader.broker.robinhood_mcp import (
         MCPAccount,
         MCPContractError,

@@ -24,7 +24,6 @@ def make_ceilings(
     *,
     max_daily_loss: str = "500",
     max_positions: int = 3,
-    slippage: str = "10",
     contracts_per_signal: int = 1,
     premium_per_signal: str = "1000",
     total_exposure: str = "5000",
@@ -38,7 +37,6 @@ def make_ceilings(
         entry_max_age_seconds=120,
         max_daily_loss_usd=Decimal(max_daily_loss),
         max_concurrent_positions=max_positions,
-        slippage_tolerance_pct=Decimal(slippage),
     )
 
 
@@ -158,7 +156,6 @@ def test_risk_ceilings_from_environment() -> None:
     env = {
         "MAX_DAILY_LOSS_USD": "750",
         "MAX_CONCURRENT_POSITIONS": "4",
-        "SLIPPAGE_TOLERANCE_PCT": "12",
         "MAX_CONTRACTS_PER_SIGNAL": "2",
         "MAX_PREMIUM_PER_SIGNAL_USD": "500",
         "PAPER_MAX_TOTAL_EXPOSURE_USD": "8000",
@@ -168,7 +165,8 @@ def test_risk_ceilings_from_environment() -> None:
     ceilings = RiskCeilings.from_environment(env)
     assert ceilings.max_daily_loss_usd == Decimal("750")
     assert ceilings.max_concurrent_positions == 4
-    assert ceilings.slippage_tolerance_pct == Decimal("12")
+    with pytest.raises(ValueError, match="exact alert limit"):
+        RiskCeilings.from_environment(dict(env, SLIPPAGE_TOLERANCE_PCT="12"))
     assert ceilings.contracts_per_signal == 2
     assert ceilings.premium_per_signal_usd == Decimal("500")
 
@@ -342,9 +340,6 @@ def test_risk_ceilings_post_init_validation() -> None:
 
     with pytest.raises(ValueError, match="invalid max concurrent positions ceiling"):
         RiskCeilings(max_concurrent_positions=0)
-
-    with pytest.raises(ValueError, match="invalid slippage tolerance ceiling"):
-        RiskCeilings(slippage_tolerance_pct=Decimal("50.1"))
 
     with pytest.raises(ValueError, match="invalid dollar ceilings"):
         RiskCeilings(max_daily_loss_usd=Decimal("-1"))

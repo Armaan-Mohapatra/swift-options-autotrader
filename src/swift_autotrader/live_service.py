@@ -2,16 +2,16 @@
 
 Connects to Robinhood Agentic MCP under explicit owner authorization.
 Ingests authentic signals from the designated Telegram channel, validates
-options eligibility, slippage ceiling, buying power, and risk limits, and
+options eligibility, exact-limit pricing, buying power, and risk limits, and
 submits live buy/sell orders with durable reconciliation.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
-import sys
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -29,15 +29,18 @@ from swift_autotrader.broker.mcp_paper_data import (
 )
 from swift_autotrader.broker.mcp_transport import OAuthEnrollment, authenticated_mcp_client
 from swift_autotrader.broker.robinhood_mcp import (
-    MCPAccount,
-    RobinhoodLiveBroker,
     RobinhoodMCPBroker,
 )
 from swift_autotrader.config import ConfigurationError, Settings, validate_private_path
 from swift_autotrader.live_dispatch import LiveDispatcher, LiveDispatchResult
-from swift_autotrader.orders.risk import RiskCeilings
-from swift_autotrader.orders.exposure_state import has_active_exposure
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope, load_acceptance_scope
+from swift_autotrader.orders.exposure_state import has_active_exposure
+from swift_autotrader.orders.unattended_approval import (
+    RECEIPT_NAME,
+    UnattendedApproval,
+    UnattendedApprovalError,
+    load_unattended_approval,
+)
 
 log = logging.getLogger("swift_autotrader.live_service")
 
@@ -91,10 +94,8 @@ def write_stop_marker_durable(root: Path, reason: str = "STOP", filename: str = 
         os.replace(tmp, target)
     except OSError as exc:
         log.critical("Failed to durably write stop marker %s: %s", target, exc)
-        try:
+        with contextlib.suppress(OSError):
             tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise RuntimeError(f"Failed to durably persist stop marker {filename}: {exc}") from exc
     return target
 
@@ -189,6 +190,7 @@ async def run_live_service(
     # flags alone to turn a paper journal or credential store into a live one.
     # Mock-client tests exercise the service without reaching local credentials.
     approved_account = config.robinhood_mcp_account
+    unattended_approval: UnattendedApproval | None = None
     if client_override is None:
         document = json.loads((managed_root / "deployment.json").read_text(encoding="utf-8"))
         if (document.get("mode") != "LIVE" or document.get("live_enabled") is not True
@@ -215,6 +217,24 @@ async def run_live_service(
                 allowed_modes=("LIVE",),
             )
             acceptance_scope = load_acceptance_scope(receipt, account=pinned_account)
+        else:
+            # Unrestricted multi-entry execution needs a separate, expiring owner
+            # receipt that caps every configured ceiling. Flags alone never suffice.
+            try:
+                approval_path = validate_private_path(
+                    managed_root / "secrets" / RECEIPT_NAME,
+                    install_root=managed_root, managed_name=RECEIPT_NAME,
+                    allowed_modes=("LIVE",),
+                )
+                unattended_approval = load_unattended_approval(
+                    approval_path, account=pinned_account, settings=config,
+                    now=(clock or (lambda: datetime.now(UTC)))(),
+                )
+            except (ConfigurationError, UnattendedApprovalError) as exc:
+                write_live_health(managed_root, "FAILED")
+                raise LocalAuthNotConfigured(
+                    f"Unattended live execution is not approved: {exc}"
+                ) from exc
     if acceptance_scope is not None and not single_entry:
         raise ConfigurationError("Acceptance scope requires single-entry mode")
 
@@ -295,6 +315,10 @@ async def run_live_service(
                 if any(os.path.lexists(managed_root / "state" / marker)
                        for marker in ("stop.request", "SWIFT_REVIEWED_STOP")):
                     break
+                if unattended_approval is not None and not unattended_approval.active(
+                        (clock or (lambda: datetime.now(UTC)))()):
+                    log.warning("Unattended live approval expired; stopping before new cycles")
+                    break
                 last_result = await dispatcher.run_once()
                 write_live_health(managed_root, "RUNNING", result=last_result,
                                   simulated=client_override is not None)
@@ -326,7 +350,7 @@ async def run_live_service(
                     )
                     if stop_event and stop_event.is_set():
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
         except BaseException:
             write_live_health(managed_root, "FAILED", result=last_result,

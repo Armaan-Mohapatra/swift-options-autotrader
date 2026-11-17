@@ -2,16 +2,15 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, date, datetime
+import sqlite3
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
-import sqlite3
 
 import pytest
 
 from swift_autotrader.broker.base import (
     BrokerOrderState,
-    BrokerOrderStatus,
 )
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
@@ -23,7 +22,6 @@ from swift_autotrader.broker.robinhood_mcp import (
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.signals.identity import OptionContract, OptionRight
-
 
 CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
 ACCOUNT = MCPAccount("test-live-acc", True, "option_level_2")

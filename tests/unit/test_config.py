@@ -52,6 +52,7 @@ def test_live_configuration_validation_success(tmp_path: Path) -> None:
     env = {
         "PAPER_ONLY": "false",
         "LIVE_ENABLED": "true",
+        "MAX_PREMIUM_PER_SIGNAL_USD": "999", "MAX_TOTAL_EXPOSURE_USD": "9999",
         "ALLOW_BROKER_WRITES": "true",
         "BROKER_BACKEND": "robinhood_mcp",
         "ROBINHOOD_MCP_ACCOUNT": "RH_ACC_123456",
@@ -62,7 +63,6 @@ def test_live_configuration_validation_success(tmp_path: Path) -> None:
         "TELEGRAM_SESSION_PATH": str(session.resolve()),
         "MAX_DAILY_LOSS_USD": "750",
         "MAX_CONCURRENT_POSITIONS": "4",
-        "SLIPPAGE_TOLERANCE_PCT": "12",
         "KILL_SWITCH_ENABLED": "true",
     }
     settings = Settings.from_env(env)
@@ -71,7 +71,7 @@ def test_live_configuration_validation_success(tmp_path: Path) -> None:
     assert settings.robinhood_mcp_account == "RH_ACC_123456"
     assert settings.max_daily_loss_usd == Decimal("750")
     assert settings.max_concurrent_positions == 4
-    assert settings.slippage_tolerance_pct == Decimal("12")
+    assert settings.public_summary()["entry_price_policy"] == "EXACT_ALERT_LIMIT"
     summary = settings.public_summary()
     assert summary["mode"] == "LIVE"
     assert "robinhood_mcp_account" not in summary
@@ -83,6 +83,7 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
     base_env = {
         "PAPER_ONLY": "false",
         "LIVE_ENABLED": "true",
+        "MAX_PREMIUM_PER_SIGNAL_USD": "999", "MAX_TOTAL_EXPOSURE_USD": "9999",
         "ALLOW_BROKER_WRITES": "true",
         "BROKER_BACKEND": "robinhood_mcp",
         "ROBINHOOD_MCP_ACCOUNT": "RH_ACC_123456",
@@ -92,6 +93,23 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
         "TELEGRAM_API_HASH": "0123456789abcdef0123456789abcdef",
         "TELEGRAM_SESSION_PATH": str(session.resolve()),
     }
+
+    # Live never inherits an implicit premium or exposure ceiling.
+    for key in ("MAX_PREMIUM_PER_SIGNAL_USD", "MAX_TOTAL_EXPOSURE_USD"):
+        for value in (None, "0", "-1", "NaN"):
+            env = dict(base_env)
+            if value is None:
+                env.pop(key)
+            else:
+                env[key] = value
+            with pytest.raises(ConfigurationError):
+                Settings.from_env(env)
+    env = dict(base_env, MAX_PREMIUM_PER_SIGNAL_USD="10000", MAX_TOTAL_EXPOSURE_USD="9999")
+    with pytest.raises(ConfigurationError, match="cannot exceed MAX_TOTAL_EXPOSURE_USD"):
+        Settings.from_env(env)
+    configured = Settings.from_env(base_env)
+    assert (configured.max_premium_per_signal_usd, configured.max_total_exposure_usd) == (
+        Decimal("999"), Decimal("9999"))
 
     # Missing account
     env = dict(base_env, ROBINHOOD_MCP_ACCOUNT="")
@@ -108,10 +126,12 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="MAX_DAILY_LOSS_USD cannot exceed"):
         Settings.from_env(env)
 
-    # Negative slippage
-    env = dict(base_env, SLIPPAGE_TOLERANCE_PCT="-5")
-    with pytest.raises(ConfigurationError, match="SLIPPAGE_TOLERANCE_PCT"):
-        Settings.from_env(env)
+    # Any price-chasing allowance is refused; an explicit zero is tolerated.
+    for value in ("-5", "10", "0.01", "NaN"):
+        env = dict(base_env, SLIPPAGE_TOLERANCE_PCT=value)
+        with pytest.raises(ConfigurationError):
+            Settings.from_env(env)
+    assert Settings.from_env(dict(base_env, SLIPPAGE_TOLERANCE_PCT="0")).is_live
 
     # Mobile bot is optional; this validates settings only, not execution permission.
     env = dict(base_env, KILL_SWITCH_ENABLED="false")

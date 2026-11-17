@@ -2,20 +2,19 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from scripts.pin_account import main as pin_script_main
 from swift_autotrader.app import main as app_main
 from swift_autotrader.broker.mcp_local_auth import (
     LocalAuthNotConfigured,
     load_pinned_agentic_account,
     pin_agentic_account,
 )
-from scripts.pin_account import main as pin_script_main
 
 
 @pytest.fixture

@@ -1,0 +1,7 @@
+# Keep working-tree bytes identical to Git blobs on every OS. The release
+# builder verifies source bytes against committed blobs, and Windows
+# autocrlf checkouts otherwise rewrite LF to CRLF.
+* text=auto eol=lf
+*.zip binary
+*.png binary
+*.sqlite3 binary

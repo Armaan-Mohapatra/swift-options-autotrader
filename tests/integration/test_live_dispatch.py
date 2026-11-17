@@ -15,19 +15,15 @@ import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from swift_autotrader.broker.base import BrokerOrderStatus, BrokerOrderState, OrderIntent, OrderSide
-from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
 from swift_autotrader.broker.robinhood_mcp import MCPAccount, RobinhoodMCPBroker
 from swift_autotrader.config import Settings
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.database.repository import TelegramStore
-from swift_autotrader.live_dispatch import LiveDispatcher, LiveDispatchResult
+from swift_autotrader.live_dispatch import LiveDispatcher
 from swift_autotrader.orders.risk import Preflight, RiskCeilings
-from swift_autotrader.orders.slippage import SlippageExceededError, resolve_live_entry_limit
 from swift_autotrader.paper_dispatch import (
     MarketEvidenceUnavailable,
     MarketSnapshot,
@@ -108,13 +104,14 @@ def dispatch_rig(tmp_path: Path) -> tuple[Path, FakeClock, StatefulFakeMCP, Mock
     settings = Settings(
         paper_only=False,
         live_enabled=True,
+        max_premium_per_signal_usd=Decimal("999"),
+        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="test-live-acc",
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
         kill_switch_enabled=True,
         kill_switch_telegram_bot_token="test_bot_token",
         kill_switch_telegram_chat_id=123456789,
@@ -230,7 +227,6 @@ def test_live_dispatch_risk_ceilings_from_settings(dispatch_rig: tuple) -> None:
     _, _, _, _, _, dispatcher = dispatch_rig
     assert dispatcher.limits.max_daily_loss_usd == Decimal("500")
     assert dispatcher.limits.max_concurrent_positions == 3
-    assert dispatcher.limits.slippage_tolerance_pct == Decimal("10")
 
 
 # ============================================================================
@@ -277,40 +273,21 @@ def test_live_dispatch_disallowed_writes_construction_error(tmp_path: Path, live
         )
 
 
-def test_live_dispatch_slippage_exceeded_blocks_order(dispatch_rig: tuple) -> None:
-    """T2-F5-04: Spiked ask exceeding slippage tolerance blocks entry order end-to-end."""
+@pytest.mark.parametrize("ask", ["1.25", "1.50"])
+def test_live_dispatch_entry_keeps_exact_alert_limit(dispatch_rig: tuple, ask: str) -> None:
+    """T2-F5-04/06: A higher ask never raises the limit; the exact alert premium rests."""
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
-    # Ask 1.50 is +25% above 1.20 (slippage tolerance is 10%)
-    feed.ask = Decimal("1.50")
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
-
-    result = asyncio.run(dispatcher.run_once())
-    assert result.status == "LIVE_CYCLE_COMPLETED"
-    assert result.entry_orders_submitted == 0
-    assert len(mcp.orders) == 0
-
-    with sqlite3.connect(str(db_path)) as db:
-        row = db.execute(
-            "SELECT outcome, reason FROM paper_engine_decisions"
-        ).fetchone()
-        assert row[0] == "BLOCKED"
-        assert row[1] == "SLIPPAGE_EXCEEDED"
-
-
-def test_live_dispatch_slippage_adjustment_order_limit(dispatch_rig: tuple) -> None:
-    """T2-F5-06: Ask within tolerance adjusts the submitted limit price to the ask."""
-    db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
-    # Alert is 1.20, Ask is 1.25 (+4.17%, within 10%)
-    feed.ask = Decimal("1.25")
+    feed.ask = Decimal(ask)
     ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
 
     result = asyncio.run(dispatcher.run_once())
     assert result.status == "LIVE_CYCLE_COMPLETED"
     assert result.entry_orders_submitted == 1
     assert len(mcp.orders) == 1
+    assert list(mcp.orders.values())[0]["price"] == "1.20"
 
-    order = list(mcp.orders.values())[0]
-    assert order["price"] == "1.25"
+    with sqlite3.connect(str(db_path)) as db:
+        assert db.execute("SELECT limit_price FROM order_intents").fetchall() == [("1.20",)]
 
 
 def test_live_dispatch_non_entry_alert_ignored(dispatch_rig: tuple) -> None:
@@ -341,7 +318,6 @@ def test_t3_live_dispatch_cumulative_loss_ceiling_blocks_new_entries(dispatch_ri
         open_signal_count=1,
         max_concurrent_positions=1,
         max_daily_loss_usd=Decimal("500"),
-        slippage_tolerance_pct=Decimal("10"),
     )
     dispatcher.engine.limits = dispatcher.limits
 
@@ -417,3 +393,24 @@ def test_t3_live_dispatch_paused_engine_skips_entries(dispatch_rig: tuple) -> No
     result = asyncio.run(dispatcher.run_once())
     assert result.entry_orders_submitted == 0
     assert len(mcp.orders) == 0
+
+
+@pytest.mark.parametrize("field", ["max_premium_per_signal_usd", "max_total_exposure_usd"])
+def test_live_dispatch_refuses_missing_owner_caps(tmp_path: Path, live_settings: Settings, field: str) -> None:
+    """A zero cap is refused, never silently replaced by a default ceiling."""
+    from dataclasses import replace
+    mcp = StatefulFakeMCP()
+    broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
+    account = MCPAccount("acc", True, "option_level_2")
+    with pytest.raises(PermissionError, match="explicit positive premium and exposure caps"):
+        LiveDispatcher(
+            tmp_path / "data" / "swift.sqlite3", CHANNEL_ID, broker, account,
+            MockQuoteFeed(FakeClock()),  # type: ignore[arg-type]
+            replace(live_settings, **{field: Decimal("0")}),
+        )
+
+
+def test_live_dispatch_uses_configured_caps_exactly(dispatch_rig: tuple) -> None:
+    _, _, _, _, _, dispatcher = dispatch_rig
+    assert dispatcher.limits.premium_per_signal_usd == dispatcher.settings.max_premium_per_signal_usd
+    assert dispatcher.limits.total_exposure_usd == dispatcher.settings.max_total_exposure_usd

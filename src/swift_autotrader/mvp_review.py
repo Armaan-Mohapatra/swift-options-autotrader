@@ -12,7 +12,7 @@ def review_status(commands: frozenset[str]) -> dict[str, object]:
             "lotto_eligible": True,
             "average_down": False,
             "partial_exit_means_full_owned_exit": True,
-            "slippage_tolerance_pct": "10",
+            "entry_price_policy": "EXACT_ALERT_LIMIT",
             "daily_loss_basis": "netted_realized_price_pnl",
             "broker_fees_in_current_loss_measure": False,
             "current_repository_loss_default_usd": "750",

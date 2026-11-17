@@ -1,14 +1,16 @@
 """Offline-only checks of the proposed MVP changes."""
 import json
 from decimal import Decimal
+
 import pytest
+
 from swift_autotrader.app import main
+from swift_autotrader.broker.robinhood_mcp import MCPContractError
 from swift_autotrader.config import Settings
 from swift_autotrader.orders.risk import RiskCeilings, rejection_reason
-from swift_autotrader.broker.robinhood_mcp import MCPContractError
-from tests.unit.test_robinhood_mcp import setup, wait, ACCOUNT, INSTRUMENT, intent, WRITE_TOOLS
-from tests.unit.test_live_risk import CONTRACT, make_ceilings, make_preflight
 from swift_autotrader.supervisor import run_supervisor
+from tests.unit.test_live_risk import CONTRACT, make_ceilings, make_preflight
+from tests.unit.test_robinhood_mcp import ACCOUNT, INSTRUMENT, WRITE_TOOLS, intent, setup, wait
 from tests.unit.test_supervisor import make_supervisor
 
 
