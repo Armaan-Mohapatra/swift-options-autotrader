@@ -30,6 +30,7 @@ scheduled task was registered. Everything here ran offline on Linux.
 | 3 | Live inherited caps nobody set | `LiveDispatcher` mapped a $0 premium cap to $9,999 and hardcoded $10,000 exposure | Live requires explicit positive `MAX_PREMIUM_PER_SIGNAL_USD` and new `MAX_TOTAL_EXPOSURE_USD` (premium ≤ total); used exactly | `test_config`, `test_live_dispatch` |
 | 4 | Unrestricted live started on flags alone | Full multi-entry live loop (e.g. via `RegisterLiveTask`) needed no owner decision beyond config + OAuth | Requires `secrets/unattended-live-approval.json`: pinned-account hash, ≤7-day window, caps the config may not exceed; loop stops at expiry | 17 cases in `test_live_service.py` |
 | 5 | Undefined names | Missing `Any`, `Mapping`, `SimpleNamespace` imports | Imports added | ruff F821 clean |
+| 6 | CI never reached tests | Windows autocrlf checkout broke the release builder's blob-byte check; `ruff check .` failed on ~880 old findings | `.gitattributes` `eol=lf`; lint excludes `review/` snapshots, ignores E501, scopes test-only style rules; safe autofixes | GitHub Actions below |
 
 ## Validation (exact commands)
 
@@ -44,14 +45,28 @@ uvx pip-audit --path <venv site-packages>   # no known vulnerabilities
 ruff check . --select F821           # clean
 ```
 
+GitHub Actions on PR #32 @ `3b27cc4` (public-repo free runners):
+
+| Job | Result |
+|-----|--------|
+| Isolated Windows dry-run and installation rehearsal | **success** (run 44045072205) |
+| windows-latest / Python 3.13 tests | **882 passed, 1 skipped** |
+| windows-latest / Python 3.11, ubuntu 3.11 / 3.13 tests | tests step **success** |
+| Regression workflow overall | failure at `Verify Phase 7 paper-only invariants` (run 44045072316) |
+
 Known open items, unchanged:
 - `scripts/phase7_verify.py` fails identically on the baseline: it asserts the
   real adapter can never write, but later PRs deliberately added a guarded
   live write path. The gate was left as is, not weakened.
 - `ruff check .` reports ~860 style findings (mostly `review/` snapshots and
   long lines); not reformatted, to keep this diff reviewable.
-- No GitHub Actions were triggered (free-resource constraint). Native Windows,
-  PowerShell scripts, DPAPI and Task Scheduler are **not** verified here.
+- The `phase7_verify` CI gate is an AGENTS.md Phase 7 control ("MCP
+  trade/cancel functions remain hard-denied") that the later live-path PRs
+  contradict. Per AGENTS.md this conflict is reported, not reinterpreted:
+  the owner must either retire that control for the live track or keep live
+  paths out of this branch line.
+- The Windows *runner* tests and install rehearsal pass; the owner's own host,
+  DPAPI enrollment and Task Scheduler supervision remain unverified.
 
 ## Broker reality (Robinhood Agentic Trading MCP)
 
