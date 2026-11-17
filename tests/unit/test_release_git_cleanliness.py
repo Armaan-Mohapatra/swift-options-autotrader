@@ -62,6 +62,23 @@ def test_clean_reviewed_checkout_creates_bound_release(tmp_path: Path):
     assert manifest["broker_writes_enabled"] is False
 
 
+def test_clean_windows_crlf_checkout_packages_exact_reviewed_git_blobs(tmp_path: Path):
+    import zipfile
+
+    root, sha = _fixture_repo(tmp_path)
+    _git(root, "config", "core.autocrlf", "true")
+    # The worktree differs byte-for-byte, but Git's clean filter maps it
+    # back to the exact reviewed LF blob. Do not package the CRLF variant.
+    file = root / ".python-version"
+    file.write_bytes(b"reviewed code\r\n")
+    assert _git(root, "status", "--porcelain") == ""
+    archive = tmp_path / "windows-clean.zip"
+    manifest = builder.create_package(root, archive, expected_commit=sha)
+    assert manifest["source_commit"] == sha
+    with zipfile.ZipFile(archive) as result:
+        assert result.read(".python-version") == b"reviewed code\n"
+
+
 def test_dirty_tracked_code_cannot_claim_reviewed_commit(tmp_path: Path):
     root, sha = _fixture_repo(tmp_path)
     (root / "src/swift_autotrader/core.py").write_text("uncommitted code\n")
