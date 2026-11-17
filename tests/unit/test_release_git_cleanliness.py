@@ -71,6 +71,10 @@ def test_clean_windows_crlf_checkout_packages_exact_reviewed_git_blobs(tmp_path:
     # back to the exact reviewed LF blob. Do not package the CRLF variant.
     file = root / ".python-version"
     file.write_bytes(b"reviewed code\r\n")
+    # Refresh the index as a real clean checkout would. Without this, Git
+    # notices the manually written worktree file as a cached modification.
+    _git(root, "reset", "--hard", "HEAD")
+    assert file.read_bytes() == b"reviewed code\r\n"
     assert _git(root, "status", "--porcelain") == ""
     archive = tmp_path / "windows-clean.zip"
     manifest = builder.create_package(root, archive, expected_commit=sha)

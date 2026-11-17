@@ -22,6 +22,7 @@ ALLOWED_DOCS = (
     "docs/PROJECT_SPEC.md", "docs/SOURCE_SPRINT_PLAN.md", "docs/ARCHITECTURE.md",
     "docs/WINDOWS_RUNBOOK.md", "docs/OPERATIONS.md", "docs/ROLLBACK.md",
     "docs/SECURITY.md", "docs/CONFIGURATION.md",
+    "docs/LIVE_OPERATIONS.md",
     "docs/PAPER_EXECUTION_PHASE3.md", "docs/PAPER_ANALYTICS_PHASE5.md",
     "docs/PHASE_REPORTS/PHASE_6.md", "docs/PHASE_REPORTS/PHASE_7.md",
     "docs/PHASE_REPORTS/PHASE_8.md", "docs/PAPER_DISPATCH_PHASE8.md",
