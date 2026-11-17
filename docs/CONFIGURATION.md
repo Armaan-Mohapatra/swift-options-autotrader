@@ -34,9 +34,9 @@ These additional variables are read by `RiskCeilings.from_environment()` or `Exi
 | --- | --- | --- |
 | `MAX_CONTRACTS_PER_SIGNAL` | `1` | Exactly 1. Applies to entry size; no adds, no averaging down. |
 | `MAX_PREMIUM_PER_SIGNAL_USD` | `0` | Mandatory max order premium including the standard 100-share options multiplier; **zero blocks entries**; hard maximum **999**. |
-| `PAPER_MAX_TOTAL_EXPOSURE_USD` | `0` | Aggregate reserved notional ceiling; **zero blocks entries**; hard maximum **10000**. |
+| `PAPER_MAX_TOTAL_EXPOSURE_USD` | blank | Optional voluntary aggregate notional cap. **Blank = no cap**: the number of trades is bounded only by available buying power (`INSUFFICIENT_BUYING_POWER`). |
 | `PAPER_MAX_DAILY_NET_LOSS_USD` | `750` | Daily realized net-loss circuit breaker (US/Eastern day, confirmed exit fills only, fees not modeled). New entries are blocked with `DAILY_LOSS_CEILING_REACHED` once realized P&L reaches the negative of this value. Range above 0 up to **750**. |
-| `PAPER_MAX_OPEN_SIGNALS` | `1` | Maximum concurrently active signals, 1–1000. |
+| `PAPER_MAX_OPEN_SIGNALS` | blank | Optional voluntary cap on concurrently active signals, 1–1000. **Blank = unlimited**; buying power is the only bound. |
 | `PAPER_ENTRY_MAX_AGE_SECONDS` | `120` | Accept only fresh persisted entry signals; 0–600. |
 | `PAPER_EXIT_QUOTE_MAX_AGE_SECONDS` | `30` | Require matching, positive, tick-valid and recent BID for sell-to-close LIMIT; 0–300. |
 

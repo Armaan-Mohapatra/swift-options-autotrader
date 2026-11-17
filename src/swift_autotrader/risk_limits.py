@@ -20,5 +20,6 @@ DAILY_NET_LOSS_LIMIT_USD = Decimal("750")
 MAX_CONTRACTS_PER_ALERT = 1
 # Largest premium (limit x quantity x 100) a single alert may risk (USD).
 PREMIUM_CEILING_USD = Decimal("999")
-# Largest total open entry exposure across all active signals (USD).
-EXPOSURE_CEILING_USD = Decimal("10000")
+# Deliberately NO cap on the number of trades or on total exposure: how many
+# trades may be open is bounded only by available buying power (see
+# orders.risk.rejection_reason, INSUFFICIENT_BUYING_POWER).
