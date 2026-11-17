@@ -99,6 +99,7 @@ def test_one_borrowed_mcp_session_handles_live_calls_on_original_loop(tmp_path):
         LiveBroker.create_journal(settings.live_journal_path)
         runner = BorrowedMCPLoop(asyncio.get_running_loop())
         broker = build_broker(settings, control, clock=clock, client=fake, loop=runner)
+        broker.signal_gate = lambda _signal: 'ENTRY'  # fake-only test fixture
         try:
             result = await asyncio.to_thread(broker.submit_order, entry())
             assert result.state.value == 'ACCEPTED'
