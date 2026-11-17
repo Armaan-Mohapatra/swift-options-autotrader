@@ -64,13 +64,22 @@ function Invoke-SwiftCli {
     & (Get-SwiftPython $root) -m swift_autotrader @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Swift command failed; see the JSON error above.' }
 }
+function Invoke-SwiftControl {
+    param([string[]]$Arguments)
+    # Emergency pause/status/resume must not depend on a healthy OAuth token,
+    # source session, live settings, market-data feed or trading configuration.
+    # The CLI's control-only path consults only this managed local SQLite DB.
+    $env:DB_PATH = Join-Path $root 'data\swift.sqlite3'
+    & (Get-SwiftPython $root) -m swift_autotrader @Arguments
+    if ($LASTEXITCODE -ne 0) { throw 'Swift entry-control command failed.' }
+}
 switch ($Action) {
     # Entry kill switch: takes effect on the next entry, no restart. Exits are never blocked.
-    'PauseEntries' { Invoke-SwiftCli -Arguments @('entries-pause') }
-    'EntriesStatus' { Invoke-SwiftCli -Arguments @('entries-status') }
+    'PauseEntries' { Invoke-SwiftControl -Arguments @('entries-pause') }
+    'EntriesStatus' { Invoke-SwiftControl -Arguments @('entries-status') }
     'ResumeEntries' {
         if ($PSCmdlet.ShouldProcess($root, 'Allow new entries again')) {
-            Invoke-SwiftCli -Arguments @('entries-resume')
+            Invoke-SwiftControl -Arguments @('entries-resume')
         }
     }
     # One-time: create the empty live journal at live_journal_path (never overwrites).
@@ -105,7 +114,8 @@ switch ($Action) {
     }
     'Status' {
         $heartbeat = Join-Path $root 'state\health.json'
-        $state = @{ task_state = (Get-TaskState); status = 'NOT_STARTED'; mode = 'PAPER_ONLY' }
+        $configured = (Get-Content -LiteralPath (Join-Path $root 'deployment.json') -Raw -Encoding UTF8 | ConvertFrom-Json).mode
+        $state = @{ task_state = (Get-TaskState); status = 'NOT_STARTED'; configured_mode = $configured }
         if (Test-Path -LiteralPath $heartbeat -PathType Leaf) {
             $state.status = 'HEARTBEAT_RECORDED'
             $state.heartbeat = Get-Content -LiteralPath $heartbeat -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -118,9 +128,9 @@ switch ($Action) {
             $result = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/status' `
                 -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
             if ($result.StatusCode -ne 200) { throw 'Local dashboard unavailable.' }
-            @{ local_dashboard = 'OK'; live_trading = $false } | ConvertTo-Json
+            @{ local_dashboard = 'OK'; live_trading = 'NOT_VERIFIED'; task_state = (Get-TaskState) } | ConvertTo-Json
         } catch {
-            @{ local_dashboard = 'UNAVAILABLE'; live_trading = $false } | ConvertTo-Json
+            @{ local_dashboard = 'UNAVAILABLE'; live_trading = 'NOT_VERIFIED'; task_state = (Get-TaskState) } | ConvertTo-Json
         }
     }
     'Backup' {

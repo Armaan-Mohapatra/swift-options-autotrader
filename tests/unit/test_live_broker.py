@@ -386,6 +386,16 @@ def test_kill_switch_blocks_entry_but_allows_owned_exit(scenario):
     assert fake.place_count == 2
 
 
+def test_exit_never_adopts_manual_contract_inventory(scenario):
+    broker, fake, clock = scenario
+    broker.submit_order(entry())
+    mark_filled(fake, clock)
+    fake.position = 2  # one Swift fill, one external/manual contract
+    with pytest.raises(LiveSafetyError, match='untracked/manual'):
+        broker.submit_order(exit_intent())
+    assert fake.place_count == 1
+
+
 def test_full_exit_requires_confirmed_ownership(scenario):
     broker, fake, clock = scenario
     with pytest.raises(LiveSafetyError, match='owned'):
@@ -581,6 +591,17 @@ class FlipKill:
         return self.left < 0
 
 
+def test_kill_switch_rechecked_at_transport_boundary(scenario):
+    broker, fake, _ = scenario
+    broker.kill_switch = FlipKill(3)  # after journal write_attempted is saved
+    status = broker.submit_order(entry())
+    assert status.state is BrokerOrderState.UNKNOWN
+    assert broker._load('signal-1:entry').write_attempted
+    assert fake.place_count == 0
+    assert broker.submit_order(entry()).state is BrokerOrderState.UNKNOWN
+    assert fake.place_count == 0
+
+
 def test_unsent_entry_is_terminal_and_releases_buying_power_and_slot(scenario):
     broker, fake, _ = scenario
     broker.kill_switch = FlipKill(1)  # off at preflight, on just before the write
@@ -749,6 +770,39 @@ def test_filled_order_executions_become_fills(scenario):
     assert [(f.fill_id, f.quantity, f.price) for f in status.fills] == [
         ('fill-1', 1, Decimal('2.00'))]
     assert status.accepted_at_utc == clock()  # created_at stands in for acceptance
+
+
+def test_overnight_close_denies_unverified_daily_realized_basis(scenario):
+    broker, fake, clock = scenario
+    fake.position = 0
+    fake.orders.append(broker_order(
+        fake, state='filled', processed_quantity='1.0000',
+        legs=[{'option_id': fake.instrument_id, 'side': 'sell',
+               'position_effect': 'close', 'executions': [
+                   {'id': 'overnight-close', 'quantity': '1.0000', 'price': '2.00',
+                    'timestamp': clock().isoformat()}]}]))
+    with pytest.raises(LiveSafetyError, match='overnight close'):
+        broker.submit_order(entry())
+    assert fake.place_count == 0
+
+
+def test_missing_fill_history_denies_daily_risk_even_when_flat(scenario):
+    broker, fake, _ = scenario
+    fake.position = 0
+    fake.orders.append(broker_order(fake, state='filled',
+                                    processed_quantity='1.0000', executions=[]))
+    with pytest.raises(LiveSafetyError, match='executions do not reconcile'):
+        broker.submit_order(entry())
+    assert fake.place_count == 0
+
+
+def test_daily_risk_uses_execution_date_not_order_creation_date(scenario):
+    broker, fake, clock = scenario
+    broker.submit_order(entry('today'))
+    mark_filled(fake, clock)
+    fake.orders[0]['created_at'] = (clock() - timedelta(days=1)).isoformat()
+    fake.omit_close = True
+    assert broker.refresh_daily_risk() is False
 
 
 def test_realized_null_gain_needs_zero_trades(scenario):

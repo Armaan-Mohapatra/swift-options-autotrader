@@ -567,22 +567,48 @@ class LiveBroker:
                 and close.get('price') is not None else None}
         return out
 
-    async def _bought_today(self, account: MCPAccount, today: str) -> dict[str, Decimal]:
-        """Contracts bought-to-open today per option, from filled quantity of today's orders."""
+    async def _today_activity(
+            self, account: MCPAccount, today: str,
+    ) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
+        """Classify fills by execution time, not the order's creation time.
+
+        Unverified filled-order evidence, unsupported legs and missing execution
+        timestamps deny new entries rather than silently undercounting daily P/L.
+        """
         bought: dict[str, Decimal] = {}
+        sold: dict[str, Decimal] = {}
         for order in await self.reader.orders(account, limit_pages=10):
-            if self._ny_date(_parse_time(order.get('created_at'))) != today:
-                continue
             processed = _decimal(order.get('processed_quantity'))
             if processed == 0:
                 continue
             legs = order.get('legs')
             if not isinstance(legs, list) or len(legs) != 1 or not isinstance(legs[0], Mapping):
-                raise LiveSafetyError('filled multi-leg order today cannot be marked')
-            if legs[0].get('side') == 'buy' and legs[0].get('position_effect') == 'open':
-                option_id = str(legs[0].get('option_id'))
-                bought[option_id] = bought.get(option_id, Decimal(0)) + processed
-        return bought
+                raise LiveSafetyError('filled multi-leg order cannot establish daily risk')
+            leg = legs[0]
+            option_id = leg.get('option_id')
+            if not isinstance(option_id, str) or not option_id:
+                raise LiveSafetyError('filled order option identity missing')
+            direction = (leg.get('side'), leg.get('position_effect'))
+            if direction not in {('buy', 'open'), ('sell', 'close')}:
+                raise LiveSafetyError('unsupported filled option order for daily risk')
+            executions = leg.get('executions')
+            if not isinstance(executions, list):
+                raise LiveSafetyError('filled order executions unavailable for daily risk')
+            total = Decimal(0)
+            for execution in executions:
+                if not isinstance(execution, Mapping):
+                    raise LiveSafetyError('invalid daily-risk execution')
+                quantity = _decimal(execution.get('quantity'))
+                if quantity <= 0 or quantity != int(quantity):
+                    raise LiveSafetyError('invalid daily-risk fill quantity')
+                total += quantity
+                if self._ny_date(_parse_time(execution.get('timestamp'))) != today:
+                    continue
+                target = bought if direction == ('buy', 'open') else sold
+                target[option_id] = target.get(option_id, Decimal(0)) + quantity
+            if total != processed:
+                raise LiveSafetyError('executions do not reconcile to daily-risk order')
+        return bought, sold
 
     async def _daily_pnl(self, account: MCPAccount) -> Decimal:
         """Today's realized total + unrealized on open longs; fails closed on any gap.
@@ -594,16 +620,21 @@ class LiveBroker:
         today = self._session_date()
         realized = await self._realized(today)
         held = [p for p in await self._positions() if _decimal(p.get('quantity')) > 0]
-        if not held:
-            return realized
-        option_ids = [str(p.get('option_id')) for p in held]
-        quotes = await self._quotes(option_ids)
         try:
-            bought = await self._bought_today(account, today)
+            bought, sold = await self._today_activity(account, today)
         except LiveSafetyError:
             raise
         except Exception as exc:
             raise LiveSafetyError('today order history unavailable') from exc
+        # A prior-day long closed today may report lifetime P/L rather than
+        # P/L measured from yesterday's close. Never assume the two are equal.
+        if any(sold.get(option_id, Decimal(0)) > bought.get(option_id, Decimal(0))
+               for option_id in set(bought) | set(sold)):
+            raise LiveSafetyError('overnight close daily P/L attribution unverified')
+        if not held:
+            return realized
+        option_ids = [str(p.get('option_id')) for p in held]
+        quotes = await self._quotes(option_ids)
         unrealized = Decimal(0)
         for position, option_id in zip(held, option_ids, strict=True):
             quantity = _decimal(position.get('quantity'))
@@ -614,16 +645,20 @@ class LiveBroker:
             mark = quote['mark']
             assert mark is not None
             opened_today = bought.get(option_id, Decimal(0))
+            closed_today = sold.get(option_id, Decimal(0))
+            prior_inventory = quantity - opened_today + closed_today
+            if prior_inventory < 0:
+                raise LiveSafetyError('current position and daily orders disagree')
+            if prior_inventory > 0 and (opened_today > 0 or closed_today > 0):
+                raise LiveSafetyError('position mixes prior-day and today lots; cannot mark')
             if opened_today == 0:
                 prior_close = quote['close']
                 if prior_close is None:
                     raise LiveSafetyError('prior close unavailable for held position')
                 unrealized += (mark - prior_close) * multiplier * quantity
-            elif opened_today >= quantity:
+            else:
                 average = _decimal(position.get('average_price'))  # per contract already
                 unrealized += (mark * multiplier - average) * quantity
-            else:
-                raise LiveSafetyError('position mixes prior-day and today lots; cannot mark')
         return realized + unrealized
 
     def _ny_date(self, moment: datetime) -> str:
@@ -700,6 +735,18 @@ class LiveBroker:
             if len(held) != 1 or held[0].get('type') != 'long' or \
                     _decimal(held[0].get('quantity')) < intent.quantity:
                 raise LiveSafetyError('broker long position not confirmed')
+            # Aggregate positions do not distinguish manually held contracts.
+            # Verify broker quantity equals the full journal-owned inventory for
+            # this option across all signals, not merely >= this exit amount.
+            with self._db() as db:
+                ownership = db.execute(
+                    'SELECT side,filled FROM live_orders WHERE option_id=?',
+                    (instrument.option_id,)).fetchall()
+            expected = sum((int(row['filled']) * (
+                1 if row['side'] == OrderSide.BUY_TO_OPEN.value else -1)
+                for row in ownership), 0)
+            if expected <= 0 or _decimal(held[0].get('quantity')) != expected:
+                raise LiveSafetyError('position has untracked/manual or uncertain holdings')
         review = await self.reader.review_order(account, instrument, intent)
         if not review.unblocked:
             raise LiveSafetyError('broker option order review not approved')
@@ -877,7 +924,24 @@ class LiveBroker:
     async def _call_write(self, name: str, payload: dict[str, Any]) -> Any:
         if self.rehearsal or not self.writes_enabled:
             raise LiveSafetyError('writes are disabled; refusing to call a write tool')
-        # Only invoked AFTER durable intent/cancel reservation and final entry kill check.
+        if name not in {'place_option_order', 'cancel_option_order'}:
+            raise LiveSafetyError('unsupported brokerage write tool')
+        if payload.get('account_number') != self.account_number:
+            raise LiveSafetyError('broker write does not target pinned account')
+        if name == 'place_option_order':
+            legs = payload.get('legs')
+            if not isinstance(legs, list) or len(legs) != 1:
+                raise LiveSafetyError('only single-leg orders permitted')
+            leg = legs[0]
+            if not isinstance(leg, Mapping):
+                raise LiveSafetyError('option leg malformed')
+            if leg.get('side') == 'buy' and leg.get('position_effect') == 'open':
+                # Check the kill switch again immediately before the MCP call.
+                # If paused after the journal write marker, leave UNKNOWN
+                # conservatively rather than attempting a duplicate later.
+                self._check_write(entry=True)
+            elif leg.get('side') != 'sell' or leg.get('position_effect') != 'close':
+                raise LiveSafetyError('only long opens and owned closes permitted')
         return await asyncio.wait_for(self.client.call_tool(name, payload),
                                       timeout=self.timeout_seconds)
 

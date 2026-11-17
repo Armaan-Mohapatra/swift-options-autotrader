@@ -184,11 +184,26 @@ def test_cli_one_liners_pause_and_check_the_kill_switch(tmp_path, monkeypatch, c
     assert json.loads(capsys.readouterr().out)['entries'] == 'ALLOWED'
     assert main(['entries-pause']) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out['entries'] == 'BLOCKED' and out['mode'] == 'PAPER'
+    assert out['entries'] == 'BLOCKED' and out['mode'] == 'CONTROL_ONLY'
     assert main(['entries-status']) == 0
     assert json.loads(capsys.readouterr().out)['paused'] is True
     assert main(['entries-resume']) == 0
     assert json.loads(capsys.readouterr().out)['entries'] == 'ALLOWED'
+
+
+def test_emergency_pause_stays_available_with_malformed_live_environment(
+        tmp_path, monkeypatch, capsys):
+    db = tmp_path / 'swift.sqlite3'
+    apply_migrations(db)
+    monkeypatch.setenv('DB_PATH', str(db))
+    monkeypatch.setenv('PAPER_ONLY', 'definitely-not-a-bool')
+    monkeypatch.setenv('LIVE_ENABLED', 'broken')
+    monkeypatch.setenv('BROKER_BACKEND', 'unknown')
+    assert main(['entries-pause']) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['entries'] == 'BLOCKED'
+    assert result['mode'] == 'CONTROL_ONLY'
+    assert engine_kill_switch(db)() is True
 
 
 def test_cli_live_journal_init_never_overwrites(tmp_path, monkeypatch, capsys):
