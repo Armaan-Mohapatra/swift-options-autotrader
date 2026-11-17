@@ -62,7 +62,6 @@ def test_live_configuration_validation_success(tmp_path: Path) -> None:
         "TELEGRAM_SESSION_PATH": str(session.resolve()),
         "MAX_DAILY_LOSS_USD": "750",
         "MAX_CONCURRENT_POSITIONS": "4",
-        "SLIPPAGE_TOLERANCE_PCT": "12",
         "KILL_SWITCH_ENABLED": "true",
     }
     settings = Settings.from_env(env)
@@ -71,7 +70,7 @@ def test_live_configuration_validation_success(tmp_path: Path) -> None:
     assert settings.robinhood_mcp_account == "RH_ACC_123456"
     assert settings.max_daily_loss_usd == Decimal("750")
     assert settings.max_concurrent_positions == 4
-    assert settings.slippage_tolerance_pct == Decimal("12")
+    assert settings.public_summary()["entry_price_policy"] == "EXACT_ALERT_LIMIT"
     summary = settings.public_summary()
     assert summary["mode"] == "LIVE"
     assert "robinhood_mcp_account" not in summary
@@ -108,10 +107,12 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="MAX_DAILY_LOSS_USD cannot exceed"):
         Settings.from_env(env)
 
-    # Negative slippage
-    env = dict(base_env, SLIPPAGE_TOLERANCE_PCT="-5")
-    with pytest.raises(ConfigurationError, match="SLIPPAGE_TOLERANCE_PCT"):
-        Settings.from_env(env)
+    # Any price-chasing allowance is refused; an explicit zero is tolerated.
+    for value in ("-5", "10", "0.01", "NaN"):
+        env = dict(base_env, SLIPPAGE_TOLERANCE_PCT=value)
+        with pytest.raises(ConfigurationError):
+            Settings.from_env(env)
+    assert Settings.from_env(dict(base_env, SLIPPAGE_TOLERANCE_PCT="0")).is_live
 
     # Mobile bot is optional; this validates settings only, not execution permission.
     env = dict(base_env, KILL_SWITCH_ENABLED="false")

@@ -29,7 +29,6 @@ from swift_autotrader.database.repository import TelegramStore
 from swift_autotrader.live_dispatch import LiveDispatcher, LiveDispatchResult
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.risk import PaperPreflight, Preflight, RiskCeilings, rejection_reason
-from swift_autotrader.orders.slippage import SlippageExceededError, resolve_live_entry_limit
 from swift_autotrader.paper_dispatch import MarketEvidenceUnavailable, MarketSnapshot, VerifiedQuote
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMessage
@@ -150,7 +149,7 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
                F4 (Intelligent Slippage Resolution), F5 (Live Market Dispatcher).
     Flow:
     1. Swift alert: 'SPY 680C 11/20 @ 1.20'
-    2. NBBO Ask at $1.22 (within 10% tolerance, slippage resolved to $1.22)
+    2. NBBO Ask at $1.22; the entry limit stays the exact $1.20 alert premium
     3. LiveDispatcher places BUY_TO_OPEN via RobinhoodLiveBroker to StatefulFakeMCP
     4. MCP order filled at $1.20
     5. Exit alert arrives: 'SPY SOLD HALF'
@@ -182,7 +181,6 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
         telegram_channel_id=CHANNEL_ID,
         telegram_api_id=12345,
         telegram_api_hash="a" * 32,
@@ -201,15 +199,6 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
 
     # 1. Swift alert arrives
     ingest_scenario_message(store, clock, "SPY 680C 11/20 @ 1.20", msg_id=101)
-
-    # 2. Slippage resolution check: Alert 1.20, Ask 1.22 -> within 10% ($1.32 ceiling)
-    resolved_limit = resolve_live_entry_limit(
-        alert_limit=Decimal("1.20"),
-        current_ask=Decimal("1.22"),
-        tick=Decimal("0.01"),
-        max_slippage_pct=Decimal("10"),
-    )
-    assert resolved_limit == Decimal("1.22")
 
     # 3. First dispatch cycle: Ingest alert and place BUY order
     result = asyncio.run(dispatcher.run_once())
@@ -324,7 +313,6 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
         telegram_channel_id=CHANNEL_ID,
         telegram_api_id=12345,
         telegram_api_hash="a" * 32,
@@ -341,45 +329,23 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
         clock=clock,
     )
 
-    # 1. Mathematical boundary check: verify standalone slippage calculation rejects
-    with pytest.raises(SlippageExceededError, match="exceeds max allowed"):
-        resolve_live_entry_limit(
-            alert_limit=Decimal("2.00"),
-            current_ask=Decimal("2.35"),
-            tick=Decimal("0.01"),
-            max_slippage_pct=Decimal("10"),
-        )
-
-    # 2. Ingest Telegram message
+    # 1. Ingest Telegram message
     ingest_scenario_message(store, clock, "QQQ 520C 11/20 @ 2.00", msg_id=201)
 
-    # 3. LiveDispatcher execution cycle
+    # 2. The gap-up never raises the bid: the exact alert premium rests at the broker
     result = asyncio.run(dispatcher.run_once())
     assert result.status == "LIVE_CYCLE_COMPLETED"
     assert result.parsed_events == 1
-    assert result.entry_orders_submitted == 0  # Genuinely blocked by live dispatcher
+    assert result.entry_orders_submitted == 1
     assert result.close_orders_submitted == 0
+    assert len(mcp.orders) == 1
+    assert list(mcp.orders.values())[0]["price"] == "2.00"
 
-    # 4. Zero orders submitted to broker; capital untouched
-    assert len(mcp.orders) == 0
-    assert mcp.buying_power == Decimal("10000.00")
-
-    # 5. Durable audit logging in SQLite verified
+    # 3. Durable audit shows an exact-limit intent and no chase or price alert
     import sqlite3
     with sqlite3.connect(str(db_path)) as db:
-        decisions = db.execute("SELECT outcome, reason FROM paper_engine_decisions").fetchall()
-        assert len(decisions) == 1
-        assert decisions[0][0] == "BLOCKED"
-        assert decisions[0][1] == "SLIPPAGE_EXCEEDED"
-
-        alerts = db.execute("SELECT code, resolved FROM paper_engine_alerts").fetchall()
-        assert len(alerts) == 1
-        assert alerts[0][0] == "SLIPPAGE_EXCEEDED"
-
-    # 6. Local notification center surfaces failure
-    dispatcher.notifications.scan()
-    pending = dispatcher.notifications.pending(10)
-    assert any(n.code == "SLIPPAGE_EXCEEDED" and n.category == "PAPER_ORDER" for n in pending)
+        assert db.execute("SELECT limit_price FROM order_intents").fetchall() == [("2.00",)]
+        assert db.execute("SELECT count(*) FROM paper_engine_alerts").fetchone()[0] == 0
 
 
 def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
@@ -418,7 +384,6 @@ def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
         telegram_channel_id=CHANNEL_ID,
         telegram_api_id=12345,
         telegram_api_hash="a" * 32,
@@ -726,7 +691,6 @@ def test_scenario_7_concurrent_rapid_signals_position_cap_saturation(tmp_path: P
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
         max_concurrent_positions=2,  # Position cap is 2
-        slippage_tolerance_pct=Decimal("10"),
         telegram_channel_id=CHANNEL_ID,
         telegram_api_id=12345,
         telegram_api_hash="a" * 32,

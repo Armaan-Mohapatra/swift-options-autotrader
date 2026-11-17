@@ -3,7 +3,7 @@
 Coordinates the end-to-end pipeline:
 1. Ingests Telegram signals from the local SQLite store.
 2. Resolves option contracts, expirations, and live quotes from Robinhood.
-3. Applies slippage-tolerant limit pricing within configured bounds.
+3. Keeps the exact original alert premium as the entry limit (no price chasing).
 4. Checks all risk and safety gates (buying power, concurrent positions, daily loss cap).
 5. Submits buy-to-open and sell-to-close orders through Robinhood Agentic MCP.
 6. Reconciles broker order states, fills, and cancellations.
@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from time import monotonic
+from typing import Any
 
 from swift_autotrader.broker.base import BrokerOrderState
 from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
@@ -34,7 +35,6 @@ from swift_autotrader.orders.acceptance_scope import AcceptanceScope
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.exit_policy import ExitQuote
 from swift_autotrader.orders.risk import Preflight, RiskCeilings
-from swift_autotrader.orders.slippage import resolve_live_entry_limit, SlippageExceededError
 from swift_autotrader.paper_dispatch import (
     MarketEvidenceUnavailable,
     MarketSnapshot,
@@ -108,7 +108,6 @@ class LiveDispatcher:
             entry_max_age_seconds=settings.telegram_max_live_age_seconds,
             max_daily_loss_usd=settings.max_daily_loss_usd,
             max_concurrent_positions=settings.max_concurrent_positions,
-            slippage_tolerance_pct=settings.slippage_tolerance_pct,
         )
 
         # Build live broker adapter

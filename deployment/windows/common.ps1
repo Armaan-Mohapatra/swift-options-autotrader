@@ -222,7 +222,8 @@ function Set-SwiftEnvironment {
         $env:MAX_CONTRACTS_PER_SIGNAL = if ($cfg.max_contracts_per_signal) { [string]$cfg.max_contracts_per_signal } else { '1' }
         $env:MAX_DAILY_LOSS_USD = if ($cfg.max_daily_loss_usd) { [string]$cfg.max_daily_loss_usd } else { '750' }
         $env:MAX_CONCURRENT_POSITIONS = if ($cfg.max_concurrent_positions) { [string]$cfg.max_concurrent_positions } else { '3' }
-        $env:SLIPPAGE_TOLERANCE_PCT = if ($cfg.slippage_tolerance_pct) { [string]$cfg.slippage_tolerance_pct } else { '10' }
+        # Entries always use the exact alert limit; a slippage allowance is rejected by the app.
+        Remove-Item Env:SLIPPAGE_TOLERANCE_PCT -ErrorAction SilentlyContinue
         $env:MAX_PREMIUM_PER_SIGNAL_USD = if ($cfg.max_premium_per_signal_usd) { [string]$cfg.max_premium_per_signal_usd } else { '0' }
         $env:ENTRY_TIMEOUT_SECONDS = '3600'
         $env:LOG_LEVEL = if ($cfg.log_level) { [string]$cfg.log_level } else { 'INFO' }

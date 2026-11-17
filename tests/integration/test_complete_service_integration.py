@@ -92,7 +92,6 @@ def managed_live_env(tmp_path: Path):
         managed_install_root=root,
         max_daily_loss_usd=Decimal("750"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
     )
     return root, settings, paper_db, live_db
 

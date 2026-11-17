@@ -65,7 +65,6 @@ def live_settings(live_db: Path, tmp_path: Path) -> Settings:
         db_path=live_db,
         max_daily_loss_usd=Decimal("500"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
         kill_switch_enabled=True,
         kill_switch_telegram_bot_token="test_bot_token_secret",
         kill_switch_telegram_chat_id=123456789,

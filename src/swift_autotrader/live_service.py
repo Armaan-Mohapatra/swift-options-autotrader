@@ -2,7 +2,7 @@
 
 Connects to Robinhood Agentic MCP under explicit owner authorization.
 Ingests authentic signals from the designated Telegram channel, validates
-options eligibility, slippage ceiling, buying power, and risk limits, and
+options eligibility, exact-limit pricing, buying power, and risk limits, and
 submits live buy/sell orders with durable reconciliation.
 """
 from __future__ import annotations

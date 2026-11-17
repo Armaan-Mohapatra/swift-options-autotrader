@@ -10,6 +10,21 @@ from typing import Protocol
 from swift_autotrader.signals.identity import OptionContract
 
 
+def reject_price_chasing(env: Mapping[str, str]) -> None:
+    """Entries use the exact alert premium; a slippage allowance is not configurable."""
+    raw = env.get("SLIPPAGE_TOLERANCE_PCT", "").strip()
+    if not raw:
+        return
+    try:
+        value = Decimal(raw)
+    except ArithmeticError as exc:
+        raise ValueError("invalid paper risk environment") from exc
+    if not value.is_finite() or value != 0:
+        raise ValueError(
+            "SLIPPAGE_TOLERANCE_PCT is unsupported: entries use the exact alert limit"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class RiskCeilings:
     contracts_per_signal: int = 1
@@ -19,12 +34,12 @@ class RiskCeilings:
     entry_max_age_seconds: int = 120
     max_daily_loss_usd: Decimal = Decimal("750")
     max_concurrent_positions: int = 3
-    slippage_tolerance_pct: Decimal = Decimal("10")
 
     @classmethod
     def from_environment(cls, values: Mapping[str, str] | None = None) -> RiskCeilings:
         """Strict optional risk environment values; zero-dollar default blocks buys."""
         env = os.environ if values is None else values
+        reject_price_chasing(env)
         try:
             return cls(
                 contracts_per_signal=int(env.get("MAX_CONTRACTS_PER_SIGNAL", "1")),
@@ -34,7 +49,6 @@ class RiskCeilings:
                 entry_max_age_seconds=int(env.get("PAPER_ENTRY_MAX_AGE_SECONDS", "120")),
                 max_daily_loss_usd=Decimal(env.get("MAX_DAILY_LOSS_USD", "750")),
                 max_concurrent_positions=int(env.get("MAX_CONCURRENT_POSITIONS", "3")),
-                slippage_tolerance_pct=Decimal(env.get("SLIPPAGE_TOLERANCE_PCT", "10")),
             )
         except (ValueError, ArithmeticError) as exc:
             raise ValueError("invalid paper risk environment") from exc
@@ -48,8 +62,6 @@ class RiskCeilings:
             raise ValueError("invalid entry freshness ceiling")
         if not 1 <= self.max_concurrent_positions <= 50:
             raise ValueError("invalid max concurrent positions ceiling")
-        if not Decimal("0") <= self.slippage_tolerance_pct <= Decimal("50"):
-            raise ValueError("invalid slippage tolerance ceiling")
         if any(not x.is_finite() or x < 0 for x in (
             self.premium_per_signal_usd, self.total_exposure_usd, self.max_daily_loss_usd,
         )):

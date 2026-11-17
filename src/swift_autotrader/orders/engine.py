@@ -24,7 +24,6 @@ from swift_autotrader.orders.exit_policy import ExitPolicy, ExitQuote
 from swift_autotrader.orders.exposure_state import unresolved_exit_signal_ids
 from swift_autotrader.orders.policy import deadline_from_acceptance
 from swift_autotrader.orders.risk import PreflightProvider, RiskCeilings, rejection_reason
-from swift_autotrader.orders.slippage import SlippageExceededError, resolve_live_entry_limit
 from swift_autotrader.orders.state_machine import (
     ACTIVE,
     TERMINAL,
@@ -746,26 +745,12 @@ class PaperOrderEngine:
         price = Decimal(signal["original_limit"])
         preflight = self.preflight.check(contract)
 
-        if entry_quotes and contract in entry_quotes:
-            entry_quote = entry_quotes[contract]
-            tick = (
-                preflight.premium_tick
-                if (preflight.premium_tick and preflight.premium_tick > 0)
-                else Decimal("0.01")
-            )
-            try:
-                price = resolve_live_entry_limit(
-                    alert_limit=price,
-                    current_ask=entry_quote.ask,
-                    tick=tick,
-                    max_slippage_pct=self.limits.slippage_tolerance_pct,
-                )
-            except SlippageExceededError:
-                self._block(sid, "SLIPPAGE_EXCEEDED", now)
-                return False
-            except (ValueError, ArithmeticError):
-                self._block(sid, "INVALID_ENTRY_QUOTE", now)
-                return False
+        # Immutable owner rule: the entry limit is the exact original alert
+        # premium. Quotes are market evidence only and never move, chase or
+        # tick-round the price; an off-grid premium is rejected by the risk
+        # gate (INVALID_PREMIUM_TICK), and an unmarketable limit simply rests
+        # until the acceptance + 3,600 second cancellation.
+        del entry_quotes
 
         quantity = self.limits.contracts_per_signal
         outstanding, count = self._outstanding_risk()

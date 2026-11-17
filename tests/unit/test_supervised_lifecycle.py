@@ -106,7 +106,6 @@ def managed_live_env(tmp_path: Path):
         managed_install_root=root,
         max_daily_loss_usd=Decimal("750"),
         max_concurrent_positions=3,
-        slippage_tolerance_pct=Decimal("10"),
     )
     return root, settings, paper_db, live_db
 
@@ -771,7 +770,7 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
         "direction": "buy",
         "quantity": "1",
         "filled_quantity": "0",
-        "price": "1.22",
+        "price": "1.20",
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
         "accepted_at": now.isoformat(),

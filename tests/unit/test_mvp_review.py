@@ -2,21 +2,9 @@ from decimal import Decimal as D
 import json
 import pytest
 from swift_autotrader.app import main
-from swift_autotrader.orders.slippage import resolve_live_entry_limit, SlippageExceededError
 from tests.unit.test_live_risk import CONTRACT, make_ceilings, make_preflight
 from swift_autotrader.orders.risk import rejection_reason
 from tests.unit.test_supervisor import make_supervisor
-
-@pytest.mark.parametrize('index,value',[(0,'NaN'),(1,'Infinity'),(2,'0'),(3,'NaN'),(3,'Infinity')])
-def test_invalid_slippage_values(index,value):
-    args=list(map(D,['1.20','1.15','0.05','10']));args[index]=D(value)
-    with pytest.raises(ValueError):resolve_live_entry_limit(*args)
-
-def test_tick_grid_below_alert():
-    assert resolve_live_entry_limit(D('1.22'),D('1.20'),D('0.05'))==D('1.25')
-
-def test_no_valid_positive_tick():
-    with pytest.raises(SlippageExceededError):resolve_live_entry_limit(D('.01'),D('.01'),D('.05'))
 
 @pytest.mark.parametrize('limit,qty',[(D('NaN'),1),(D('0'),1),(D('1'),0),(D('1'),True),(D('-1'),1)])
 def test_invalid_candidate_order(limit,qty):
