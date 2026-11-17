@@ -43,8 +43,16 @@ Each result is `WOULD_SEND` (with the exact `place_option_order` arguments, acco
 to its last four digits) or `DENIED` (with the reason). One JSON line per result goes to
 `<install>\logs\live_rehearsal.jsonl`. Three independent guards stop a write: the client
 wrapper only allows known read tools, the broker is built with `rehearsal=True`, and
-`_call_write` refuses. A denial that mentions a position, realized P/L or order field is a
-response-shape mismatch to fix before going live.
+`_call_write` refuses. Rehearsal first requires a real original ENTRY parser decision, an eligible Telegram
+source revision and a source-sent timestamp no more than 120 seconds old. Stale
+historical alerts are `DENIED: STALE_ENTRY_NO_REPLAY` and are never represented as
+live-ready opportunities. Missing source lineage is also denied. To assess the
+actual end-to-end path, run rehearsal against a genuinely fresh authorized alert;
+this remains broker-write-disabled.
+
+A denial that mentions a position, realized P/L or order field may signal a
+response-shape mismatch to fix before going live. It may also be a legitimate
+insufficient-buying-power, loss-limit, kill-switch or market-state denial.
 
 ## Deploy this branch to the installed Swift copy (stays PAPER)
 
@@ -124,6 +132,14 @@ not only the earlier local reservation time. The live dispatcher polls realized
 and unrealized P/L on each cycle, even with no new signals, and blocks new
 entries whenever the risk snapshot cannot be trusted. Exits and cancellations
 remain available. All these behaviors require local integration validation.
+
+## Live dashboard evidence boundary
+
+The local dashboard never claims to show authoritative Robinhood P/L. When
+`LIVE` is configured, it labels the mode as `LIVE CONFIGURED · BROKER P/L
+UNVERIFIED` and suppresses simulated P/L cards. The local journal and source
+metadata can help troubleshooting, but they do not replace read-only broker
+positions, confirmed executions, buying power, or the daily-loss guard.
 
 ## Backup and recovery boundary
 

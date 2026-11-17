@@ -193,6 +193,45 @@ def recorded_entry_intents(control_db: Path, *, limit: int = 50) -> list[OrderIn
     return out
 
 
+def _rehearsal_source_denial(control_db: Path, signal_id: str,
+                             now: datetime) -> str | None:
+    """Validate real source provenance/freshness before saying WOULD_SEND.
+
+    A stored historical ENTRY is not a fresh copy-trade instruction. The
+    original Telegram revision (rather than parser-created signal time) owns
+    the source timestamp and eligibility. Missing lineage fails closed.
+    """
+    with closing(sqlite3.connect(f'{Path(control_db).resolve().as_uri()}?mode=ro', uri=True,
+                                 timeout=5)) as db:
+        row = db.execute(
+            'SELECT r.telegram_sent_at_utc,r.eligible_for_future_processing,'
+            'p.intent,p.status,p.reason FROM signal_metadata m '
+            'JOIN telegram_message_revisions r ON r.revision_id=m.first_revision_id '
+            'JOIN signal_parser_decisions p ON p.revision_id=m.first_revision_id '
+            'WHERE m.signal_id=?', (signal_id,),
+        ).fetchone()
+        closed = db.execute('SELECT 1 FROM signal_close_requests WHERE signal_id=?',
+                            (signal_id,)).fetchone()
+    if row is None:
+        return 'SOURCE_LINEAGE_UNVERIFIED'
+    sent, eligible, intent, status, reason = row
+    if (intent != 'ENTRY' or status != 'RECORDED'
+            or reason != 'ENTRY_VALIDATED_NOT_EXECUTED' or not eligible):
+        return 'SOURCE_ENTRY_NOT_ELIGIBLE'
+    if closed:
+        return 'SOURCE_ALREADY_HAS_CLOSE_REQUEST'
+    try:
+        timestamp = datetime.fromisoformat(str(sent).replace('Z', '+00:00'))
+        if timestamp.tzinfo is None or now.tzinfo is None:
+            return 'SOURCE_TIMESTAMP_UNVERIFIED'
+        age = (now.astimezone(UTC) - timestamp.astimezone(UTC)).total_seconds()
+    except (ValueError, TypeError, OverflowError):
+        return 'SOURCE_TIMESTAMP_UNVERIFIED'
+    if not 0 <= age <= 120:
+        return 'STALE_ENTRY_NO_REPLAY'
+    return None
+
+
 def rehearse_entries(broker: LiveBroker, control_db: Path, *, limit: int = 50,
                      log_path: Path | None = None) -> list[dict[str, Any]]:
     """Run the full entry preflight for every recorded ENTRY signal; write nothing live.
@@ -208,7 +247,13 @@ def rehearse_entries(broker: LiveBroker, control_db: Path, *, limit: int = 50,
             result: dict[str, Any] = {'logical_order_id': f'{item}:entry', 'status': 'DENIED',
                                       'reason': 'signal row malformed'}
         else:
-            result = broker.rehearse(item)
+            denial = _rehearsal_source_denial(
+                control_db, item.logical_order_id.split(':', 1)[0], broker.clock())
+            if denial:
+                result = {'logical_order_id': item.logical_order_id,
+                          'status': 'DENIED', 'reason': denial}
+            else:
+                result = broker.rehearse(item)
         result['at_utc'] = datetime.now(UTC).isoformat()
         results.append(result)
     if log_path is not None:

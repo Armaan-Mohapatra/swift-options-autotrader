@@ -34,17 +34,33 @@ WRITE_TOOLS = {'place_option_order', 'cancel_option_order'}
 
 
 def add_signal(db: Path, sid: str, *, intent: str = 'ENTRY', expiry: str = '2027-02-19',
-               limit: str = '2.00', rev: int = 1) -> None:
+               limit: str = '2.00', rev: int = 1,
+               sent_at: str = '2026-11-17T16:59:40Z') -> None:
     with sqlite3.connect(db) as con:
+        con.execute('INSERT INTO raw_events(channel_id,telegram_message_id,edit_version,'
+                    'received_at_utc,sent_at_utc,body) VALUES(?,?,0,?,?,?)',
+                    ('c', str(rev), sent_at, sent_at, 'SYNTHETIC OPTIONS ALERT'))
+        raw_id = con.execute('SELECT last_insert_rowid()').fetchone()[0]
+        con.execute('INSERT INTO telegram_message_revisions('
+                    'raw_event_id,channel_id,message_id,revision,event_kind,origin,'
+                    'telegram_sent_at_utc,received_at_utc,content_sha256,'
+                    'eligible_for_future_processing) '
+                    "VALUES(?,?,?,0,'new','live',?,?,?,1)",
+                    (raw_id, 'c', rev, sent_at, sent_at, f'hash-{rev}'))
+        source_rev = con.execute('SELECT last_insert_rowid()').fetchone()[0]
         con.execute("INSERT OR IGNORE INTO option_signals(signal_id,underlying,option_right,"
                     "strike,expiration_date,original_limit,created_at_utc) "
                     "VALUES(?,?,?,?,?,?,'2026-11-17T16:00:00Z')",
                     (sid, 'AAPL', 'CALL', '150', expiry, limit))
+        con.execute('INSERT INTO signal_metadata(signal_id,channel_id,source_message_id,'
+                    'category,first_revision_id) VALUES(?,?,?,?,?)',
+                    (sid, 'c', rev, 'STANDARD', source_rev))
         con.execute("INSERT INTO signal_parser_decisions(revision_id,channel_id,message_id,"
-                    "intent,status,signal_id,processed_at_utc) "
-                    "VALUES(?,?,?,?,'RECORDED',?,'2026-11-17T16:00:01Z')",
-                    (rev, 'c', rev, intent, sid))
-
+                    "intent,status,reason,signal_id,processed_at_utc) "
+                    "VALUES(?,?,?,?,'RECORDED',?,?,'2026-11-17T16:00:01Z')",
+                    (source_rev, 'c', rev, intent,
+                     'ENTRY_VALIDATED_NOT_EXECUTED' if intent == 'ENTRY' else
+                     'METADATA_ONLY', sid))
 
 @pytest.fixture
 def rig(tmp_path):
@@ -116,6 +132,27 @@ def test_rehearsal_denies_an_expired_contract_and_a_malformed_row(rig):
     results = {r['logical_order_id']: r for r in rehearse_entries(broker, db)}
     assert results['sig-old:entry']['status'] == 'DENIED'
     assert results['sig-bad:entry']['status'] == 'DENIED'
+
+
+def test_rehearsal_never_calls_broker_for_stale_source_alert(rig):
+    db, journal, broker, fake = rig
+    add_signal(db, 'sig-stale', sent_at='2026-11-17T14:00:00Z')
+    (result,) = rehearse_entries(broker, db)
+    assert result['status'] == 'DENIED'
+    assert result['reason'] == 'STALE_ENTRY_NO_REPLAY'
+    assert not fake.call_log
+    assert journal_rows(journal) == (0, 0)
+
+
+def test_rehearsal_denies_missing_source_lineage(rig):
+    db, _, broker, fake = rig
+    add_signal(db, 'sig-entry')
+    with sqlite3.connect(db) as con:
+        con.execute('DELETE FROM signal_metadata WHERE signal_id=?', ('sig-entry',))
+    (result,) = rehearse_entries(broker, db)
+    assert result['status'] == 'DENIED'
+    assert result['reason'] == 'SOURCE_LINEAGE_UNVERIFIED'
+    assert not fake.call_log
 
 
 def test_read_only_client_refuses_write_and_unknown_tools(rig):
