@@ -46,6 +46,7 @@ This guard blocks missing protected commits/modules. Its output PASS_LINEAGE_ONL
 - get_portfolio exposes buying_power as a nested object, not just a primitive amount.
 - PR #34's RobinhoodMCPBroker.orders has a hard 10-page cap. Its LiveBroker._today_activity calls orders(limit_pages=10) without a date filter. For sufficiently deep order history, this fails closed and may prevent unattended entries. Do NOT simply filter by today's ORDER CREATION time: an older order could fill today. Require a complete coverage proof based on EXECUTION timestamps and adversarial tests spanning >10 pages and overnight orders. No guessed P&L.
 - These definitions come from the connected tool interface; actual broker response bodies, local OAuth and billing/permission behavior have NOT been verified.
+- The connected place_option_order workflow currently specifies broker pre-trade review and explicit user confirmation. DO NOT assume a separate unattended local MCP client is exempt. Verify the broker's supported authorization and automation policy directly; if every-order confirmation is required, unattended execution is BLOCKED, not a reason to bypass the requirement.
 
 ## Live activation boundary
 
