@@ -69,6 +69,20 @@ class LineageGuardTests(unittest.TestCase):
         self.assertIn("src/swift_autotrader/orders/acceptance_scope.py",
                       result["missing_in_candidate"])
 
+    def test_historical_baseline_without_new_receipt_can_pass(self):
+        receipt = "src/swift_autotrader/orders/unattended_approval.py"
+        self.cmd("rm", receipt)
+        self.cmd("commit", "-qm", "historic installed release predating receipt")
+        historical = self.cmd("rev-parse", "HEAD").strip()
+        p = self.repo / receipt
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("# restored in integrated candidate\n", encoding="utf-8")
+        self.cmd("add", ".")
+        self.cmd("commit", "-qm", "add modern owner approval")
+        result = guard.audit(self.repo, historical, "HEAD")
+        self.assertEqual("PASS_LINEAGE_ONLY", result["status"])
+        self.assertEqual([], result["missing_in_baseline"])
+
     def test_ref_injection_and_unknown_ref_deny(self):
         for invalid in ("--exec=rm", "missing-branch", "\nnot_a_ref"):
             with self.subTest(invalid=invalid):
