@@ -236,11 +236,17 @@ class LiveBroker:
                  clock: Callable[[], datetime] | None = None,
                  timeout_seconds: float = 15.0,
                  loop: _LoopThread | None = None,
-                 rehearsal: bool = False) -> None:
+                 rehearsal: bool = False,
+                 submission_guard: Callable[[OrderIntent], bool] | None = None,
+                 loss_limit: Decimal = DAILY_NET_LOSS_LIMIT_USD) -> None:
         if not account_number or not isinstance(account_number, str):
             raise ValueError('pin a specific dedicated MCP account number')
         if not 1 <= timeout_seconds <= 60:
             raise ValueError('invalid MCP timeout')
+        if (not isinstance(loss_limit, Decimal) or not loss_limit.is_finite()
+                or not 0 < loss_limit <= DAILY_NET_LOSS_LIMIT_USD):
+            raise ValueError('daily net loss limit outside the approved range')
+        self.loss_limit = loss_limit
         self.path = Path(db_path)
         self.client = client
         self.account_number = account_number
@@ -249,6 +255,9 @@ class LiveBroker:
         self.writes_enabled = writes_enabled and not rehearsal
         self.kill_switch = kill_switch or (lambda: True)  # default: killed
         self.signal_gate = signal_gate  # default: deny entries without signal lineage
+        # Extra write-boundary veto for BUY_TO_OPEN (e.g. the supervised acceptance scope).
+        # It can only refuse; exits and cancels are never blocked by it.
+        self.submission_guard = submission_guard
         self.clock = clock or (lambda: datetime.now(UTC))
         self.timeout_seconds = timeout_seconds
         self.reader = RobinhoodMCPBroker(client, timeout_seconds=timeout_seconds)
@@ -430,7 +439,7 @@ class LiveBroker:
 
     def _check_loss_latch(self, net_pnl: Decimal, *, persist: bool = True) -> None:
         session = self._session_date()
-        breached = net_pnl <= -DAILY_NET_LOSS_LIMIT_USD
+        breached = net_pnl <= -self.loss_limit
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             if breached and persist:
@@ -993,6 +1002,8 @@ class LiveBroker:
             payload = self.reader.future_order_payload(account, instrument, intent)
             self._check_write(entry=intent.side is OrderSide.BUY_TO_OPEN)
             if intent.side is OrderSide.BUY_TO_OPEN:
+                if self.submission_guard is not None and not self.submission_guard(intent):
+                    raise LiveSafetyError('submission guard refused this entry')
                 buying_power = await self._portfolio()
                 self._check_loss_latch(await self._daily_pnl(account))
                 if buying_power < intent.limit_price * Decimal(instrument.multiplier):

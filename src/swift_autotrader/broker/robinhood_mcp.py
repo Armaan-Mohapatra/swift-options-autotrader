@@ -12,7 +12,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid5
@@ -269,18 +268,14 @@ class RobinhoodMCPBroker:
     def __init__(
         self, client: MCPAsyncClient | None = None, *, timeout_seconds: float = 15.0,
         approved_account_number: str | None = None,
-        allow_live_writes: bool = False,
     ):
         if not 1 <= timeout_seconds <= 60:
             raise ValueError("MCP read timeout outside range")
         if approved_account_number is not None:
             _identifier(approved_account_number)
         self.approved_account_number = approved_account_number
-        # Optional final pre-placement authorization (intent) -> bool. Never an issuer.
-        self.submission_guard = None
         self.client = client
         self.timeout_seconds = timeout_seconds
-        self.allow_live_writes = allow_live_writes
         self._discovered: dict[str, dict[str, Any]] | None = None
 
     async def discover(self) -> ReadOnlyDiagnostic:
@@ -330,8 +325,8 @@ class RobinhoodMCPBroker:
         )
 
     async def _call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        if name in WRITE_TOOLS and not self.allow_live_writes:
-            raise BrokerWritesDisabledError("MCP write tools are forbidden unless allow_live_writes=True")
+        if name in WRITE_TOOLS:
+            raise BrokerWritesDisabledError("MCP write tools are forbidden on the read adapter")
         if name not in READ_TOOLS and name not in WRITE_TOOLS:
             raise MCPContractError(f"Unrecognized MCP tool: {name}")
         if (
@@ -569,52 +564,11 @@ class RobinhoodMCPBroker:
             raise MCPContractError("External-agent account required")
         return {"account_number": account.account_number, "order_id": _identifier(broker_order_id)}
 
-    async def place_order(
-        self, account: MCPAccount, instrument: MCPInstrument, intent: OrderIntent
-    ) -> dict[str, Any]:
-        """Submit a real option order to Robinhood via Agentic MCP."""
-        if not self.allow_live_writes:
-            raise BrokerWritesDisabledError("Live order placement is not authorized")
-        # A local write flag is not proof of provider permission. An absent,
-        # ambiguous, approval-required or warned review must not reach placement.
-        try:
-            review = await self.review_order(account, instrument, intent)
-        except (MCPContractError, MCPReadError) as exc:
-            # Only this read-only review boundary proves no placement was sent.
-            raise SubmissionNotAttemptedError("Provider review unusable") from exc
-        if not review.unblocked:
-            raise SubmissionNotAttemptedError("Provider review did not permit unattended submission")
-        payload = self.future_order_payload(account, instrument, intent)
-        # Final authorization boundary: re-validate AFTER instrument resolution,
-        # network latency and provider review, immediately before placement.
-        guard = self.submission_guard
-        if guard is not None:
-            try:
-                permitted = guard(intent)
-            except Exception as exc:
-                raise SubmissionNotAttemptedError("Submission authorization check failed") from exc
-            if permitted is not True:
-                raise SubmissionNotAttemptedError("Authorization no longer valid at submission boundary")
-        return await self._call("place_option_order", payload)
-
-    async def cancel_order_by_id(
-        self, account: MCPAccount, broker_order_id: str
-    ) -> dict[str, Any]:
-        """Cancel an open broker order on Robinhood via Agentic MCP."""
-        if not self.allow_live_writes:
-            raise BrokerWritesDisabledError("Live cancellation is not authorized")
-        payload = self.future_cancel_payload(account, broker_order_id)
-        return await self._call("cancel_option_order", payload)
-
     def submit_order(self, intent: OrderIntent) -> BrokerOrderStatus:
-        if not self.allow_live_writes:
-            raise BrokerWritesDisabledError("All real brokerage order submission is disabled")
-        raise NotImplementedError("Use RobinhoodLiveBroker or async place_order")
+        raise BrokerWritesDisabledError("This read adapter never writes; LiveBroker is the only writer")
 
     def cancel_order(self, logical_order_id: str) -> BrokerOrderStatus:
-        if not self.allow_live_writes:
-            raise BrokerWritesDisabledError("All real brokerage cancellation is disabled")
-        raise NotImplementedError("Use RobinhoodLiveBroker or async cancel_order_by_id")
+        raise BrokerWritesDisabledError("This read adapter never writes; LiveBroker is the only writer")
 
     def get_order(self, logical_order_id: str) -> BrokerOrderStatus:
         raise BrokerWritesDisabledError("Use read-only async reconciliation; no live engine")
@@ -808,209 +762,4 @@ class RobinhoodMCPBroker:
             available_buying_power_usd=available,
             premium_tick=known_tick or Decimal("0"), contract=contract,
         )
-
-
-class RobinhoodLiveBroker:
-    """Live broker adapter fulfilling the Broker protocol for real order execution.
-
-    Communicates with Robinhood Agentic MCP under explicit user authorization.
-    All orders are submitted with stable deterministic idempotency keys and
-    immediately reconciled against the broker.
-    """
-
-    def __init__(
-        self,
-        mcp_broker: RobinhoodMCPBroker,
-        account: MCPAccount,
-        loop: asyncio.AbstractEventLoop | None = None,
-        db_path: Path | None = None,
-    ):
-        if not mcp_broker.allow_live_writes:
-            raise BrokerWritesDisabledError("Live broker requires allow_live_writes=True")
-        if not account.eligible:
-            raise MCPContractError("Live broker requires an option-eligible agentic account")
-        self.mcp = mcp_broker
-        self.account = account
-        self.loop = loop
-        self.db_path = Path(db_path) if db_path else None
-        self._orders_by_id: dict[str, OrderIntent] = {}
-        self._broker_id_map: dict[str, str] = {}  # logical_order_id -> broker_order_id
-        self._last_status: dict[str, BrokerOrderStatus] = {}
-        self._resolved_instruments: dict[OptionContract, MCPInstrument] = {}
-        if self.db_path is not None:
-            if not self.db_path.is_file():
-                raise MCPContractError("Durable order journal is missing")
-            self._load_broker_id_map()
-
-    def _load_broker_id_map(self) -> None:
-        import sqlite3
-        from contextlib import closing
-        try:
-            with closing(sqlite3.connect(str(self.db_path))) as db:
-                for row in db.execute(
-                    "SELECT logical_order_id, broker_order_id FROM order_intents WHERE broker_order_id IS NOT NULL"
-                ).fetchall():
-                    if row[0] and row[1]:
-                        self._broker_id_map[str(row[0])] = str(row[1])
-        except Exception as exc:
-            raise MCPContractError("Unable to load durable broker order identities") from exc
-
-    def _persist_broker_id(self, logical_order_id: str, broker_order_id: str) -> None:
-        if self.db_path is None:
-            # Legacy in-memory test callers only: the managed service supplies a journal.
-            return
-        if not self.db_path.is_file():
-            raise MCPContractError("Durable order journal is missing")
-        import sqlite3
-        from contextlib import closing
-        try:
-            with closing(sqlite3.connect(str(self.db_path))) as db, db:
-                cursor = db.execute(
-                    "UPDATE order_intents SET broker_order_id=? WHERE logical_order_id=? AND (broker_order_id IS NULL OR broker_order_id=?)",
-                    (broker_order_id, logical_order_id, broker_order_id),
-                )
-                if cursor.rowcount != 1:
-                    raise MCPContractError("Durable order identity missing or conflicting")
-        except sqlite3.Error as exc:
-            raise MCPContractError("Unable to persist durable broker order identity") from exc
-
-    def _load_intent_from_db(self, logical_order_id: str) -> OrderIntent | None:
-        if not self.db_path or not self.db_path.is_file():
-            return None
-        import sqlite3
-        from contextlib import closing
-        try:
-            with closing(sqlite3.connect(str(self.db_path))) as db:
-                row = db.execute(
-                    "SELECT o.logical_order_id, o.idempotency_key, o.side, o.requested_quantity, o.limit_price, "
-                    "s.underlying, s.option_right, s.strike, s.expiration_date, o.broker_order_id "
-                    "FROM order_intents o JOIN option_signals s ON s.signal_id=o.signal_id "
-                    "WHERE o.logical_order_id=?",
-                    (logical_order_id,),
-                ).fetchone()
-                if row:
-                    from swift_autotrader.signals.identity import OptionRight
-                    contract = OptionContract(
-                        row[5], OptionRight(row[6]), Decimal(str(row[7])), date.fromisoformat(row[8])
-                    )
-                    if row[9]:
-                        self._broker_id_map[logical_order_id] = str(row[9])
-                    return OrderIntent(
-                        row[0], row[1], contract, OrderSide(row[2]), int(row[3]), Decimal(str(row[4]))
-                    )
-        except Exception as exc:
-            raise MCPContractError("Unable to reconstruct durable order intent") from exc
-        return None
-
-    def _run(self, coro):
-        if self.loop is not None and not self.loop.is_closed():
-            if self.loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-                return future.result(timeout=self.mcp.timeout_seconds + 5)
-            return self.loop.run_until_complete(coro)
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop is not None and loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(asyncio.run, coro).result(timeout=self.mcp.timeout_seconds + 5)
-        return asyncio.run(coro)
-
-    def resolve_instrument(self, contract: OptionContract) -> MCPInstrument:
-        if contract not in self._resolved_instruments:
-            inst = self._run(self.mcp.resolve_instrument(contract))
-            self._resolved_instruments[contract] = inst
-        return self._resolved_instruments[contract]
-
-    def submit_order(self, intent: OrderIntent) -> BrokerOrderStatus:
-        """Submit live order to Robinhood and return initial reconciled status."""
-        if not self.mcp.allow_live_writes:
-            raise BrokerWritesDisabledError("Live broker writes are disabled")
-        instrument = self.resolve_instrument(intent.contract)
-        self._orders_by_id[intent.logical_order_id] = intent
-
-        async def _submit():
-            response = await self.mcp.place_order(self.account, instrument, intent)
-            order_data = response.get("order") if isinstance(response, Mapping) else None
-            if order_data is None and isinstance(response, Mapping):
-                order_data = response.get("data", response)
-            if order_data is not None and isinstance(order_data, Mapping):
-                broker_id = order_data.get("id")
-                if broker_id and isinstance(broker_id, (str, int)):
-                    b_id = str(broker_id)
-                    self._broker_id_map[intent.logical_order_id] = b_id
-                    self._persist_broker_id(intent.logical_order_id, b_id)
-            # Reconcile immediately with broker
-            return await self.mcp.reconcile_order(
-                self.account, intent,
-                broker_order_id=self._broker_id_map.get(intent.logical_order_id),
-            )
-
-        status = self._run(_submit())
-        self._last_status[intent.logical_order_id] = status
-        return status
-
-    def get_order(self, logical_order_id: str) -> BrokerOrderStatus:
-        """Poll and reconcile status of an order by its logical order ID."""
-        intent = self._orders_by_id.get(logical_order_id)
-        if intent is None:
-            intent = self._load_intent_from_db(logical_order_id)
-            if intent is not None:
-                self._orders_by_id[logical_order_id] = intent
-        if intent is None:
-            return BrokerOrderStatus(logical_order_id, BrokerOrderState.UNKNOWN, 0, None)
-        broker_id = self._broker_id_map.get(logical_order_id)
-
-        async def _get():
-            nonlocal broker_id
-            if not broker_id:
-                rows = await self.mcp.orders(self.account, limit_pages=5)
-                expected_ref = self.mcp.future_order_payload(
-                    self.account, MCPInstrument("identity-only", intent.contract, True, None), intent,
-                )["ref_id"]
-                matches = [row for row in rows if row.get("ref_id") == expected_ref]
-                if len(matches) == 1 and matches[0].get("id"):
-                    broker_id = str(matches[0]["id"])
-                    status = self.mcp.normalize_order(matches[0], intent, expected_broker_order_id=broker_id)
-                    self._broker_id_map[logical_order_id] = broker_id
-                    self._persist_broker_id(logical_order_id, broker_id)
-                    return status
-            return await self.mcp.reconcile_order(
-                self.account, intent, broker_order_id=broker_id
-            )
-
-        status = self._run(_get())
-        self._last_status[logical_order_id] = status
-        return status
-
-    def cancel_order(self, logical_order_id: str) -> BrokerOrderStatus:
-        """Cancel an open order on Robinhood."""
-        if not self.mcp.allow_live_writes:
-            raise BrokerWritesDisabledError("Live broker writes are disabled")
-        intent = self._orders_by_id.get(logical_order_id)
-        if intent is None:
-            intent = self._load_intent_from_db(logical_order_id)
-            if intent is not None:
-                self._orders_by_id[logical_order_id] = intent
-        if intent is None:
-            return BrokerOrderStatus(logical_order_id, BrokerOrderState.UNKNOWN, 0, None)
-        broker_id = self._broker_id_map.get(logical_order_id)
-        if not broker_id:
-            # Need to find the broker ID by querying active orders
-            status = self.get_order(logical_order_id)
-            broker_id = self._broker_id_map.get(logical_order_id)
-            if not broker_id:
-                return status
-
-        async def _cancel():
-            await self.mcp.cancel_order_by_id(self.account, broker_id)
-            return await self.mcp.reconcile_order(
-                self.account, intent, broker_order_id=broker_id
-            )
-
-        status = self._run(_cancel())
-        self._last_status[logical_order_id] = status
-        return status
 

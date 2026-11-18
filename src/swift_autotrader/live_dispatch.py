@@ -4,7 +4,7 @@ Coordinates the end-to-end pipeline:
 1. Ingests Telegram signals from the local SQLite store.
 2. Resolves option contracts, expirations, and live quotes from Robinhood.
 3. Keeps the exact original alert premium as the entry limit (no price chasing).
-4. Checks all risk and safety gates (buying power, concurrent positions, daily loss cap).
+4. Checks all risk and safety gates (buying power, $999 premium, $750 net-loss latch).
 5. Submits buy-to-open and sell-to-close orders through Robinhood Agentic MCP.
 6. Reconciles broker order states, fills, and cancellations.
 """
@@ -19,13 +19,15 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
-from swift_autotrader.broker.robinhood_mcp import (
-    MCPAccount,
-    RobinhoodLiveBroker,
-    RobinhoodMCPBroker,
+from swift_autotrader.broker.live_broker import (
+    LiveBroker,
+    engine_kill_switch,
+    entry_signal_gate,
 )
+from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
+from swift_autotrader.broker.robinhood_mcp import MCPAccount, RobinhoodMCPBroker
 from swift_autotrader.config import Settings
+from swift_autotrader.live_runtime import BorrowedMCPLoop
 from swift_autotrader.notifications.alerts import NotificationCenter
 from swift_autotrader.orders.acceptance_scope import AcceptanceScope
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
@@ -71,12 +73,13 @@ class LiveDispatcher:
         target_message_id: int | None = None,
         acceptance_scope: AcceptanceScope | None = None,
     ):
-        if not mcp_broker.allow_live_writes:
-            raise PermissionError("LiveDispatcher requires mcp_broker.allow_live_writes=True")
-        # Explicit owner caps only; never substitute an implicit ceiling.
-        for cap in (settings.max_premium_per_signal_usd, settings.max_total_exposure_usd):
-            if not cap.is_finite() or cap <= 0:
-                raise PermissionError("Live dispatch requires explicit positive premium and exposure caps")
+        # The premium ceiling is an explicit owner decision. There is deliberately no
+        # trade-count or aggregate-exposure cap: buying power alone bounds exposure.
+        premium_cap = settings.max_premium_per_signal_usd
+        if not premium_cap.is_finite() or premium_cap <= 0:
+            raise PermissionError("Live dispatch requires an explicit positive premium ceiling")
+        if settings.live_journal_path is None:
+            raise PermissionError("Live dispatch requires the separate durable live journal")
         self.db_path = Path(db_path)
         self.channel_id = channel_id
         self.mcp = mcp_broker
@@ -101,14 +104,23 @@ class LiveDispatcher:
             contracts_per_signal=settings.max_contracts_per_signal,
             premium_per_signal_usd=settings.max_premium_per_signal_usd,
             total_exposure_usd=settings.max_total_exposure_usd,
-            open_signal_count=settings.max_concurrent_positions,
             entry_max_age_seconds=settings.telegram_max_live_age_seconds,
-            max_daily_loss_usd=settings.max_daily_loss_usd,
-            max_concurrent_positions=settings.max_concurrent_positions,
+            daily_net_loss_usd=settings.max_daily_loss_usd,
         )
 
-        # Build live broker adapter
-        self.live_broker = RobinhoodLiveBroker(self.mcp, self.account, loop=loop, db_path=self.db_path)
+        # ONE canonical live broker. It shares the service's authenticated MCP client (single
+        # OAuth session) and runs its coroutines on that client's own event loop.
+        try:
+            borrowed = BorrowedMCPLoop(asyncio.get_running_loop())
+        except RuntimeError:
+            borrowed = BorrowedMCPLoop(loop) if loop is not None else None
+        self.live_broker = LiveBroker(
+            settings.live_journal_path, self.mcp.client,
+            account_number=self.account.account_number, writes_enabled=True,
+            kill_switch=engine_kill_switch(self.db_path),
+            signal_gate=entry_signal_gate(self.db_path),
+            clock=self.clock, loop=borrowed, loss_limit=settings.max_daily_loss_usd,
+        )
 
         # Preflight store
         from swift_autotrader.orders.risk import PaperPreflight
@@ -126,7 +138,7 @@ class LiveDispatcher:
         )
         self.notifications = NotificationCenter(self.db_path)
         if self.acceptance_scope is not None:
-            self.live_broker.mcp.submission_guard = self._authorize_submission
+            self.live_broker.submission_guard = self._authorize_submission
 
     def _authorize_entry(self, db, signal, intent: OrderIntent, now: datetime) -> bool:
         # Called within the engine's BEGIN IMMEDIATE transaction. Enforce one
@@ -218,153 +230,155 @@ class LiveDispatcher:
         now = self.clock()
         log.info("Starting live dispatch cycle at %s", now.isoformat())
 
-        # Ensure live broker has event loop for threadsafe async bridging
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        self.live_broker.loop = loop
+        # 1. Watchdog: Cancel due unfilled orders off-thread
+        watchdog = await asyncio.to_thread(
+            self.engine.run_cycle,
+            allow_entries=False,
+            process_closes=False,
+        )
 
-        try:
-            # 1. Watchdog: Cancel due unfilled orders off-thread
-            watchdog = await asyncio.to_thread(
-                self.engine.run_cycle,
-                allow_entries=False,
-                process_closes=False,
-            )
+        # Broker-side housekeeping: 60-minute expiry backstop and broker-sourced
+        # realized-plus-unrealized P&L (latches the daily stop). Failure to read P&L is
+        # logged only; the write-boundary preflight independently denies entries without it.
+        await asyncio.to_thread(self._broker_housekeeping)
 
-            # Check durable acceptance state in database
-            import sqlite3
-            from contextlib import closing
-            with closing(sqlite3.connect(str(self.db_path))) as con:
-                row = con.execute("SELECT count(*) FROM order_intents WHERE side='BUY_TO_OPEN'").fetchone()
-                existing_buys = int(row[0]) if row else 0
+        # Check durable acceptance state in database
+        import sqlite3
+        from contextlib import closing
+        with closing(sqlite3.connect(str(self.db_path))) as con:
+            row = con.execute("SELECT count(*) FROM order_intents WHERE side='BUY_TO_OPEN'").fetchone()
+            existing_buys = int(row[0]) if row else 0
 
-            # 2. Get pending Telegram updates and active positions
-            matcher = SignalMatcher(self.db_path, self.channel_id)
-            pending_entries, pending_followups, active = self._get_pending_and_active(now)
+        # 2. Get pending Telegram updates and active positions
+        matcher = SignalMatcher(self.db_path, self.channel_id)
+        pending_entries, pending_followups, active = self._get_pending_and_active(now)
 
-            target_revision_ids: list[int] | None = None
-            if self.single_entry:
-                allow_entries = False
-                allowed_signal_ids: frozenset[str] | None = frozenset()
-                if existing_buys > 0:
-                    entries = []
-                elif pending_entries:
-                    target_rev_id, _mid, target_alert = pending_entries[0]
-                    entries = [target_alert]
-                    target_revision_ids = [target_rev_id]
-                else:
-                    entries = []
+        target_revision_ids: list[int] | None = None
+        if self.single_entry:
+            allow_entries = False
+            allowed_signal_ids: frozenset[str] | None = frozenset()
+            if existing_buys > 0:
+                entries = []
+            elif pending_entries:
+                target_rev_id, _mid, target_alert = pending_entries[0]
+                entries = [target_alert]
+                target_revision_ids = [target_rev_id]
             else:
-                allow_entries = True
-                allowed_signal_ids = None
-                entries = [p[2] for p in pending_entries]
+                entries = []
+        else:
+            allow_entries = True
+            allowed_signal_ids = None
+            entries = [p[2] for p in pending_entries]
 
-            # 3. Fetch live market data snapshot from Robinhood MCP
-            snapshot = None
-            if entries or active:
-                try:
-                    snapshot = await asyncio.wait_for(
-                        self.provider.snapshot(entries, active, now),
-                        timeout=15.0,
-                    )
-                    snapshot.validate(now, max_age_seconds=30)
-                except Exception as exc:
-                    log.warning("Market snapshot unavailable: %s", exc)
-                    self.notifications.record("APPLICATION", "MARKET_DATA_UNAVAILABLE", source_key="live-dispatch")
-                    realized_loss = await asyncio.to_thread(
-                        self.engine.cumulative_realized_daily_loss, now
-                    )
-                    return LiveDispatchResult(
-                        status="MARKET_DATA_UNAVAILABLE",
-                        parsed_events=0,
-                        entry_orders_submitted=0,
-                        close_orders_submitted=0,
-                        cancellations=watchdog.cancellation_requests,
-                        realized_daily_loss_usd=realized_loss,
-                        open_positions_count=len(active),
-                        unresolved_exit_count=await asyncio.to_thread(self.engine.unresolved_exit_count),
-                    )
+        # 3. Fetch live market data snapshot from Robinhood MCP
+        snapshot = None
+        if entries or active:
+            try:
+                snapshot = await asyncio.wait_for(
+                    self.provider.snapshot(entries, active, now),
+                    timeout=15.0,
+                )
+                snapshot.validate(now, max_age_seconds=30)
+            except Exception as exc:
+                log.warning("Market snapshot unavailable: %s", exc)
+                self.notifications.record("APPLICATION", "MARKET_DATA_UNAVAILABLE", source_key="live-dispatch")
+                realized_loss = await asyncio.to_thread(
+                    self.engine.cumulative_realized_daily_loss, now
+                )
+                return LiveDispatchResult(
+                    status="MARKET_DATA_UNAVAILABLE",
+                    parsed_events=0,
+                    entry_orders_submitted=0,
+                    close_orders_submitted=0,
+                    cancellations=watchdog.cancellation_requests,
+                    realized_daily_loss_usd=realized_loss,
+                    open_positions_count=len(active),
+                    unresolved_exit_count=await asyncio.to_thread(self.engine.unresolved_exit_count),
+                )
 
-            # 4. Process parser decisions for verified contracts
-            decisions = []
-            exit_quotes: dict[OptionContract, ExitQuote] = {}
-            if snapshot:
-                self.preflight.instruments.clear()
-                self.preflight.instruments.update(snapshot.instruments)
-                catalog = StaticInstrumentCatalog(snapshot.instruments.keys())
-                matcher.catalog = catalog
-                if self.single_entry:
-                    revisions_to_process = []
-                    if target_revision_ids:
-                        revisions_to_process.extend(target_revision_ids)
-                    if pending_followups:
-                        revisions_to_process.extend(pending_followups)
-                    if revisions_to_process:
-                        decisions = matcher.process_pending(limit=len(revisions_to_process), revision_ids=revisions_to_process)
-                else:
-                    decisions = matcher.process_pending(limit=200)
-
-                for contract, quote in snapshot.quotes.items():
-                    inst_check = snapshot.instruments.get(contract)
-                    if inst_check and inst_check.market_session_open:
-                        exit_quotes[contract] = ExitQuote(
-                            contract, quote.bid, inst_check.premium_tick, quote.observed_at_utc
-                        )
-
-            # 5. Run the live execution cycle off-thread
+        # 4. Process parser decisions for verified contracts
+        decisions = []
+        exit_quotes: dict[OptionContract, ExitQuote] = {}
+        if snapshot:
+            self.preflight.instruments.clear()
+            self.preflight.instruments.update(snapshot.instruments)
+            catalog = StaticInstrumentCatalog(snapshot.instruments.keys())
+            matcher.catalog = catalog
             if self.single_entry:
-                valid_sids = []
-                if decisions and existing_buys == 0:
-                    for d in decisions:
-                        if d.intent == "ENTRY" and d.signal_id and d.status == "RECORDED":
-                            with closing(sqlite3.connect(str(self.db_path))) as con:
-                                sig = con.execute(
-                                    "SELECT underlying FROM option_signals WHERE signal_id=?",
-                                    (d.signal_id,),
-                                ).fetchone()
-                            if sig:
-                                if self.authorized_symbol is not None and sig[0].upper() != self.authorized_symbol:
-                                    log.warning(
-                                        "Signal %s underlying %s does not match authorized %s",
-                                        d.signal_id, sig[0], self.authorized_symbol,
-                                    )
-                                    continue
-                                valid_sids.append(d.signal_id)
-                if valid_sids:
-                    allowed_signal_ids = frozenset([valid_sids[0]])
-                    allow_entries = True
-                else:
-                    allowed_signal_ids = frozenset()
-                    allow_entries = False
+                revisions_to_process = []
+                if target_revision_ids:
+                    revisions_to_process.extend(target_revision_ids)
+                if pending_followups:
+                    revisions_to_process.extend(pending_followups)
+                if revisions_to_process:
+                    decisions = matcher.process_pending(limit=len(revisions_to_process), revision_ids=revisions_to_process)
+            else:
+                decisions = matcher.process_pending(limit=200)
 
-            cycle = await asyncio.to_thread(
-                self.engine.run_cycle,
-                quotes=exit_quotes,
-                entry_quotes=snapshot.quotes if snapshot else None,
-                allow_entries=allow_entries,
-                process_closes=True,
-                allowed_signal_ids=allowed_signal_ids,
-            )
+            for contract, quote in snapshot.quotes.items():
+                inst_check = snapshot.instruments.get(contract)
+                if inst_check and inst_check.market_session_open:
+                    exit_quotes[contract] = ExitQuote(
+                        contract, quote.bid, inst_check.premium_tick, quote.observed_at_utc
+                    )
 
-            # Dynamically calculate realized daily loss today
-            realized_loss = await asyncio.to_thread(
-                self.engine.cumulative_realized_daily_loss, now
-            )
+        # 5. Run the live execution cycle off-thread
+        if self.single_entry:
+            valid_sids = []
+            if decisions and existing_buys == 0:
+                for d in decisions:
+                    if d.intent == "ENTRY" and d.signal_id and d.status == "RECORDED":
+                        with closing(sqlite3.connect(str(self.db_path))) as con:
+                            sig = con.execute(
+                                "SELECT underlying FROM option_signals WHERE signal_id=?",
+                                (d.signal_id,),
+                            ).fetchone()
+                        if sig:
+                            if self.authorized_symbol is not None and sig[0].upper() != self.authorized_symbol:
+                                log.warning(
+                                    "Signal %s underlying %s does not match authorized %s",
+                                    d.signal_id, sig[0], self.authorized_symbol,
+                                )
+                                continue
+                            valid_sids.append(d.signal_id)
+            if valid_sids:
+                allowed_signal_ids = frozenset([valid_sids[0]])
+                allow_entries = True
+            else:
+                allowed_signal_ids = frozenset()
+                allow_entries = False
 
-            return LiveDispatchResult(
-                status="LIVE_CYCLE_COMPLETED",
-                parsed_events=len(decisions),
-                entry_orders_submitted=cycle.entry_submissions,
-                close_orders_submitted=cycle.close_submissions,
-                cancellations=watchdog.cancellation_requests + cycle.cancellation_requests,
-                realized_daily_loss_usd=realized_loss,
-                open_positions_count=len(active),
-                unresolved_exit_count=await asyncio.to_thread(self.engine.unresolved_exit_count),
-            )
-        finally:
-            self.live_broker.loop = None
+        cycle = await asyncio.to_thread(
+            self.engine.run_cycle,
+            quotes=exit_quotes,
+            entry_quotes=snapshot.quotes if snapshot else None,
+            allow_entries=allow_entries,
+            process_closes=True,
+            allowed_signal_ids=allowed_signal_ids,
+        )
+
+        # Dynamically calculate realized daily loss today
+        realized_loss = await asyncio.to_thread(
+            self.engine.cumulative_realized_daily_loss, now
+        )
+
+        return LiveDispatchResult(
+            status="LIVE_CYCLE_COMPLETED",
+            parsed_events=len(decisions),
+            entry_orders_submitted=cycle.entry_submissions,
+            close_orders_submitted=cycle.close_submissions,
+            cancellations=watchdog.cancellation_requests + cycle.cancellation_requests,
+            realized_daily_loss_usd=realized_loss,
+            open_positions_count=len(active),
+            unresolved_exit_count=await asyncio.to_thread(self.engine.unresolved_exit_count),
+        )
+
+    def _broker_housekeeping(self) -> None:
+        for step in (self.live_broker.review_expired_entries, self.live_broker.refresh_daily_risk):
+            try:
+                step()
+            except Exception as exc:  # noqa: BLE001 - entries stay denied by the write preflight
+                log.warning("Broker housekeeping step %s failed: %s", step.__name__, type(exc).__name__)
 
     def _get_pending_and_active(
         self, now: datetime

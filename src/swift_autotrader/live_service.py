@@ -259,7 +259,6 @@ async def run_live_service(
         mcp_broker = RobinhoodMCPBroker(
             client,
             approved_account_number=approved_account,
-            allow_live_writes=True,
         )
 
         # 1. Verify Robinhood accounts and permissions
@@ -295,6 +294,11 @@ async def run_live_service(
             target_message_id=target_message_id,
             acceptance_scope=acceptance_scope,
         )
+
+        # The single canonical broker must itself confirm the pinned, agentic-enabled account
+        # (read-only get_accounts) before any cycle can reach a write boundary.
+        if not await asyncio.to_thread(dispatcher.live_broker.verify_account):
+            raise PermissionError("Live broker could not verify the pinned dedicated account")
 
         write_live_health(managed_root, "STARTING", simulated=client_override is not None)
         log.info("Execution service initialized")
