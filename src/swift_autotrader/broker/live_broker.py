@@ -105,6 +105,9 @@ _STATES = {
     'cancelled': BrokerOrderState.CANCELED, 'failed': BrokerOrderState.REJECTED,
     'voided': BrokerOrderState.REJECTED,
 }
+# Order history is read to EXHAUSTION (no `next`): that is the coverage proof for daily risk and
+# reconciliation. If it is not exhausted within this many pages the read fails closed.
+_ORDER_HISTORY_PAGES = 100
 _CREATED_SKEW_SECONDS = 120  # tolerated broker-vs-local clock difference for created_at
 _TERMINAL = {BrokerOrderState.FILLED, BrokerOrderState.CANCELED,
              BrokerOrderState.REJECTED}
@@ -591,7 +594,7 @@ class LiveBroker:
         """
         bought: dict[str, Decimal] = {}
         sold: dict[str, Decimal] = {}
-        for order in await self.reader.orders(account, limit_pages=10):
+        for order in await self.reader.orders(account, limit_pages=_ORDER_HISTORY_PAGES):
             processed = _decimal(order.get('processed_quantity'))
             if processed == 0:
                 continue
@@ -873,7 +876,7 @@ class LiveBroker:
 
     async def _reconcile(self, record: _Record) -> BrokerOrderStatus:
         account = await self._account()
-        rows = await self.reader.orders(account, limit_pages=10)
+        rows = await self.reader.orders(account, limit_pages=_ORDER_HISTORY_PAGES)
         item = self._match_order(rows, record)
         if item is None:
             if record.state in _TERMINAL:  # incl. released-unsent: journal is authoritative

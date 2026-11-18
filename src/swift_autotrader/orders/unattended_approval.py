@@ -20,7 +20,7 @@ RECEIPT_NAME = "unattended-live-approval.json"
 _FIELDS = frozenset({
     "version", "account_sha256", "issued_at", "expires_at",
     "max_contracts_per_signal", "max_premium_per_signal_usd",
-    "max_total_exposure_usd", "max_daily_loss_usd",
+    "max_daily_loss_usd",
 })
 
 
@@ -35,7 +35,6 @@ class UnattendedApproval:
     expires_at: datetime
     max_contracts_per_signal: int
     max_premium_per_signal_usd: Decimal
-    max_total_exposure_usd: Decimal
     max_daily_loss_usd: Decimal
 
     def active(self, now: datetime) -> bool:
@@ -94,7 +93,8 @@ def load_unattended_approval(
         raise UnattendedApprovalError("Approval receipt is not valid JSON") from exc
     if not isinstance(obj, dict) or set(obj) != _FIELDS:
         raise UnattendedApprovalError("Approval receipt fields are invalid")
-    if type(obj["version"]) is not int or obj["version"] != 1:
+    # v2: no aggregate-exposure ceiling exists any more (buying power alone bounds it).
+    if type(obj["version"]) is not int or obj["version"] != 2:
         raise UnattendedApprovalError("Unsupported approval receipt version")
     if type(obj["account_sha256"]) is not str or not hmac.compare_digest(
         obj["account_sha256"], hashlib.sha256(account.encode("utf-8")).hexdigest()
@@ -106,7 +106,7 @@ def load_unattended_approval(
     approval = UnattendedApproval(
         obj["account_sha256"], _when(obj["issued_at"]), _when(obj["expires_at"]),
         contracts, _money(obj["max_premium_per_signal_usd"]),
-        _money(obj["max_total_exposure_usd"]), _money(obj["max_daily_loss_usd"]),
+        _money(obj["max_daily_loss_usd"]),
     )
     if approval.expires_at - approval.issued_at > MAX_APPROVAL_WINDOW:
         raise UnattendedApprovalError("Approval window exceeds 7 days; renew it")
@@ -118,8 +118,6 @@ def load_unattended_approval(
              approval.max_contracts_per_signal),
             ("MAX_PREMIUM_PER_SIGNAL_USD", settings.max_premium_per_signal_usd,
              approval.max_premium_per_signal_usd),
-            ("MAX_TOTAL_EXPOSURE_USD", settings.max_total_exposure_usd,
-             approval.max_total_exposure_usd),
             ("MAX_DAILY_LOSS_USD", settings.max_daily_loss_usd,
              approval.max_daily_loss_usd),
         ) if configured > approved

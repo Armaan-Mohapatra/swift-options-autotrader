@@ -25,13 +25,29 @@ from typing import Any
 
 from swift_autotrader.broker.base import OrderIntent
 from swift_autotrader.broker.robinhood_mcp import (
-    _REQUIRED,
     READ_TOOLS,
     WRITE_TOOLS,
 )
 from swift_autotrader.notifications.kill_switch import TelegramKillSwitchBot
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.supervisor import ServiceSupervisor
+
+
+# Advertised input properties of the real Robinhood MCP tools (LiveBroker verifies these).
+_TOOL_PROPERTIES: dict[str, set[str]] = {
+    "get_accounts": set(),
+    "get_portfolio": {"account_number"},
+    "get_realized_pnl": {"account_number", "start_date", "end_date"},
+    "get_option_chains": {"underlying_symbol"},
+    "get_option_instruments": {"chain_id", "expiration_dates", "strike_price", "type", "state"},
+    "get_option_quotes": {"instrument_ids"},
+    "get_option_orders": {"account_number", "order_id", "state", "created_at_gte", "cursor"},
+    "get_option_positions": {"account_number", "nonzero", "option_ids", "cursor"},
+    "review_option_order": {"account_number", "legs", "quantity"},
+    "place_option_order": {"account_number", "ref_id", "legs", "quantity", "price", "type",
+                           "time_in_force", "market_hours"},
+    "cancel_option_order": {"account_number", "order_id"},
+}
 
 
 class SessionPasswordNeededError(Exception):
@@ -96,7 +112,13 @@ class StatefulFakeMCP:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.faults: dict[str, Exception] = {}
         self.order_counter: int = 1000
-        self.names = (READ_TOOLS | WRITE_TOOLS) - set(omit_tools)
+        self.names = (READ_TOOLS | WRITE_TOOLS | {"get_realized_pnl"}) - set(omit_tools)
+        # Real-shape account state used by LiveBroker's realized-plus-unrealized accounting.
+        self.realized_pnl = "0"
+        self.realized_trades = 0
+        self.orders_page_size: int | None = None  # None = one page; else paginate with `next`
+        self.positions_override: list[dict[str, Any]] | None = None
+        self.prior_close: dict[str, str] = {}
 
         self._seed_default_data()
 
@@ -235,7 +257,7 @@ class StatefulFakeMCP:
             raise self.faults["list_tools"]
         tools = []
         for name in sorted(self.names):
-            required_fields = _REQUIRED.get(name, ())
+            required_fields = _TOOL_PROPERTIES.get(name, set())
             properties = {f: {"type": "string"} for f in required_fields}
             tools.append({
                 "name": name,
@@ -283,7 +305,21 @@ class StatefulFakeMCP:
             quotes = [
                 self.quotes[iid] for iid in instrument_ids if iid in self.quotes
             ]
-            return {"structuredContent": {"data": {"quotes": quotes}}}
+            results = []
+            for quote in quotes:
+                bid, ask = Decimal(quote["bid_price"]), Decimal(quote["ask_price"])
+                mark = (bid + ask) / 2
+                results.append({
+                    "quote": dict(quote, mark_price=str(mark)),
+                    "close": {"price": self.prior_close.get(quote["instrument_id"], str(mark))},
+                })
+            # `results` is the real shape; the flat `quotes` list is kept for older readers.
+            return {"structuredContent": {"data": {"quotes": quotes, "results": results}}}
+
+        if name == "get_realized_pnl":
+            point = {"realized_gain": self.realized_pnl, "number_of_trades": self.realized_trades}
+            return {"structuredContent": {"data": {
+                "total_returns": self.realized_pnl, "data_points": [point]}}}
 
         if name == "review_option_order":
             return {"structuredContent": {"data": {
@@ -319,10 +355,14 @@ class StatefulFakeMCP:
                 "account_number": arguments.get("account_number", self.account_number),
                 "state": "confirmed",
                 "direction": legs[0].get("side", "buy") if legs else "buy",
-                "quantity": str(arguments.get("quantity", 1)),
+                "type": "limit",
+                "quantity": f"{Decimal(str(arguments.get('quantity', 1))):.4f}",
                 "filled_quantity": "0",
-                "price": str(arguments.get("price", "1.00")),
-                "legs": legs,
+                "processed_quantity": "0.0000",
+                "agent_initiated": True,
+                "placed_agent": "agent",
+                "price": f"{Decimal(str(arguments.get('price', '1.00'))):.4f}",
+                "legs": [dict(leg, executions=[]) for leg in legs],
                 "created_at": now_iso,
                 "updated_at": now_iso,
                 "accepted_at": now_iso,
@@ -354,12 +394,45 @@ class StatefulFakeMCP:
                 matched = [o for o in matched if o.get("id") == order_id]
             elif account:
                 matched = [o for o in matched if o.get("account_number") == account]
-            return {"structuredContent": {"data": {"orders": matched}}}
+            matched = [dict(o) for o in matched]
+            next_url = None
+            if self.orders_page_size:
+                start = int(str(arguments.get("cursor", "0")).rsplit("=", 1)[-1] or 0)
+                end = start + self.orders_page_size
+                next_url = f"https://api.example/orders/?cursor={end}" if end < len(matched) else None
+                matched = matched[start:end]
+            return {"structuredContent": {"data": {"orders": matched, "next": next_url}}}
 
         if name == "get_option_positions":
-            return {"structuredContent": {"data": {"positions": []}}}
+            if self.positions_override is not None:
+                return {"structuredContent": {"data": {
+                    "positions": list(self.positions_override), "next": None}}}
+            return {"structuredContent": {"data": {
+                "positions": self._derived_positions(), "next": None}}}
 
         raise AssertionError(f"Unhandled MCP tool: {name}")
+
+    def _derived_positions(self) -> list[dict[str, Any]]:
+        """Real-shape long positions derived from executed buys minus executed sells."""
+        held: dict[str, list[Decimal]] = {}
+        for order in self.orders.values():
+            leg = order["legs"][0]
+            qty = Decimal(order.get("processed_quantity", "0"))
+            if qty == 0:
+                continue
+            row = held.setdefault(leg["option_id"], [Decimal(0), Decimal(0)])
+            sign = 1 if leg.get("side") == "buy" else -1
+            row[0] += sign * qty
+            if sign == 1:
+                row[1] += qty * Decimal(order["fills"][0]["price"]) * 100
+        positions = []
+        for option_id, (quantity, cost) in held.items():
+            if quantity > 0:
+                positions.append({
+                    "option_id": option_id, "type": "long", "quantity": f"{quantity}.0000",
+                    "average_price": str(cost / quantity),
+                    "trade_value_multiplier": "100.0000"})
+        return positions
 
     def fill_order(
         self,
@@ -376,6 +449,7 @@ class StatefulFakeMCP:
         now_str = self._now_iso()
         order["state"] = "filled"
         order["filled_quantity"] = str(qty)
+        order["processed_quantity"] = f"{qty}.0000"
         order["updated_at"] = now_str
         fill_rec = {
             "id": f"fill_{uuid.uuid4().hex[:8]}",
@@ -385,6 +459,7 @@ class StatefulFakeMCP:
         }
         order["fills"] = [fill_rec]
         order["executions"] = [fill_rec]
+        order["legs"][0]["executions"] = [dict(fill_rec)]
 
     def partial_fill(
         self,
@@ -400,6 +475,7 @@ class StatefulFakeMCP:
         now_str = self._now_iso()
         order["state"] = "partially_filled"
         order["filled_quantity"] = str(filled_quantity)
+        order["processed_quantity"] = f"{filled_quantity}.0000"
         order["updated_at"] = now_str
         fill_rec = {
             "id": f"fill_{uuid.uuid4().hex[:8]}",
@@ -409,6 +485,7 @@ class StatefulFakeMCP:
         }
         order["fills"] = [fill_rec]
         order["executions"] = [fill_rec]
+        order["legs"][0]["executions"] = [dict(fill_rec)]
 
 
 class MockTelethonClient:

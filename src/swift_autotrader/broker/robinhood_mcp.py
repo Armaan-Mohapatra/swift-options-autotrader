@@ -577,7 +577,7 @@ class RobinhoodMCPBroker:
                      limit_pages: int = 3) -> list[dict[str, Any]]:
         if not account.eligible:
             raise MCPContractError("External-agent account required")
-        if not 1 <= limit_pages <= 10:
+        if not 1 <= limit_pages <= 100:
             raise ValueError("Too many history pages")
         cursor = None
         seen = set()
