@@ -23,20 +23,20 @@ OTHER_CONTRACT = OptionContract("SPY", OptionRight.PUT, Decimal("670"), date(202
 def make_ceilings(
     *,
     max_daily_loss: str = "500",
-    max_positions: int = 3,
     contracts_per_signal: int = 1,
-    premium_per_signal: str = "1000",
-    total_exposure: str = "5000",
-    open_signal_count: int = 3,
+    premium_per_signal: str = "999",
+    total_exposure: str | None = None,
+    open_signal_count: int | None = None,
 ) -> RiskCeilings:
+    # Owner contract: no trade-count or exposure cap by default; both are optional
+    # voluntary operator caps and buying power is the only mandatory bound.
     return RiskCeilings(
         contracts_per_signal=contracts_per_signal,
         premium_per_signal_usd=Decimal(premium_per_signal),
-        total_exposure_usd=Decimal(total_exposure),
+        total_exposure_usd=None if total_exposure is None else Decimal(total_exposure),
         open_signal_count=open_signal_count,
         entry_max_age_seconds=120,
-        max_daily_loss_usd=Decimal(max_daily_loss),
-        max_concurrent_positions=max_positions,
+        daily_net_loss_usd=Decimal(max_daily_loss),
     )
 
 
@@ -76,7 +76,7 @@ def test_preflight_full_clearance() -> None:
         preflight,
         outstanding_usd=Decimal("0"),
         active_signals=0,
-        cumulative_realized_loss_usd=Decimal("0"),
+        realized_net_pnl_today_usd=Decimal("0"),
     )
     assert reason is None
 
@@ -93,14 +93,25 @@ def test_daily_loss_limit_rejection() -> None:
         preflight,
         outstanding_usd=Decimal("0"),
         active_signals=0,
-        cumulative_realized_loss_usd=Decimal("500.01"),
+        realized_net_pnl_today_usd=Decimal("-500.01"),
     )
-    assert reason == "DAILY_LOSS_LIMIT_REACHED"
+    assert reason == "DAILY_LOSS_CEILING_REACHED"
 
 
-def test_max_concurrent_positions_ceiling() -> None:
-    """T1-F3-03: Active signals meet or exceed max_concurrent_positions."""
-    ceilings = make_ceilings(max_positions=3)
+def test_no_trade_count_cap_by_default() -> None:
+    """T1-F3-03a: Owner contract: no default trade-count cap; buying power bounds entries."""
+    ceilings = make_ceilings()
+    assert ceilings.open_signal_count is None and ceilings.total_exposure_usd is None
+    reason = rejection_reason(
+        CONTRACT, Decimal("1.20"), 1, ceilings, make_preflight(available_buying_power="100000"),
+        outstanding_usd=Decimal("50000"), active_signals=500,
+    )
+    assert reason is None
+
+
+def test_optional_open_signal_cap_when_operator_sets_one() -> None:
+    """T1-F3-03: A voluntary operator open-signal cap is still honoured when configured."""
+    ceilings = make_ceilings(open_signal_count=3)
     preflight = make_preflight()
     reason = rejection_reason(
         CONTRACT,
@@ -110,7 +121,7 @@ def test_max_concurrent_positions_ceiling() -> None:
         preflight,
         outstanding_usd=Decimal("0"),
         active_signals=3,
-        cumulative_realized_loss_usd=Decimal("0"),
+        realized_net_pnl_today_usd=Decimal("0"),
     )
     assert reason == "OPEN_SIGNAL_CAP_EXCEEDED"
 
@@ -128,7 +139,7 @@ def test_buying_power_insufficiency() -> None:
         preflight,
         outstanding_usd=Decimal("0"),
         active_signals=0,
-        cumulative_realized_loss_usd=Decimal("0"),
+        realized_net_pnl_today_usd=Decimal("0"),
     )
     assert reason == "INSUFFICIENT_BUYING_POWER"
 
@@ -146,7 +157,7 @@ def test_signal_premium_ceiling_enforcement() -> None:
         preflight,
         outstanding_usd=Decimal("0"),
         active_signals=0,
-        cumulative_realized_loss_usd=Decimal("0"),
+        realized_net_pnl_today_usd=Decimal("0"),
     )
     assert reason == "SIGNAL_PREMIUM_CAP_EXCEEDED"
 
@@ -154,20 +165,23 @@ def test_signal_premium_ceiling_enforcement() -> None:
 def test_risk_ceilings_from_environment() -> None:
     """T1-F3-06: Parse risk ceilings from environment mapping."""
     env = {
-        "MAX_DAILY_LOSS_USD": "750",
-        "MAX_CONCURRENT_POSITIONS": "4",
-        "MAX_CONTRACTS_PER_SIGNAL": "2",
+        "PAPER_MAX_DAILY_NET_LOSS_USD": "750",
+        "MAX_CONTRACTS_PER_SIGNAL": "1",
         "MAX_PREMIUM_PER_SIGNAL_USD": "500",
         "PAPER_MAX_TOTAL_EXPOSURE_USD": "8000",
         "PAPER_MAX_OPEN_SIGNALS": "5",
         "PAPER_ENTRY_MAX_AGE_SECONDS": "90",
     }
     ceilings = RiskCeilings.from_environment(env)
-    assert ceilings.max_daily_loss_usd == Decimal("750")
-    assert ceilings.max_concurrent_positions == 4
+    assert ceilings.daily_net_loss_usd == Decimal("750")
+    assert ceilings.open_signal_count == 5
     with pytest.raises(ValueError, match="exact alert limit"):
         RiskCeilings.from_environment(dict(env, SLIPPAGE_TOLERANCE_PCT="12"))
-    assert ceilings.contracts_per_signal == 2
+    with pytest.raises(ValueError, match="approved maximum"):
+        RiskCeilings.from_environment(dict(env, MAX_CONTRACTS_PER_SIGNAL="2"))
+    with pytest.raises(ValueError, match="invalid paper risk environment"):
+        RiskCeilings.from_environment(dict(env, PAPER_MAX_DAILY_NET_LOSS_USD="751"))
+    assert ceilings.contracts_per_signal == 1
     assert ceilings.premium_per_signal_usd == Decimal("500")
 
 
@@ -180,9 +194,9 @@ def test_risk_ceilings_from_environment() -> None:
     ("loss", "expected"),
     [
         (Decimal("499.99"), None),
-        (Decimal("500.00"), "DAILY_LOSS_LIMIT_REACHED"),
-        (Decimal("500.01"), "DAILY_LOSS_LIMIT_REACHED"),
-        (Decimal("1000.00"), "DAILY_LOSS_LIMIT_REACHED"),
+        (Decimal("500.00"), "DAILY_LOSS_CEILING_REACHED"),
+        (Decimal("500.01"), "DAILY_LOSS_CEILING_REACHED"),
+        (Decimal("1000.00"), "DAILY_LOSS_CEILING_REACHED"),
     ],
 )
 def test_exact_loss_ceiling_boundary(loss: Decimal, expected: str | None) -> None:
@@ -197,7 +211,7 @@ def test_exact_loss_ceiling_boundary(loss: Decimal, expected: str | None) -> Non
         preflight,
         outstanding_usd=Decimal("0"),
         active_signals=0,
-        cumulative_realized_loss_usd=loss,
+        realized_net_pnl_today_usd=-loss,
     )
     assert result == expected
 
@@ -212,7 +226,7 @@ def test_exact_loss_ceiling_boundary(loss: Decimal, expected: str | None) -> Non
 )
 def test_exact_concurrent_positions_boundary(active_signals: int, expected: str | None) -> None:
     """T2-F3-02: Exact boundary check for concurrent position caps."""
-    ceilings = make_ceilings(max_positions=3, open_signal_count=3)
+    ceilings = make_ceilings(open_signal_count=3)
     preflight = make_preflight()
     result = rejection_reason(
         CONTRACT,
@@ -222,7 +236,7 @@ def test_exact_concurrent_positions_boundary(active_signals: int, expected: str 
         preflight,
         outstanding_usd=Decimal("0"),
         active_signals=active_signals,
-        cumulative_realized_loss_usd=Decimal("0"),
+        realized_net_pnl_today_usd=Decimal("0"),
     )
     assert result == expected
 
@@ -338,8 +352,23 @@ def test_risk_ceilings_post_init_validation() -> None:
     with pytest.raises(ValueError, match="invalid quantity ceiling"):
         RiskCeilings(contracts_per_signal=101)
 
-    with pytest.raises(ValueError, match="invalid max concurrent positions ceiling"):
-        RiskCeilings(max_concurrent_positions=0)
+    with pytest.raises(ValueError, match="invalid active signal ceiling"):
+        RiskCeilings(open_signal_count=0)
+
+    with pytest.raises(ValueError, match="daily net loss ceiling"):
+        RiskCeilings(daily_net_loss_usd=Decimal("-1"))
+
+    with pytest.raises(ValueError, match="daily net loss ceiling"):
+        RiskCeilings(daily_net_loss_usd=Decimal("750.01"))
 
     with pytest.raises(ValueError, match="invalid dollar ceilings"):
-        RiskCeilings(max_daily_loss_usd=Decimal("-1"))
+        RiskCeilings(premium_per_signal_usd=Decimal("-1"))
+
+
+def test_unknown_daily_pnl_blocks_entries() -> None:
+    """T2-F3-12: Unknown (non-finite) daily P&L fails closed."""
+    assert rejection_reason(
+        CONTRACT, Decimal("1.00"), 1, make_ceilings(), make_preflight(),
+        outstanding_usd=Decimal("0"), active_signals=0,
+        realized_net_pnl_today_usd=Decimal("NaN"),
+    ) == "DAILY_PNL_UNVERIFIED"

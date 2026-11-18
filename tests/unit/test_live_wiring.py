@@ -9,7 +9,6 @@ import asyncio
 import json
 import sqlite3
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -38,15 +37,23 @@ ACCOUNT = 'MCP-ONLY-123'  # synthetic; the fake client uses this number
 
 
 def live_env(tmp_path: Path) -> dict[str, str]:
+    """A complete canonical live configuration (synthetic account, offline session file)."""
+    session = tmp_path / 'secrets' / 'telegram.session'
+    session.parent.mkdir(parents=True, exist_ok=True)
+    session.write_bytes(b'synthetic')
     return {'PAPER_ONLY': 'false', 'LIVE_ENABLED': 'true', 'ALLOW_BROKER_WRITES': 'true',
-            'BROKER_BACKEND': 'robinhood_live', 'LIVE_ACCOUNT_NUMBER': ACCOUNT,
-            'LIVE_JOURNAL_PATH': str(tmp_path / 'journal.sqlite')}
+            'BROKER_BACKEND': 'robinhood_mcp', 'ROBINHOOD_MCP_ACCOUNT': ACCOUNT,
+            'LIVE_JOURNAL_PATH': str(tmp_path / 'journal.sqlite'),
+            'MAX_PREMIUM_PER_SIGNAL_USD': '999',
+            'TELEGRAM_ENABLED': 'true', 'SWIFT_TELEGRAM_CHANNEL_ID': '-1001234567890',
+            'TELEGRAM_API_ID': '12345', 'TELEGRAM_API_HASH': 'a' * 32,
+            'TELEGRAM_SESSION_PATH': str(session)}
 
 
 def test_defaults_are_paper():
     settings = Settings.from_env({})
-    assert settings.mode == 'PAPER' and not settings.live_mode
-    assert settings.live_account_ending is None and settings.live_fallback == ()
+    assert settings.mode == 'PAPER_ONLY' and not settings.live_mode
+    assert settings.live_account_ending is None
 
 
 def test_complete_live_settings_enable_live_and_mask_the_account(tmp_path):
@@ -58,15 +65,15 @@ def test_complete_live_settings_enable_live_and_mask_the_account(tmp_path):
 
 
 @pytest.mark.parametrize('missing', ['PAPER_ONLY', 'LIVE_ENABLED', 'ALLOW_BROKER_WRITES',
-                                     'BROKER_BACKEND', 'LIVE_ACCOUNT_NUMBER',
-                                     'LIVE_JOURNAL_PATH'])
-def test_any_missing_live_setting_defaults_to_paper(tmp_path, missing):
+                                     'BROKER_BACKEND', 'ROBINHOOD_MCP_ACCOUNT',
+                                     'LIVE_JOURNAL_PATH', 'MAX_PREMIUM_PER_SIGNAL_USD',
+                                     'TELEGRAM_ENABLED'])
+def test_any_missing_live_setting_is_refused_never_live(tmp_path, missing):
+    """An incomplete live request fails closed at startup; it never becomes live."""
     env = live_env(tmp_path)
     del env[missing]
-    settings = Settings.from_env(env)
-    assert settings.mode == 'PAPER' and settings.live_fallback
-    assert settings.paper_only and not settings.live_enabled
-    assert not settings.allow_broker_writes and settings.broker_backend == 'paper'
+    with pytest.raises(ConfigurationError):
+        Settings.from_env(env)
 
 
 def test_partial_settings_never_validate_and_live_needs_an_absolute_journal(tmp_path):
@@ -75,10 +82,13 @@ def test_partial_settings_never_validate_and_live_needs_an_absolute_journal(tmp_
     env = live_env(tmp_path) | {'LIVE_JOURNAL_PATH': 'relative.sqlite'}
     with pytest.raises(ConfigurationError):
         Settings.from_env(env)
+    env = live_env(tmp_path) | {'BROKER_BACKEND': 'robinhood_live'}  # PR #34 name is gone
+    with pytest.raises(ConfigurationError):
+        Settings.from_env(env)
 
 
 def make_live(tmp_path: Path, *, account: str = ACCOUNT):
-    env = live_env(tmp_path) | {'LIVE_ACCOUNT_NUMBER': account}
+    env = live_env(tmp_path) | {'ROBINHOOD_MCP_ACCOUNT': account}
     settings = Settings.from_env(env)
     control = tmp_path / 'swift.sqlite3'
     apply_migrations(control)
@@ -115,12 +125,14 @@ def test_one_borrowed_mcp_session_handles_live_calls_on_original_loop(tmp_path):
     asyncio.run(exercise())
 
 
-def test_self_check_prints_paper_mode_and_why_live_was_not_used(tmp_path):
+def test_self_check_prints_paper_mode(tmp_path):
+    """Regression: paper-dispatch-service calls this in paper mode; it must not crash."""
     lines: list[str] = []
-    result = startup_self_check(Settings.from_env({'LIVE_ENABLED': 'true'}),
-                                tmp_path / 'x.sqlite3', out=lines.append)
-    assert result['mode'] == 'PAPER'
-    assert lines[0].startswith('MODE=PAPER') and 'missing' in lines[0]
+    result = startup_self_check(Settings.from_env({}), tmp_path / 'x.sqlite3', out=lines.append)
+    assert result == {'mode': 'PAPER_ONLY', 'account': '', 'kill_switch': ''}
+    assert lines == ['MODE=PAPER_ONLY']
+    with pytest.raises(ConfigurationError):  # a partial live request never reaches the check
+        Settings.from_env({'LIVE_ENABLED': 'true'})
 
 
 def test_self_check_passes_live_and_prints_only_the_account_ending(tmp_path):
@@ -188,49 +200,26 @@ def test_build_broker_is_paper_unless_live_is_complete(tmp_path):
 
 def test_engine_accepts_only_paper_or_an_enabled_live_broker(tmp_path):
     settings, control, broker, fake = make_live(tmp_path)
-    engine = PaperOrderEngine(control, broker, preflight=PaperPreflight())
+    engine = PaperOrderEngine(control, broker, preflight=PaperPreflight(), live_mode=True)
     assert type(engine.broker) is LiveBroker
+    with pytest.raises(TypeError, match='ONLY the concrete PaperBroker'):
+        PaperOrderEngine(control, broker, preflight=PaperPreflight())  # never silently live
     disabled = LiveBroker(settings.live_journal_path, fake, account_number=ACCOUNT)
-    with pytest.raises(TypeError, match='only the concrete PaperBroker'):
-        PaperOrderEngine(control, disabled, preflight=PaperPreflight())
+    with pytest.raises(TypeError, match='only an enabled LiveBroker'):
+        PaperOrderEngine(control, disabled, preflight=PaperPreflight(), live_mode=True)
     broker.close()
     disabled.close()
 
 
-def test_live_risk_monitor_runs_after_entry_exit_and_cancel_cycles(tmp_path, monkeypatch):
+def test_paper_dispatcher_refuses_a_live_broker(tmp_path):
+    """One live service: the paper dispatcher can never drive the live writer."""
     _, control, broker, _ = make_live(tmp_path)
-    dispatcher = PaperDispatcher(control, -1001234567890, provider=object(),
-                                 limits=RiskCeilings(), broker=broker)
-    order: list[str] = []
-
-    async def record_cycle(**_kwargs):
-        order.append('engine')
-        return SimpleNamespace(entry_submissions=0, close_submissions=0,
-                               cancellation_requests=0)
-
-    def record_risk():
-        order.append('risk')
-        return False
-
-    monkeypatch.setattr(dispatcher, '_engine_cycle', record_cycle)
-    monkeypatch.setattr(broker, 'refresh_daily_risk', record_risk)
     try:
-        result = asyncio.run(dispatcher.run_once())
-        assert result.entry_orders == result.exit_orders == 0
-        assert order == ['engine', 'engine', 'risk']
+        with pytest.raises(TypeError, match='ONLY the concrete PaperBroker'):
+            PaperDispatcher(control, -1001234567890, provider=object(),
+                            limits=RiskCeilings(), broker=broker)
     finally:
         broker.close()
-
-
-def test_dispatcher_cycles_a_live_broker_off_the_event_loop(tmp_path):
-    settings, control, broker, _ = make_live(tmp_path)
-    dispatcher = PaperDispatcher(control, -1001234567890, provider=object(),
-                                 limits=RiskCeilings(), broker=broker)
-    assert dispatcher.live
-    # The blocking LiveBroker may not run on this loop; the cycle moves to a thread.
-    cycle = asyncio.run(dispatcher._engine_cycle(allow_entries=False, process_closes=False))
-    assert cycle.entry_submissions == 0
-    broker.close()
     assert not PaperDispatcher(control, -1001234567890, provider=object(),
                                limits=RiskCeilings()).live
 
@@ -276,7 +265,7 @@ def test_status_notifications_accept_locked_paper_or_complete_live(install):
             'PAPER_ONLY': 'false', 'LIVE_ENABLED': 'true', 'ALLOW_BROKER_WRITES': 'true'})
     for env in ({'PAPER_ONLY': 'true', 'ALLOW_BROKER_WRITES': 'false'},
                 {'PAPER_ONLY': 'false', 'LIVE_ENABLED': 'true', 'ALLOW_BROKER_WRITES': 'true',
-                 'BROKER_BACKEND': 'robinhood_live'}):
+                 'BROKER_BACKEND': 'robinhood_mcp'}):
         with pytest.raises(ValueError):  # gets past the mode check, stops at the missing token
             deliver_status_notifications(install, env=base | env)
 

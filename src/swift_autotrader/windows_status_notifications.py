@@ -14,6 +14,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from swift_autotrader.config import LIVE_BACKEND
 from swift_autotrader.notifications.alerts import NotificationCenter
 from swift_autotrader.windows_runtime import _atomic_json, validate_install_root
 
@@ -29,7 +30,7 @@ def deliver_status_notifications(
     paper_locked = env.get("PAPER_ONLY") == "true" and env.get("ALLOW_BROKER_WRITES") == "false"
     live_complete = (env.get("PAPER_ONLY") == "false" and env.get("LIVE_ENABLED") == "true"
                      and env.get("ALLOW_BROKER_WRITES") == "true"
-                     and env.get("BROKER_BACKEND") == "robinhood_live")
+                     and env.get("BROKER_BACKEND") == LIVE_BACKEND)
     if not paper_locked and not live_complete:
         raise PermissionError("Status service requires paper-locked or complete live settings")
     token = env.get("TELEGRAM_STATUS_BOT_TOKEN", "")

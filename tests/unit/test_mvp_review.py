@@ -13,10 +13,10 @@ from tests.unit.test_supervisor import make_supervisor
 def test_invalid_candidate_order(limit,qty):
     assert rejection_reason(CONTRACT,limit,qty,make_ceilings(),make_preflight(),outstanding_usd=D('0'),active_signals=0)=='INVALID_ORDER_INPUT'
 
-@pytest.mark.parametrize('change',[{'outstanding_usd':D('NaN')},{'outstanding_usd':D('-1')},{'active_signals':-1},{'active_signals':True},{'cumulative_realized_loss_usd':D('Infinity')}])
-def test_invalid_risk_evidence(change):
-    args={'outstanding_usd':D('0'),'active_signals':0,'cumulative_realized_loss_usd':D('0'),**change}
-    assert rejection_reason(CONTRACT,D('1'),1,make_ceilings(),make_preflight(),**args)=='INVALID_RISK_EVIDENCE'
+@pytest.mark.parametrize('change,expected',[({'outstanding_usd':D('NaN')},'INVALID_RISK_EVIDENCE'),({'outstanding_usd':D('-1')},'INVALID_RISK_EVIDENCE'),({'active_signals':-1},'INVALID_RISK_EVIDENCE'),({'active_signals':True},'INVALID_RISK_EVIDENCE'),({'realized_net_pnl_today_usd':D('-Infinity')},'DAILY_PNL_UNVERIFIED'),({'realized_net_pnl_today_usd':D('NaN')},'DAILY_PNL_UNVERIFIED')])
+def test_invalid_risk_evidence(change,expected):
+    args={'outstanding_usd':D('0'),'active_signals':0,'realized_net_pnl_today_usd':D('0'),**change}
+    assert rejection_reason(CONTRACT,D('1'),1,make_ceilings(),make_preflight(),**args)==expected
 
 def test_review_is_offline_and_does_not_read_configuration(monkeypatch,capsys):
     from swift_autotrader.config import Settings

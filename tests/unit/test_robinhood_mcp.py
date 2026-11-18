@@ -9,7 +9,6 @@ from types import SimpleNamespace
 import pytest
 
 from swift_autotrader.broker.base import (
-    Broker,
     BrokerOrderState,
 )
 from swift_autotrader.broker.mcp_transport import (
@@ -25,7 +24,6 @@ from swift_autotrader.broker.robinhood_mcp import (
     MCPContractError,
     MCPInstrument,
     MCPReadError,
-    RobinhoodLiveBroker,
     RobinhoodMCPBroker,
 )
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
@@ -497,255 +495,24 @@ def test_live_writes_disabled_by_default():
         wait(adapter._call("place_option_order", {"account_number": "ACC1", "legs": [], "quantity": "1"}))
 
 
-def test_live_writes_allowed_when_enabled():
+def test_read_adapter_has_no_write_unlock():
+    """The removed RobinhoodLiveBroker path must not return: LiveBroker is the only writer."""
+    import swift_autotrader.broker.robinhood_mcp as rh
+
     fake, _ = setup()
-    adapter = RobinhoodMCPBroker(fake, allow_live_writes=True)
-    fake.responses["place_option_order"] = lambda args: {
-        "order": {"id": "ord_live_123", "state": "confirmed"}
-    }
-    result = wait(adapter._call("place_option_order", {
-        "account_number": "ACC1", "legs": [{"option_id": "opt1", "side": "buy", "ratio_quantity": 1}],
-        "quantity": "1",
-    }))
-    assert result["order"]["id"] == "ord_live_123"
-    assert ("place_option_order", {
-        "account_number": "ACC1", "legs": [{"option_id": "opt1", "side": "buy", "ratio_quantity": 1}],
-        "quantity": "1",
-    }) in fake.calls
-
-
-def setup_live_broker():
-    fake, _ = setup()
-    orders_by_id: dict[str, dict] = {}
-
-    def handle_place(args):
-        broker_order_id = f"rh-broker-ord-{len(orders_by_id) + 1}"
-        order = {
-            "id": broker_order_id,
-            "ref_id": args.get("ref_id"),
-            "state": "confirmed",
-            "filled_quantity": 0,
-            "accepted_at": "2026-11-12T18:00:00Z",
-            "fills": [],
-        }
-        orders_by_id[broker_order_id] = order
-        return {"order": order}
-
-    def handle_cancel(args):
-        oid = args.get("order_id")
-        if oid in orders_by_id:
-            orders_by_id[oid]["state"] = "cancelled"
-        return {"status": "success"}
-
-    def handle_get_orders(args):
-        oid = args.get("order_id")
-        if oid and oid in orders_by_id:
-            return {"orders": [orders_by_id[oid]]}
-        return {"orders": list(orders_by_id.values())}
-
-    fake.responses["place_option_order"] = handle_place
-    fake.responses["cancel_option_order"] = handle_cancel
-    fake.responses["get_option_orders"] = handle_get_orders
-
-    mcp_broker = RobinhoodMCPBroker(fake, allow_live_writes=True)
-    live_broker = RobinhoodLiveBroker(mcp_broker, ACCOUNT)
-    return fake, mcp_broker, live_broker, orders_by_id
-
-
-def test_robinhood_live_broker_protocol_conformance_and_fail_closed():
-    fake, mcp_broker, live_broker, _ = setup_live_broker()
-
-    # Must conform to Broker protocol
-    assert isinstance(live_broker, Broker)
-
-    # Fail closed when writes disabled on MCP broker
-    readonly_mcp = RobinhoodMCPBroker(fake, allow_live_writes=False)
-    with pytest.raises(BrokerWritesDisabledError, match="allow_live_writes=True"):
-        RobinhoodLiveBroker(readonly_mcp, ACCOUNT)
-
-    # Fail closed with ineligible account
-    ineligible_account = MCPAccount("bad-acc", False, "option_level_2")
-    with pytest.raises(MCPContractError, match="option-eligible"):
-        RobinhoodLiveBroker(mcp_broker, ineligible_account)
-
-    ineligible_level = MCPAccount("bad-lvl", True, "option_level_0")
-    with pytest.raises(MCPContractError, match="option-eligible"):
-        RobinhoodLiveBroker(mcp_broker, ineligible_level)
-
-    # Dynamic fail-closed check if allow_live_writes becomes False
-    mcp_broker.allow_live_writes = False
-    test_intent = intent()
-    with pytest.raises(BrokerWritesDisabledError, match="disabled"):
-        live_broker.submit_order(test_intent)
-    with pytest.raises(BrokerWritesDisabledError, match="disabled"):
-        live_broker.cancel_order(test_intent.logical_order_id)
-
-
-def test_robinhood_live_broker_submit_order_places_and_reconciles():
-    fake, _, live_broker, orders_by_id = setup_live_broker()
-    ord_intent = intent(price="1.20")
-
-    status = live_broker.submit_order(ord_intent)
-
-    # Check status returned is reconciled and accepted
-    assert status.logical_order_id == ord_intent.logical_order_id
-    assert status.state == BrokerOrderState.ACCEPTED
-    assert status.filled_quantity == 0
-    assert status.requested_quantity == 2
-    assert status.limit_price == Decimal("1.20")
-    assert status.contract == CONTRACT
-
-    # Verify place_option_order was dispatched with exact parameters
-    place_calls = [c for c in fake.calls if c[0] == "place_option_order"]
-    assert len(place_calls) == 1
-    args = place_calls[0][1]
-    assert args["account_number"] == ACCOUNT.account_number
-    assert args["quantity"] == "2"
-    assert args["price"] == "1.20"
-    assert args["type"] == "limit"
-    assert args["time_in_force"] == "gfd"
-    assert len(args["legs"]) == 1
-    assert args["legs"][0]["option_id"] == "synthetic-option-id"
-    assert args["legs"][0]["side"] == "buy"
-    assert args["legs"][0]["position_effect"] == "open"
-
-    # Verify cached instrument resolution on subsequent submit
-    calls_before = len(fake.calls)
-    second_intent = OrderIntent("logical-2", "once-key-2", CONTRACT, OrderSide.BUY_TO_OPEN, 1, Decimal("1.20"))
-    live_broker.submit_order(second_intent)
-    chains_calls = [c for c in fake.calls[calls_before:] if c[0] in ("get_option_chains", "get_option_instruments")]
-    assert len(chains_calls) == 0  # Reused cached instrument
-
-
-def test_robinhood_live_broker_get_order_and_fills():
-    fake, _, live_broker, orders_by_id = setup_live_broker()
-    ord_intent = intent()
-
-    # Unknown logical order ID
-    unknown_status = live_broker.get_order("nonexistent-order")
-    assert unknown_status.state == BrokerOrderState.UNKNOWN
-
-    # Submit order
-    live_broker.submit_order(ord_intent)
-
-    # Poll status before fill
-    status = live_broker.get_order(ord_intent.logical_order_id)
-    assert status.state == BrokerOrderState.ACCEPTED
-    assert status.filled_quantity == 0
-
-    # Simulate fill at broker
-    broker_id = live_broker._broker_id_map[ord_intent.logical_order_id]
-    orders_by_id[broker_id]["state"] = "filled"
-    orders_by_id[broker_id]["filled_quantity"] = 2
-    orders_by_id[broker_id]["fills"] = [
-        {"id": "fill-101", "quantity": 1, "price": "1.19", "timestamp": "2026-11-12T18:01:00Z"},
-        {"id": "fill-102", "quantity": 1, "price": "1.20", "timestamp": "2026-11-12T18:01:01Z"},
-    ]
-
-    status_filled = live_broker.get_order(ord_intent.logical_order_id)
-    assert status_filled.state == BrokerOrderState.FILLED
-    assert status_filled.filled_quantity == 2
-    assert len(status_filled.fills) == 2
-    assert status_filled.fills[0].price == Decimal("1.19")
-    assert status_filled.fills[1].price == Decimal("1.20")
-
-
-def test_robinhood_live_broker_cancel_order_bug_fix_and_reconciliation():
-    """Verify bug fix: cancel_order calls cancel_order_by_id (NOT cancel_broker_order)."""
-    fake, _, live_broker, orders_by_id = setup_live_broker()
-    ord_intent = intent()
-
-    # Unknown order returns UNKNOWN without calling cancel
-    unknown = live_broker.cancel_order("does-not-exist")
-    assert unknown.state == BrokerOrderState.UNKNOWN
-    assert not any(c[0] == "cancel_option_order" for c in fake.calls)
-
-    # Submit valid order
-    live_broker.submit_order(ord_intent)
-    broker_id = live_broker._broker_id_map[ord_intent.logical_order_id]
-
-    # Cancel order — this previously crashed calling non-existent cancel_broker_order
-    cancel_status = live_broker.cancel_order(ord_intent.logical_order_id)
-
-    # Verify cancel tool was called on FakeMCP
-    cancel_calls = [c for c in fake.calls if c[0] == "cancel_option_order"]
-    assert len(cancel_calls) == 1
-    assert cancel_calls[0][1]["account_number"] == ACCOUNT.account_number
-    assert cancel_calls[0][1]["order_id"] == broker_id
-
-    # Verify returned status reflects cancelled state
-    assert cancel_status.state == BrokerOrderState.CANCELED
-    assert cancel_status.logical_order_id == ord_intent.logical_order_id
-
-
-def test_robinhood_live_broker_cancel_recovers_broker_id_if_unmapped():
-    """If place_order didn't store broker_id directly, get_order discovers it before cancel."""
-    fake, _, live_broker, orders_by_id = setup_live_broker()
-
-    # Override place_option_order to NOT return order id in place response
-    def minimal_place(args):
-        broker_order_id = "discovered-broker-id"
-        order = {
-            "id": broker_order_id,
-            "ref_id": args.get("ref_id"),
-            "state": "confirmed",
-            "filled_quantity": 0,
-            "accepted_at": "2026-11-12T18:00:00Z",
-            "fills": [],
-        }
-        orders_by_id[broker_order_id] = order
-        return {"result": "order placed"}  # No 'order' dict in response
-
-    fake.responses["place_option_order"] = minimal_place
-    ord_intent = intent()
-
-    live_broker.submit_order(ord_intent)
-    # Manually clear broker_id_map to simulate missing initial map
-    live_broker._broker_id_map.pop(ord_intent.logical_order_id, None)
-
-    # cancel_order will call get_order to recover the broker_id
-    status = live_broker.cancel_order(ord_intent.logical_order_id)
-    assert status.state == BrokerOrderState.CANCELED
-    assert live_broker._broker_id_map.get(ord_intent.logical_order_id) == "discovered-broker-id"
-
-    cancel_calls = [c for c in fake.calls if c[0] == "cancel_option_order"]
-    assert len(cancel_calls) == 1
-    assert cancel_calls[0][1]["order_id"] == "discovered-broker-id"
-
-
-def test_robinhood_live_broker_sell_to_close_order():
-    fake, _, live_broker, _ = setup_live_broker()
-    close_intent = intent(side=OrderSide.SELL_TO_CLOSE, price="2.50")
-
-    status = live_broker.submit_order(close_intent)
-    assert status.state == BrokerOrderState.ACCEPTED
-    assert status.side == OrderSide.SELL_TO_CLOSE
-
-    place_calls = [c for c in fake.calls if c[0] == "place_option_order"]
-    assert len(place_calls) == 1
-    legs = place_calls[0][1]["legs"]
-    assert legs[0]["side"] == "sell"
-    assert legs[0]["position_effect"] == "close"
-
-
-def test_robinhood_live_broker_with_event_loop():
-    fake, _, _, _ = setup_live_broker()
-    loop = asyncio.new_event_loop()
-    try:
-        mcp = RobinhoodMCPBroker(fake, allow_live_writes=True)
-        live_broker = RobinhoodLiveBroker(mcp, ACCOUNT, loop=loop)
-        ord_intent = intent()
-
-        status = live_broker.submit_order(ord_intent)
-        assert status.state == BrokerOrderState.ACCEPTED
-
-        get_status = live_broker.get_order(ord_intent.logical_order_id)
-        assert get_status.state == BrokerOrderState.ACCEPTED
-
-        cancel_status = live_broker.cancel_order(ord_intent.logical_order_id)
-        assert cancel_status.state == BrokerOrderState.CANCELED
-    finally:
-        loop.close()
+    assert not hasattr(rh, "RobinhoodLiveBroker")
+    with pytest.raises(TypeError):
+        RobinhoodMCPBroker(fake, allow_live_writes=True)  # no unlock parameter exists
+    adapter = RobinhoodMCPBroker(fake)
+    adapter.allow_live_writes = True  # an attribute cannot unlock it either
+    for tool in ("place_option_order", "cancel_option_order"):
+        with pytest.raises(BrokerWritesDisabledError):
+            wait(adapter._call(tool, {"account_number": ACCOUNT.account_number}))
+    for command in (lambda: adapter.submit_order(intent()),
+                    lambda: adapter.cancel_order("synthetic-logical")):
+        with pytest.raises(BrokerWritesDisabledError):
+            command()
+    assert not any(c[0] in {"place_option_order", "cancel_option_order"} for c in fake.calls)
 
 
 def test_fake_mcp_ref_id_idempotency_deduplication():

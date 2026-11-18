@@ -40,6 +40,7 @@ from tests.fixtures.live_mocks import (
     FakeClock,
     MockProcessManager,
     StatefulFakeMCP,
+    live_journal,
 )
 
 
@@ -89,8 +90,8 @@ def managed_live_env(tmp_path: Path):
         telegram_api_hash="a" * 32,
         telegram_session_path=session_file,
         managed_install_root=root,
+        live_journal_path=live_journal(root / "data" / "live_journal.sqlite3"),
         max_daily_loss_usd=Decimal("750"),
-        max_concurrent_positions=3,
     )
     return root, settings, paper_db, live_db
 
@@ -222,7 +223,7 @@ def test_live_dispatch_operational_cycle(managed_live_env) -> None:
     assert len(fake_mcp.orders) == 1
     order = next(iter(fake_mcp.orders.values()))
     assert order["direction"] == "buy"
-    assert order["quantity"] == "1"
+    assert Decimal(order["quantity"]) == 1
 
     # Verify recorded in live.sqlite3
     with sqlite3.connect(live_db) as conn:
@@ -279,7 +280,7 @@ def test_live_dispatch_single_entry_bounded_acceptance(managed_live_env) -> None
 
     # CRITICAL: Verify EXACTLY 1 order submitted despite 2 eligible candidates
     assert len(fake_mcp.orders) == 1
-    assert next(iter(fake_mcp.orders.values()))["quantity"] == "1"
+    assert Decimal(next(iter(fake_mcp.orders.values()))["quantity"]) == 1
 
     # Verify stop marker was automatically written to latch the service closed
     stop_file = root / "state" / "stop.request"
@@ -314,7 +315,7 @@ def test_dashboard_live_mode_availability_and_reporting(managed_live_env, monkey
     monkeypatch.setenv("TELEGRAM_API_HASH", settings.telegram_api_hash)
     monkeypatch.setenv("TELEGRAM_SESSION_PATH", str(settings.telegram_session_path))
     monkeypatch.setenv("MAX_PREMIUM_PER_SIGNAL_USD", "999")
-    monkeypatch.setenv("MAX_TOTAL_EXPOSURE_USD", "9999")
+    monkeypatch.setenv("LIVE_JOURNAL_PATH", str(settings.live_journal_path))
 
     with running_dashboard(live_db) as base_url:
         # 1. HTML Console

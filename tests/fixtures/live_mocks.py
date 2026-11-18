@@ -428,7 +428,7 @@ class StatefulFakeMCP:
         for option_id, (quantity, cost) in held.items():
             if quantity > 0:
                 positions.append({
-                    "option_id": option_id, "type": "long", "quantity": f"{quantity}.0000",
+                    "option_id": option_id, "type": "long", "quantity": f"{quantity:.4f}",
                     "average_price": str(cost / quantity),
                     "trade_value_multiplier": "100.0000"})
         return positions
@@ -653,3 +653,13 @@ def execute_flatten_positions(
 ) -> list[OrderIntent]:
     """Safely execute position liquidation and buy cancellation on an engine."""
     return engine.flatten_positions(now)
+
+
+def live_journal(path: Path) -> Path:
+    """Pre-create the separate durable LiveBroker journal (never overwrites)."""
+    from swift_autotrader.broker.live_broker import LiveBroker
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        LiveBroker.create_journal(path)
+    return path

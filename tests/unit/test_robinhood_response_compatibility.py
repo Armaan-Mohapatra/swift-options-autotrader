@@ -1,9 +1,7 @@
 """Unit tests for Robinhood MCP response normalization, reconciliation, and durable order linkage."""
 from __future__ import annotations
 
-import asyncio
-import sqlite3
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -16,10 +14,8 @@ from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
     MCPContractError,
     MCPInstrument,
-    RobinhoodLiveBroker,
     RobinhoodMCPBroker,
 )
-from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 
@@ -227,60 +223,50 @@ def test_normalize_order_executions_list_fallback():
     assert status.fills[1].fill_id == "exec-part-2"
 
 
+def _live(tmp_path: Path, fake=None, *, journal: Path | None = None):
+    """The canonical LiveBroker on the offline real-shape MCP fake."""
+    from swift_autotrader.broker.live_broker import LiveBroker
+    from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP, live_journal
+
+    if fake is None:
+        fake = StatefulFakeMCP(account_number=ACCOUNT.account_number,
+                               clock=FakeClock(datetime(2026, 11, 16, 15, 0, tzinfo=UTC)))
+    journal = journal or live_journal(tmp_path / "live_journal.sqlite3")
+    broker = LiveBroker(journal, fake, account_number=ACCOUNT.account_number,
+                        writes_enabled=True, kill_switch=lambda: False,
+                        signal_gate=lambda _signal: "ENTRY", clock=fake.clock)
+    return broker, fake
+
+
+def _spy_entry(logical_id: str = "sig-1:entry") -> OrderIntent:
+    return OrderIntent(logical_id, f"idemp-{logical_id}", CONTRACT, OrderSide.BUY_TO_OPEN,
+                       1, Decimal("1.22"))
+
+
 def test_durable_broker_id_persistence_and_recovery(tmp_path: Path):
-    from tests.fixtures.live_mocks import StatefulFakeMCP
-
-    db_path = tmp_path / "swift.sqlite3"
-    apply_migrations(db_path)
-
-    # Seed an option_signals and order_intents row
-    with sqlite3.connect(db_path) as db:
-        db.execute(
-            "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,created_at_utc,state) "
-            "VALUES('sig-1', 1, 'SPY', 'CALL', '680', '2026-11-20', '1.25', '2026-11-16T14:30:00Z', 'PROCESSED')"
-        )
-        db.execute(
-            "INSERT INTO order_intents(logical_order_id,signal_id,idempotency_key,side,requested_quantity,limit_price,state) "
-            "VALUES('order-log-1', 'sig-1', 'idemp-order-log-1', 'BUY_TO_OPEN', 1, '1.25', 'SUBMITTED')"
-        )
-
-    fake_mcp = StatefulFakeMCP(account_number="test-live-acc")
-    mcp_broker = RobinhoodMCPBroker(fake_mcp, allow_live_writes=True)
-    loop = asyncio.new_event_loop()
-
+    """Restart recovers the broker order from the durable live journal; never re-places."""
+    broker1, fake = _live(tmp_path)
     try:
-        broker1 = RobinhoodLiveBroker(mcp_broker, ACCOUNT, loop=loop, db_path=db_path)
-        broker1._resolved_instruments[CONTRACT] = INSTRUMENT
-
-        intent_obj = make_intent("order-log-1")
-        submit_status = broker1.submit_order(intent_obj)
-        assert submit_status.state in (BrokerOrderState.ACCEPTED, BrokerOrderState.SUBMITTED)
-        assert submit_status.broker_order_id is not None
-        assigned_broker_id = submit_status.broker_order_id
-
-        # Verify broker_order_id was persisted into sqlite database
-        with sqlite3.connect(db_path) as db:
-            persisted_id = db.execute(
-                "SELECT broker_order_id FROM order_intents WHERE logical_order_id='order-log-1'"
-            ).fetchone()[0]
-        assert persisted_id == assigned_broker_id
-
-        # Simulate process crash and restart: create a new broker instance from same db
-        broker2 = RobinhoodLiveBroker(mcp_broker, ACCOUNT, loop=loop, db_path=db_path)
-        assert "order-log-1" in broker2._broker_id_map
-        assert broker2._broker_id_map["order-log-1"] == assigned_broker_id
-
-        # Query order on broker2 using logical ID; should resolve using persisted broker order id
-        queried_status = broker2.get_order("order-log-1")
-        assert queried_status.broker_order_id == assigned_broker_id
-        assert queried_status.state in (BrokerOrderState.ACCEPTED, BrokerOrderState.SUBMITTED)
-
-        # Cancel order on broker2
-        cancel_status = broker2.cancel_order("order-log-1")
-        assert cancel_status.state == BrokerOrderState.CANCELED
-
+        status = broker1.submit_order(_spy_entry())
+        assert status.state is BrokerOrderState.ACCEPTED
     finally:
-        loop.close()
+        broker1.close()
+    places = sum(1 for name, _ in fake.calls if name == "place_option_order")
+    assert places == 1 and len(fake.orders) == 1
+    broker_id = next(iter(fake.orders))
+
+    # Simulated crash/restart: a new broker instance on the same journal.
+    broker2, _ = _live(tmp_path, fake, journal=broker1.path)
+    try:
+        assert broker2._load("sig-1:entry").broker_id == broker_id
+        assert broker2.get_order("sig-1:entry").state is BrokerOrderState.ACCEPTED
+        assert broker2.submit_order(_spy_entry()).state is BrokerOrderState.ACCEPTED
+        assert broker2.cancel_order("sig-1:entry").state is BrokerOrderState.CANCELED
+        cancels = [a for name, a in fake.calls if name == "cancel_option_order"]
+        assert [a["order_id"] for a in cancels] == [broker_id]
+    finally:
+        broker2.close()
+    assert sum(1 for name, _ in fake.calls if name == "place_option_order") == 1
 
 
 @pytest.mark.parametrize("mutations", [
@@ -329,28 +315,43 @@ def test_fill_without_own_timestamp_is_not_inferred():
     {"order_checks": [{"severity": "warning", "code": "REVIEW"}], "approval_required": False},
     {"order_checks": []},
 ])
-def test_provider_review_blocks_placement(review, monkeypatch):
-    from swift_autotrader.broker.robinhood_mcp import normalize_read_only_review
-    adapter = RobinhoodMCPBroker(MockMCPClient(), allow_live_writes=True)
-    async def fake_review(*args):
-        return normalize_read_only_review(review)
-    async def forbidden(*args, **kwargs):
-        pytest.fail("Order placement must not be called")
-    monkeypatch.setattr(adapter, "review_order", fake_review)
-    monkeypatch.setattr(adapter, "_call", forbidden)
-    with pytest.raises(MCPContractError):
-        asyncio.run(adapter.place_order(ACCOUNT, INSTRUMENT, make_intent()))
+def test_provider_review_blocks_placement(review, tmp_path):
+    """Robinhood's own pre-trade review is never bypassed: a blocked review sends nothing."""
+    from swift_autotrader.broker.live_broker import LiveSafetyError
+
+    broker, fake = _live(tmp_path)
+    original = fake.call_tool
+
+    async def reviewed(name, arguments):
+        if name == "review_option_order":
+            return {"structuredContent": {"data": review}}
+        return await original(name, arguments)
+
+    fake.call_tool = reviewed
+    try:
+        with pytest.raises((LiveSafetyError, MCPContractError)):
+            broker.submit_order(_spy_entry())
+    finally:
+        broker.close()
+    assert not any(name == "place_option_order" for name, _ in fake.calls)
 
 
 def test_durable_identity_conflict_cannot_be_silently_ignored(tmp_path):
-    db = tmp_path / "journal.sqlite3"
-    with sqlite3.connect(db) as conn:
-        conn.execute("CREATE TABLE order_intents(logical_order_id TEXT PRIMARY KEY, broker_order_id TEXT)")
-        conn.execute("INSERT INTO order_intents VALUES ('logical-id', 'existing-broker-id')")
-    broker = RobinhoodLiveBroker(RobinhoodMCPBroker(MockMCPClient(), allow_live_writes=True), ACCOUNT, db_path=db)
-    with pytest.raises(MCPContractError, match="conflicting"):
-        broker._persist_broker_id("logical-id", "other-broker-id")
-    with pytest.raises(MCPContractError):
-        broker._persist_broker_id("unknown-id", "other-broker-id")
-    with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT broker_order_id FROM order_intents").fetchone()[0] == "existing-broker-id"
+    """A changed broker order ID for a journaled order is refused, never overwritten."""
+    from swift_autotrader.broker.live_broker import LiveSafetyError
+
+    broker, fake = _live(tmp_path)
+    try:
+        status = broker.submit_order(_spy_entry())
+        original_id = broker._load("sig-1:entry").broker_id
+        assert original_id is not None
+        with pytest.raises(LiveSafetyError, match="broker order ID changed"):
+            broker._persist_status("sig-1:entry", status, "other-broker-id")
+        with pytest.raises(LiveSafetyError, match="journal record missing"):
+            broker._persist_status("unknown-id", status, "other-broker-id")
+        assert broker._load("sig-1:entry").broker_id == original_id
+        with pytest.raises(LiveSafetyError, match="idempotency identity reused"):
+            broker.submit_order(OrderIntent("sig-1:entry", "a-different-key", CONTRACT,
+                                            OrderSide.BUY_TO_OPEN, 1, Decimal("1.22")))
+    finally:
+        broker.close()

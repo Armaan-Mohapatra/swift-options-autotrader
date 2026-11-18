@@ -2,7 +2,8 @@
 
 Nothing here is reached unless ``Settings.live_mode`` is true, i.e. every live setting
 is present (PAPER_ONLY=false, LIVE_ENABLED, ALLOW_BROKER_WRITES, BROKER_BACKEND=
-robinhood_live, LIVE_ACCOUNT_NUMBER, LIVE_JOURNAL_PATH). Anything less runs as paper.
+robinhood_mcp, ROBINHOOD_MCP_ACCOUNT, LIVE_JOURNAL_PATH). A partial live request is
+refused by ``Settings.validate()``; it never runs live.
 """
 from __future__ import annotations
 
@@ -125,10 +126,9 @@ def startup_self_check(settings: Settings, control_db: Path, broker: Broker | No
     verified as the pinned one (read-only get_accounts through the broker).
     """
     if not settings.live_mode:
-        note = (f" (live requested but incomplete, missing: {', '.join(settings.live_fallback)})"
-                if settings.live_fallback else "")
-        out(f"MODE=PAPER{note}")
-        return {"mode": "PAPER", "account": "", "kill_switch": ""}
+        # Incomplete live settings never reach here: Settings.validate() refuses them.
+        out(f"MODE={settings.mode}")
+        return {"mode": settings.mode, "account": "", "kill_switch": ""}
     out(f"MODE=LIVE account={settings.live_account_ending}")
     journal = settings.live_journal_path
     if journal is None or not Path(journal).is_file():

@@ -79,6 +79,12 @@ class FakeMCPClient:
         self.page_positions = False
         self.next_at_top = False  # `next` beside `data` instead of inside it
         self.extra_positions: list[dict[str, Any]] = []
+        # Paginated order history: older broker orders listed before ours.
+        self.history: list[dict[str, Any]] = []
+        self.orders_page_size: int | None = None
+        self.repeat_cursor = False
+        self.fail_order_page: int | None = None  # page index whose read is interrupted
+        self.order_pages_read = 0
 
     def _stamp(self) -> str:
         return self.clock().isoformat()
@@ -169,7 +175,19 @@ class FakeMCPClient:
                     'approval_required': self.approval_required}
         if name == 'get_option_orders':
             assert arguments['account_number'] == self.account
-            return {'data': {'orders': [dict(x) for x in self.orders], 'next': None}}
+            rows = [dict(x) for x in self.history + self.orders]
+            if not self.orders_page_size:
+                return {'data': {'orders': rows, 'next': None}}
+            start = int(arguments.get('cursor', '0'))
+            page = start // self.orders_page_size
+            self.order_pages_read += 1
+            if self.fail_order_page is not None and page == self.fail_order_page:
+                raise ConnectionError('synthetic outage in the middle of history pagination')
+            end = start + self.orders_page_size
+            cursor = 1 if self.repeat_cursor else end
+            more = end < len(rows)
+            return {'data': {'orders': rows[start:end],
+                             'next': f'https://api.example/o/?cursor={cursor}' if more else None}}
         if name == 'get_option_positions':
             assert arguments['account_number'] == self.account
             assert arguments['nonzero'] is True
@@ -657,9 +675,17 @@ def test_limits_are_read_from_risk_limits(scenario, monkeypatch):
     with pytest.raises(LiveSafetyError, match='100'):
         broker.submit_order(entry())
     monkeypatch.setattr(live_broker, 'PREMIUM_CEILING_USD', Decimal('999'))
-    monkeypatch.setattr(live_broker, 'DAILY_NET_LOSS_LIMIT_USD', Decimal('250'))
+    # The latch uses the configured ceiling (MAX_DAILY_LOSS_USD), bounded by risk_limits.
+    assert broker.loss_limit == risk_limits.DAILY_NET_LOSS_LIMIT_USD
+    tighter = LiveBroker(broker.path, fake, account_number=fake.account, writes_enabled=True,
+                         kill_switch=lambda: False, signal_gate=lambda _signal: 'ENTRY',
+                         clock=broker.clock, loss_limit=Decimal('250'))
     with pytest.raises(LiveSafetyError, match='latched'):  # fake P/L is -300
-        broker.submit_order(entry())
+        tighter.submit_order(entry())
+    tighter.close()
+    for bad in (Decimal('750.01'), Decimal('0'), Decimal('-1'), Decimal('NaN')):
+        with pytest.raises(ValueError, match='approved range'):
+            LiveBroker(broker.path, fake, account_number=fake.account, loss_limit=bad)
     assert fake.place_count == 0
 
 
@@ -893,3 +919,132 @@ def test_buying_power_comes_only_from_get_portfolio(scenario):
     fake.buying_power = '100'
     with pytest.raises(LiveSafetyError, match='buying power'):
         broker.submit_order(entry())
+
+
+# --- Order-history pagination: full coverage proof, never a 10-page assumption ----------
+
+def _history_filler(fake: FakeMCPClient, count: int) -> list[dict[str, Any]]:
+    """Older, unfilled foreign orders that pad the history across many pages."""
+    old = (fake.clock() - timedelta(days=3)).isoformat()
+    return [broker_order(fake, id=f'old-{i}', state='cancelled', created_at=old,
+                         updated_at=old) for i in range(count)]
+
+
+def _overnight_sell_filled_today(fake: FakeMCPClient) -> dict[str, Any]:
+    """Created yesterday (resting overnight), executed today: a prior-day position close."""
+    yesterday = (fake.clock() - timedelta(days=1)).isoformat()
+    order = broker_order(fake, id='overnight-sell', state='filled', created_at=yesterday,
+                         processed_quantity='1.0000',
+                         executions=[{'id': 'overnight-fill', 'quantity': '1.0000',
+                                      'price': '1.9000',
+                                      'timestamp': fake.clock().isoformat()}])
+    order['legs'][0].update(side='sell', position_effect='close')
+    return order
+
+
+def test_order_history_beyond_ten_pages_is_read_to_exhaustion(scenario):
+    """An overnight order executed today on page 14 is found by execution time and counted."""
+    broker, fake, _ = scenario
+    fake.orders_page_size = 3
+    fake.history = _history_filler(fake, 40) + [_overnight_sell_filled_today(fake)]
+    with pytest.raises(LiveSafetyError, match='overnight close'):
+        broker.submit_order(entry())
+    assert fake.order_pages_read >= 14
+    assert fake.place_count == 0
+    # Without the far-page overnight execution, the same deep history permits the entry.
+    fake.history = _history_filler(fake, 40)
+    assert broker.submit_order(entry()).state is BrokerOrderState.ACCEPTED
+    assert fake.place_count == 1
+
+
+def test_order_history_that_cannot_be_exhausted_fails_closed(scenario):
+    """More pages than the coverage cap is unverifiable: deny entries and risk refresh."""
+    broker, fake, _ = scenario
+    broker.submit_order(entry())  # an existing order whose status must be re-verified
+    fake.orders_page_size = 1
+    fake.history = _history_filler(fake, live_broker._ORDER_HISTORY_PAGES + 5)
+    with pytest.raises(live_broker.LivePreflightRefusal, match='order history'):
+        broker.submit_order(entry('signal-2'))
+    with pytest.raises(LiveSafetyError, match='order history'):
+        broker.refresh_daily_risk()
+    # Reconciliation without full history is UNKNOWN, never "absent", never resent.
+    assert broker.get_order('signal-1:entry').state is BrokerOrderState.UNKNOWN
+    assert fake.place_count == 1
+
+
+def test_repeated_history_cursor_fails_closed(scenario):
+    broker, fake, _ = scenario
+    fake.orders_page_size = 2
+    fake.repeat_cursor = True
+    fake.history = _history_filler(fake, 10)
+    with pytest.raises(live_broker.LivePreflightRefusal):
+        broker.submit_order(entry())
+    assert fake.place_count == 0
+
+
+def test_history_outage_mid_pagination_fails_closed(scenario):
+    broker, fake, _ = scenario
+    fake.orders_page_size = 2
+    fake.fail_order_page = 12
+    fake.history = _history_filler(fake, 40)
+    with pytest.raises(live_broker.LivePreflightRefusal, match='order history'):
+        broker.submit_order(entry())
+    assert fake.place_count == 0
+
+
+@pytest.mark.parametrize(('realized', 'unrealized', 'allowed'), [
+    ('-549.99', '-200', True),    # net -749.99: inside the $750 latch
+    ('-550', '-200', False),      # net -750.00: latched exactly at the ceiling
+    ('100', '-850', False),       # a realized gain cannot hide an unrealized loss
+    ('-780', '+20', False),       # net -760: an unrealized gain cannot hide a realized loss
+])
+def test_750_latch_uses_realized_plus_unrealized_at_the_exact_boundary(
+        scenario, realized, unrealized, allowed):
+    broker, fake, _ = scenario
+    fake.realized, fake.unrealized = realized, unrealized.lstrip('+')
+    if allowed:
+        assert broker.submit_order(entry()).state is BrokerOrderState.ACCEPTED
+        assert broker.refresh_daily_risk() is False
+    else:
+        with pytest.raises(LiveSafetyError, match='latched'):
+            broker.submit_order(entry())
+        assert fake.place_count == 0
+        # The latch persists for the New York day, across a recovery and a restart.
+        fake.realized, fake.unrealized = '0', '0'
+        restarted = LiveBroker(broker.path, fake, account_number=fake.account,
+                               writes_enabled=True, kill_switch=lambda: False,
+                               signal_gate=lambda _signal: 'ENTRY', clock=broker.clock)
+        with pytest.raises(LiveSafetyError, match='latched'):
+            restarted.submit_order(entry('signal-2'))
+        restarted.close()
+        assert fake.place_count == 0
+
+
+def test_full_exit_after_partial_fill_sells_exactly_the_filled_quantity(scenario):
+    """A partially filled (then cancelled) entry exits its full OWNED filled quantity only."""
+    broker, fake, clock = scenario
+    legacy = OrderIntent('legacy:entry', 'legacy-order-key', entry().contract,
+                         OrderSide.BUY_TO_OPEN, 2, Decimal('2.00'))
+    broker._reserve(legacy, option_id=fake.instrument_id, multiplier=100,
+                    available=Decimal('1000'))
+    with sqlite3.connect(broker.path) as con:
+        con.execute('UPDATE live_orders SET write_attempted=1 WHERE logical_id=?',
+                    ('legacy:entry',))
+    fake.orders.append(broker_order(
+        fake, id='legacy-order-broker', quantity='2.0000', price='2.0000',
+        state='cancelled', processed_quantity='1.0000',
+        executions=[{'id': 'legacy-fill-1', 'quantity': '1.0000', 'price': '1.9900',
+                     'timestamp': clock().isoformat()}]))
+    status = broker.get_order('legacy:entry')
+    assert status.state is BrokerOrderState.CANCELED and status.filled_quantity == 1
+    fake.position = 1
+    over = OrderIntent('legacy:exit', 'legacy-exit-2', legacy.contract,
+                       OrderSide.SELL_TO_CLOSE, 2, Decimal('1.95'))
+    with pytest.raises(LiveSafetyError, match='full signal quantity'):
+        broker.submit_order(over)
+    exact = OrderIntent('legacy:exit', 'legacy-exit-1', legacy.contract,
+                        OrderSide.SELL_TO_CLOSE, 1, Decimal('1.95'))
+    assert broker.submit_order(exact).state is BrokerOrderState.ACCEPTED
+    sell = fake.orders[-1]
+    assert Decimal(sell['quantity']) == 1
+    assert sell['legs'][0]['side'] == 'sell' and sell['legs'][0]['position_effect'] == 'close'

@@ -17,7 +17,6 @@ from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
     RobinhoodMCPBroker,
-    SubmissionNotAttemptedError,
 )
 from swift_autotrader.database.repository import TelegramStore
 from swift_autotrader.live_dispatch import LiveDispatcher
@@ -80,8 +79,7 @@ def _setup(settings, live_db, *, expires_in=90, hooks=None, review_override=None
     )
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True,
                          options_level="option_level_2")
-    mcp = RobinhoodMCPBroker(fake, approved_account_number=settings.robinhood_mcp_account,
-                             allow_live_writes=True)
+    mcp = RobinhoodMCPBroker(fake, approved_account_number=settings.robinhood_mcp_account)
     dispatcher = LiveDispatcher(
         live_db, settings.telegram_channel_id, mcp, account,
         MCPReadOnlyOptionData(mcp, calendar=OpenMarketCalendar()), settings,
@@ -120,8 +118,7 @@ def test_control_valid_scope_places_exactly_once(managed_live_env):
 def test_expiry_after_intent_blocks_placement(managed_live_env, tool):
     _, settings, _, live_db = managed_live_env
     dispatcher, fake = _setup(settings, live_db, hooks={tool: _expire})
-    with pytest.raises(SubmissionNotAttemptedError):
-        asyncio.run(dispatcher.run_once())
+    asyncio.run(dispatcher.run_once())  # refused unsent; the cycle itself completes
     assert _placements(fake) == 0
     assert _intent_state(live_db) == [("REJECTED",)]
     # A later cycle must never re-attempt the refused entry.
@@ -132,17 +129,16 @@ def test_expiry_after_intent_blocks_placement(managed_live_env, tool):
 def test_superseded_revision_during_review_blocks_placement(managed_live_env):
     _, settings, _, live_db = managed_live_env
     dispatcher, fake = _setup(settings, live_db, hooks={"review_option_order": _supersede})
-    with pytest.raises(SubmissionNotAttemptedError):
-        asyncio.run(dispatcher.run_once())
+    asyncio.run(dispatcher.run_once())  # refused unsent; the cycle itself completes
     assert _placements(fake) == 0
+    assert _intent_state(live_db) == [("REJECTED",)]
 
 
 def test_provider_required_approval_is_definitive_non_submission(managed_live_env):
     _, settings, _, live_db = managed_live_env
     dispatcher, fake = _setup(settings, live_db, review_override={"structuredContent": {"data": {
         "order_checks": [], "approval_required": True}}})
-    with pytest.raises(SubmissionNotAttemptedError):
-        asyncio.run(dispatcher.run_once())
+    asyncio.run(dispatcher.run_once())  # refused unsent; the cycle itself completes
     assert _placements(fake) == 0
     assert _intent_state(live_db) == [("REJECTED",)]
 
@@ -150,9 +146,9 @@ def test_provider_required_approval_is_definitive_non_submission(managed_live_en
 def test_malformed_review_is_definitive_non_submission(managed_live_env):
     _, settings, _, live_db = managed_live_env
     dispatcher, fake = _setup(settings, live_db, review_override={"structuredContent": {"data": {}}})
-    with pytest.raises(SubmissionNotAttemptedError):
-        asyncio.run(dispatcher.run_once())
+    asyncio.run(dispatcher.run_once())  # refused unsent; the cycle itself completes
     assert _placements(fake) == 0
+    assert _intent_state(live_db) == [("REJECTED",)]
 
 
 def test_guard_exception_fails_closed(managed_live_env):
@@ -161,10 +157,10 @@ def test_guard_exception_fails_closed(managed_live_env):
 
     def boom(_intent):
         raise sqlite3.OperationalError("database is locked")
-    dispatcher.mcp.submission_guard = boom
-    with pytest.raises(SubmissionNotAttemptedError):
-        asyncio.run(dispatcher.run_once())
+    dispatcher.live_broker.submission_guard = boom
+    asyncio.run(dispatcher.run_once())  # refused unsent; the cycle itself completes
     assert _placements(fake) == 0
+    assert _intent_state(live_db) == [("REJECTED",)]
 
 
 def test_guard_rejects_changed_terms_and_duplicates_but_never_blocks_exits(managed_live_env):

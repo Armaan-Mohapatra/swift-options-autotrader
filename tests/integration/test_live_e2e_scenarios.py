@@ -19,9 +19,9 @@ from decimal import Decimal
 from pathlib import Path
 
 from swift_autotrader.analytics.metrics import PaperAnalytics
+from swift_autotrader.broker.live_broker import LiveBroker
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
-    RobinhoodLiveBroker,
     RobinhoodMCPBroker,
 )
 from swift_autotrader.config import Settings
@@ -38,6 +38,7 @@ from tests.fixtures.live_mocks import (
     MockProcessManager,
     MockTelegramBotAPI,
     StatefulFakeMCP,
+    live_journal,
 )
 from tests.integration.test_engine_flatten import seed_signal_and_entry
 
@@ -150,7 +151,7 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
     Flow:
     1. Swift alert: 'SPY 680C 11/20 @ 1.20'
     2. NBBO Ask at $1.22; the entry limit stays the exact $1.20 alert premium
-    3. LiveDispatcher places BUY_TO_OPEN via RobinhoodLiveBroker to StatefulFakeMCP
+    3. LiveDispatcher places BUY_TO_OPEN via the canonical LiveBroker to StatefulFakeMCP
     4. MCP order filled at $1.20
     5. Exit alert arrives: 'SPY SOLD HALF'
     6. LiveDispatcher places SELL_TO_CLOSE at $1.80
@@ -163,7 +164,7 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
 
     clock = FakeClock(datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC))
     mcp = StatefulFakeMCP(account_number="live-acc-sc1", buying_power=Decimal("10000.00"), clock=clock)
-    mcp_broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(mcp)
     account = MCPAccount("live-acc-sc1", True, "option_level_2")
     feed = ScenarioQuoteFeed(clock, contract=SPY_CONTRACT)
     store = TelegramStore(db_path, CHANNEL_ID)
@@ -182,7 +183,7 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
         robinhood_mcp_account="live-acc-sc1",
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
-        max_concurrent_positions=3,
+        live_journal_path=live_journal(db_path.parent / "live_journal.sqlite3"),
         telegram_channel_id=CHANNEL_ID,
         telegram_api_id=12345,
         telegram_api_hash="a" * 32,
@@ -242,7 +243,7 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
     sell_order_id = list(mcp.orders.keys())[1]
     sell_order = mcp.orders[sell_order_id]
     assert sell_order["direction"] == "sell"
-    assert sell_order["quantity"] == "1"
+    assert Decimal(sell_order["quantity"]) == 1
 
     # 7. Fill sell order on MCP
     mcp.fill_order(sell_order_id, filled_quantity=1, fill_price=Decimal("1.80"))
@@ -275,9 +276,9 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
     Flow:
     1. Rapid momentum alert arrives: 'QQQ 520C 11/20 @ 2.00'
     2. Market ask spikes to $2.35 (+17.5% > 10% tolerance ceiling $2.20)
-    3. LiveDispatcher executes cycle off-thread; resolve_live_entry_limit raises SlippageExceededError
-    4. Order submission blocked by live engine; zero orders placed on MCP; capital 100% protected.
-    5. BLOCKED decision and SLIPPAGE_EXCEEDED alert persisted in SQLite; local notification recorded.
+    3. LiveBroker's 10% ask guard refuses the entry in preflight (the limit is never raised).
+    4. Zero orders placed on MCP; the exact-limit intent is a recorded unsent refusal.
+    5. A later normal quote never resurrects or re-prices the refused entry.
     """
     db_path = tmp_path / "data" / "swift.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -295,7 +296,7 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
         bid="2.30",
         ask="2.35",
     )
-    mcp_broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(mcp)
     account = MCPAccount("live-acc-sc2", True, "option_level_2")
     feed = ScenarioQuoteFeed(clock, contract=QQQ_CONTRACT)
     feed.bid = Decimal("2.30")
@@ -316,7 +317,7 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
         robinhood_mcp_account="live-acc-sc2",
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
-        max_concurrent_positions=3,
+        live_journal_path=live_journal(db_path.parent / "live_journal.sqlite3"),
         telegram_channel_id=CHANNEL_ID,
         telegram_api_id=12345,
         telegram_api_hash="a" * 32,
@@ -336,20 +337,29 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
     # 1. Ingest Telegram message
     ingest_scenario_message(store, clock, "QQQ 520C 11/20 @ 2.00", msg_id=201)
 
-    # 2. The gap-up never raises the bid: the exact alert premium rests at the broker
+    # 2. The gap-up never raises the limit, and a >10% ask is a REJECTION guard at LiveBroker:
+    #    nothing is placed at Robinhood.
     result = asyncio.run(dispatcher.run_once())
     assert result.status == "LIVE_CYCLE_COMPLETED"
     assert result.parsed_events == 1
-    assert result.entry_orders_submitted == 1
+    assert result.entry_orders_submitted == 0
     assert result.close_orders_submitted == 0
-    assert len(mcp.orders) == 1
-    assert list(mcp.orders.values())[0]["price"] == "2.00"
+    assert len(mcp.orders) == 0
+    assert not any(name == "place_option_order" for name, _ in mcp.calls)
 
-    # 3. Durable audit shows an exact-limit intent and no chase or price alert
+    # 3. Durable audit: the exact alert limit was recorded, refused unsent, never chased.
     import sqlite3
     with sqlite3.connect(str(db_path)) as db:
-        assert db.execute("SELECT limit_price FROM order_intents").fetchall() == [("2.00",)]
-        assert db.execute("SELECT count(*) FROM paper_engine_alerts").fetchone()[0] == 0
+        assert db.execute("SELECT limit_price, state FROM order_intents").fetchall() == [
+            ("2.00", "REJECTED")]
+        assert {r[0] for r in db.execute("SELECT code FROM paper_engine_alerts")} == {
+            "SUBMISSION_REFUSED_PRE_PLACEMENT"}
+
+    # 4. A later cycle with a normal quote never resurrects or re-prices the refused entry.
+    mcp.set_quote("opt-qqq-520c", "1.98", "2.02")
+    clock.advance(5)
+    assert asyncio.run(dispatcher.run_once()).entry_orders_submitted == 0
+    assert len(mcp.orders) == 0
 
 
 def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
@@ -371,7 +381,7 @@ def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
 
     clock = FakeClock(datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC))
     mcp = StatefulFakeMCP(account_number="live-acc-sc3", buying_power=Decimal("10000.00"), clock=clock)
-    mcp_broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(mcp)
     account = MCPAccount("live-acc-sc3", True, "option_level_2")
     feed = ScenarioQuoteFeed(clock, contract=SPY_CONTRACT)
     store = TelegramStore(db_path, CHANNEL_ID)
@@ -389,7 +399,7 @@ def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
         robinhood_mcp_account="live-acc-sc3",
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
-        max_concurrent_positions=3,
+        live_journal_path=live_journal(db_path.parent / "live_journal.sqlite3"),
         telegram_channel_id=CHANNEL_ID,
         telegram_api_id=12345,
         telegram_api_hash="a" * 32,
@@ -451,25 +461,23 @@ def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
             "SELECT outcome, reason FROM paper_engine_decisions ORDER BY decided_at_utc DESC"
         ).fetchall()
         assert decisions[0][0] == "BLOCKED"
-        assert decisions[0][1] == "DAILY_LOSS_LIMIT_REACHED"
+        assert decisions[0][1] == "DAILY_LOSS_CEILING_REACHED"
 
         alerts = db.execute(
-            "SELECT code FROM paper_engine_alerts WHERE code='DAILY_LOSS_LIMIT_REACHED'"
+            "SELECT code FROM paper_engine_alerts WHERE code='DAILY_LOSS_CEILING_REACHED'"
         ).fetchall()
         assert len(alerts) >= 1
 
     # 7. Local notification scan
     dispatcher.notifications.scan()
     pending = dispatcher.notifications.pending(10)
-    assert any(n.code == "DAILY_LOSS_LIMIT_REACHED" and n.category == "PAPER_ORDER" for n in pending)
+    assert any(n.code == "DAILY_LOSS_CEILING_REACHED" and n.category == "PAPER_ORDER" for n in pending)
 
     # 8. Boundary unit checks preserved
     ceilings = RiskCeilings(
         contracts_per_signal=1,
         premium_per_signal_usd=Decimal("500"),
-        total_exposure_usd=Decimal("5000"),
-        max_daily_loss_usd=Decimal("500"),
-        max_concurrent_positions=3,
+        daily_net_loss_usd=Decimal("500"),
     )
     preflight_ok = Preflight(
         instrument_verified=True,
@@ -483,20 +491,20 @@ def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
     assert rejection_reason(
         SPY_CONTRACT, Decimal("1.20"), 1, ceilings, preflight_ok,
         outstanding_usd=Decimal("0"), active_signals=0,
-        cumulative_realized_loss_usd=Decimal("200.00"),
+        realized_net_pnl_today_usd=Decimal("-200.00"),
     ) is None
     # Breached ceiling ($520 loss > $500 ceiling): tripped
     assert rejection_reason(
         SPY_CONTRACT, Decimal("1.20"), 1, ceilings, preflight_ok,
         outstanding_usd=Decimal("0"), active_signals=0,
-        cumulative_realized_loss_usd=Decimal("520.00"),
-    ) == "DAILY_LOSS_LIMIT_REACHED"
+        realized_net_pnl_today_usd=Decimal("-520.00"),
+    ) == "DAILY_LOSS_CEILING_REACHED"
     # Exact boundary ($500 loss == $500 ceiling): tripped
     assert rejection_reason(
         SPY_CONTRACT, Decimal("1.20"), 1, ceilings, preflight_ok,
         outstanding_usd=Decimal("0"), active_signals=0,
-        cumulative_realized_loss_usd=Decimal("500.00"),
-    ) == "DAILY_LOSS_LIMIT_REACHED"
+        realized_net_pnl_today_usd=Decimal("-500.00"),
+    ) == "DAILY_LOSS_CEILING_REACHED"
 
 
 def test_scenario_4_mobile_emergency_remote_flatten(tmp_path: Path) -> None:
@@ -517,23 +525,24 @@ def test_scenario_4_mobile_emergency_remote_flatten(tmp_path: Path) -> None:
 
     clock = FakeClock(datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC))
     mcp = StatefulFakeMCP(account_number="live-acc-sc4", buying_power=Decimal("10000.00"), clock=clock)
-    mcp_broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
-    account = MCPAccount("live-acc-sc4", True, "option_level_2")
-    live_broker = RobinhoodLiveBroker(mcp_broker, account)
+    live_broker = LiveBroker(live_journal(db_path.parent / "live_journal.sqlite3"), mcp,
+                             account_number="live-acc-sc4", writes_enabled=True,
+                             kill_switch=lambda: False, signal_gate=lambda _signal: "ENTRY",
+                             clock=clock)
 
     engine = PaperOrderEngine(
         db_path,
         live_broker,
         preflight=PaperPreflight(),
-        limits=RiskCeilings(max_concurrent_positions=5),
+        limits=RiskCeilings(),
         clock=clock,
         live_mode=True,
     )
 
     now = clock.now()
 
-    # Seed position: 2 SPY contracts bought and filled safely via seed helper
-    seed_signal_and_entry(engine, "sig_held", SPY_CONTRACT, 2, Decimal("1.20"), now, filled_quantity=2)
+    # Seed position: one SPY contract (one per original entry) bought and filled
+    seed_signal_and_entry(engine, "sig_held", SPY_CONTRACT, 1, Decimal("1.20"), now, filled_quantity=1)
 
     # Setup Kill Switch
     bot = MockTelegramBotAPI(
@@ -555,8 +564,9 @@ def test_scenario_4_mobile_emergency_remote_flatten(tmp_path: Path) -> None:
     # Verify liquidation SELL order was submitted to broker/MCP (order 1 is seed buy, order 2 is flatten sell)
     assert len(mcp.orders) == 2
     sell_order = list(mcp.orders.values())[1]
-    assert sell_order["direction"] == "sell"
-    assert sell_order["quantity"] == "2"
+    assert sell_order["legs"][0]["side"] == "sell"
+    assert sell_order["legs"][0]["position_effect"] == "close"
+    assert Decimal(sell_order["quantity"]) == 1
 
     # Verify engine state is paused / emergency stopped
     paused, emergency_stop = engine._control()
@@ -641,24 +651,20 @@ def test_scenario_6_unauthorized_attacker_killswitch_rejection(tmp_path: Path) -
     assert len(bot.pending_tokens) == 0
 
 
-def test_scenario_7_concurrent_rapid_signals_position_cap_saturation(tmp_path: Path) -> None:
-    """Scenario 7: Concurrent Rapid Telegram Signals with Position Cap Saturation.
+def test_scenario_7_concurrent_rapid_signals_have_no_trade_count_cap(tmp_path: Path) -> None:
+    """Scenario 7: Concurrent rapid Telegram signals; no trade-count cap (owner contract).
 
     Exercises: F1 (Telegram Alerts), F3 (Live Risk Ceilings), F5 (Live Market Dispatcher).
     Flow:
-    1. Settings configured with max_concurrent_positions = 2
+    1. Owner contract: no trade-count or aggregate cap (buying power is the only bound)
     2. Multi-contract quote feed provides verified quotes for SPY, AAPL, NVDA, and QQQ
     3. Three rapid concurrent signals arrive before dispatch cycle runs:
        - Alert 1: SPY 680C 11/20 @ 1.20
        - Alert 2: AAPL 250C 11/20 @ 1.50
        - Alert 3: NVDA 140C 11/20 @ 3.00
-    4. LiveDispatcher.run_once() parses all 3 alerts:
-       - Submits buy order for SPY (active_signals=0)
-       - Submits buy order for AAPL (active_signals=1)
-       - Evaluates preflight for NVDA (active_signals=2 >= 2) -> BLOCKED with OPEN_SIGNAL_CAP_EXCEEDED
-    5. Exactly 2 orders placed with Robinhood MCP broker; 3rd order blocked; notification logged.
-    6. Open positions filled on MCP; 4th alert arrives ('QQQ 500C 11/20 @ 2.00') -> also BLOCKED.
-    7. Standalone mathematical boundary checks verify active_signals = 0, 1, 2, 3.
+    4. LiveDispatcher.run_once() submits one contract for each of the 3 alerts.
+    5. Positions fill; a 4th alert ('QQQ 500C 11/20 @ 2.00') also enters.
+    6. Standalone checks: a VOLUNTARY operator open-signal cap is still honoured.
     """
     db_path = tmp_path / "data" / "swift.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -666,7 +672,7 @@ def test_scenario_7_concurrent_rapid_signals_position_cap_saturation(tmp_path: P
 
     clock = FakeClock(datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC))
     mcp = StatefulFakeMCP(account_number="live-acc-sc7", buying_power=Decimal("10000.00"), clock=clock)
-    mcp_broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(mcp)
     account = MCPAccount("live-acc-sc7", True, "option_level_2")
 
     aapl_contract = OptionContract("AAPL", OptionRight.CALL, Decimal("250"), date(2026, 11, 20))
@@ -698,7 +704,7 @@ def test_scenario_7_concurrent_rapid_signals_position_cap_saturation(tmp_path: P
         robinhood_mcp_account="live-acc-sc7",
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
-        max_concurrent_positions=2,  # Position cap is 2
+        live_journal_path=live_journal(db_path.parent / "live_journal.sqlite3"),
         telegram_channel_id=CHANNEL_ID,
         telegram_api_id=12345,
         telegram_api_hash="a" * 32,
@@ -722,58 +728,41 @@ def test_scenario_7_concurrent_rapid_signals_position_cap_saturation(tmp_path: P
     clock.advance(seconds=1)
     ingest_scenario_message(store, clock, "NVDA 140C 11/20 @ 3.00", msg_id=703)
 
-    # 2. First dispatch cycle: Processes 3 alerts, submits exactly 2 orders, blocks 3rd
+    # 2. First dispatch cycle: owner contract has NO trade-count cap, so every original
+    #    ENTRY submits exactly one contract; only buying power bounds exposure.
     res = asyncio.run(dispatcher.run_once())
     assert res.status == "LIVE_CYCLE_COMPLETED"
     assert res.parsed_events == 3
-    assert res.entry_orders_submitted == 2
-    assert len(mcp.orders) == 2
+    assert res.entry_orders_submitted == 3
+    assert len(mcp.orders) == 3
+    assert all(Decimal(o["quantity"]) == 1 for o in mcp.orders.values())
 
-    # Verify durable decisions in SQLite
     import sqlite3
     with sqlite3.connect(str(db_path)) as db:
         decisions = db.execute(
             "SELECT outcome, reason FROM paper_engine_decisions ORDER BY decided_at_utc ASC"
         ).fetchall()
-        assert len(decisions) == 3
-        assert decisions[0][0] == "INTENT_RECORDED"
-        assert decisions[1][0] == "INTENT_RECORDED"
-        assert decisions[2][0] == "BLOCKED"
-        assert decisions[2][1] == "OPEN_SIGNAL_CAP_EXCEEDED"
+        assert decisions == [("INTENT_RECORDED", None)] * 3
 
-    # Verify notification recorded
-    dispatcher.notifications.scan()
-    pending = dispatcher.notifications.pending(10)
-    assert any(n.code == "OPEN_SIGNAL_CAP_EXCEEDED" for n in pending)
-
-    # 3. Fill both active orders on MCP
+    # 3. Fill the active orders on MCP
     order_ids = list(mcp.orders.keys())
-    mcp.fill_order(order_ids[0], 1, Decimal("1.20"))
-    mcp.fill_order(order_ids[1], 1, Decimal("1.50"))
+    for oid, price in zip(order_ids, ("1.20", "1.50", "3.00"), strict=True):
+        mcp.fill_order(oid, 1, Decimal(price))
     clock.advance(seconds=15)
     asyncio.run(dispatcher.run_once())
 
-    # 4. Across-cycle saturation: Ingest 4th alert while 2 positions are OPEN
+    # 4. Across-cycle: a 4th alert while three positions are open still enters.
     ingest_scenario_message(store, clock, "QQQ 500C 11/20 @ 2.00", msg_id=704)
     clock.advance(seconds=5)
     res4 = asyncio.run(dispatcher.run_once())
-    assert res4.entry_orders_submitted == 0
-    assert len(mcp.orders) == 2  # Total orders remain 2
-
-    with sqlite3.connect(str(db_path)) as db:
-        latest = db.execute(
-            "SELECT outcome, reason FROM paper_engine_decisions ORDER BY decided_at_utc DESC LIMIT 1"
-        ).fetchone()
-        assert latest[0] == "BLOCKED"
-        assert latest[1] == "OPEN_SIGNAL_CAP_EXCEEDED"
+    assert res4.entry_orders_submitted == 1
+    assert len(mcp.orders) == 4
 
     # 5. Boundary unit checks preserved
     ceilings = RiskCeilings(
         contracts_per_signal=1,
         premium_per_signal_usd=Decimal("500"),
-        total_exposure_usd=Decimal("5000"),
-        max_daily_loss_usd=Decimal("500"),
-        max_concurrent_positions=2,
+        daily_net_loss_usd=Decimal("500"),
         open_signal_count=2,
     )
     preflight = Preflight(

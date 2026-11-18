@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from swift_autotrader.broker.live_broker import LiveBroker
 from swift_autotrader.broker.robinhood_mcp import MCPAccount, RobinhoodMCPBroker
 from swift_autotrader.config import Settings
 from swift_autotrader.database.migrate import apply_migrations
@@ -92,8 +93,10 @@ def dispatch_rig(tmp_path: Path) -> tuple[Path, FakeClock, StatefulFakeMCP, Mock
 
     clock = FakeClock(datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC))
     mcp = StatefulFakeMCP(account_number="test-live-acc", buying_power=Decimal("10000.00"), clock=clock)
-    mcp_broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(mcp)  # read adapter; LiveBroker is the one writer
     account = MCPAccount("test-live-acc", True, "option_level_2")
+    journal = tmp_path / "data" / "live_journal.sqlite3"
+    LiveBroker.create_journal(journal)
     feed = MockQuoteFeed(clock)
     store = TelegramStore(db_path, CHANNEL_ID)
 
@@ -105,13 +108,12 @@ def dispatch_rig(tmp_path: Path) -> tuple[Path, FakeClock, StatefulFakeMCP, Mock
         paper_only=False,
         live_enabled=True,
         max_premium_per_signal_usd=Decimal("999"),
-        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="test-live-acc",
         db_path=db_path,
         max_daily_loss_usd=Decimal("500"),
-        max_concurrent_positions=3,
+        live_journal_path=journal,
         kill_switch_enabled=True,
         kill_switch_telegram_bot_token="test_bot_token",
         kill_switch_telegram_chat_id=123456789,
@@ -225,8 +227,10 @@ def test_live_dispatch_watchdog_cancellation(dispatch_rig: tuple) -> None:
 def test_live_dispatch_risk_ceilings_from_settings(dispatch_rig: tuple) -> None:
     """T1-F5-05: Dispatcher accurately inherits configured risk limits from Settings."""
     _, _, _, _, _, dispatcher = dispatch_rig
-    assert dispatcher.limits.max_daily_loss_usd == Decimal("500")
-    assert dispatcher.limits.max_concurrent_positions == 3
+    assert dispatcher.limits.daily_net_loss_usd == Decimal("500")
+    # Owner contract: no trade-count or aggregate-exposure cap.
+    assert dispatcher.limits.open_signal_count is None
+    assert dispatcher.limits.total_exposure_usd is None
 
 
 # ============================================================================
@@ -255,22 +259,22 @@ def test_live_dispatch_stale_market_snapshot_rejected(dispatch_rig: tuple) -> No
     assert result.entry_orders_submitted == 0
 
 
-def test_live_dispatch_disallowed_writes_construction_error(tmp_path: Path, live_settings: Settings) -> None:
-    """T2-F5-03: Construction fails if allow_live_writes is False."""
-    mcp = StatefulFakeMCP()
-    broker = RobinhoodMCPBroker(mcp, allow_live_writes=False)
-    account = MCPAccount("acc", True, "option_level_2")
-    feed = MockQuoteFeed(FakeClock())
+def test_live_dispatch_refuses_missing_or_absent_live_journal(tmp_path: Path, live_settings: Settings) -> None:
+    """T2-F5-03: Construction fails closed without the separate, pre-created live journal."""
+    from dataclasses import replace
 
-    with pytest.raises(PermissionError, match="allow_live_writes=True"):
-        LiveDispatcher(
-            tmp_path / "data" / "swift.sqlite3",
-            CHANNEL_ID,
-            broker,
-            account,
-            feed,  # type: ignore[arg-type]
-            live_settings,
-        )
+    from swift_autotrader.broker.live_broker import LiveSafetyError
+    broker = RobinhoodMCPBroker(StatefulFakeMCP())
+    account = MCPAccount("synthetic-account", True, "option_level_2")
+    feed = MockQuoteFeed(FakeClock())
+    db = tmp_path / "data" / "swift.sqlite3"
+    with pytest.raises(PermissionError, match="separate durable live journal"):
+        LiveDispatcher(db, CHANNEL_ID, broker, account, feed,  # type: ignore[arg-type]
+                       replace(live_settings, live_journal_path=None))
+    assert not live_settings.live_journal_path.exists()
+    with pytest.raises(LiveSafetyError, match="pre-create the durable journal"):
+        LiveDispatcher(db, CHANNEL_ID, broker, account, feed,  # type: ignore[arg-type]
+                       live_settings)
 
 
 @pytest.mark.parametrize("ask", ["1.25", "1.50"])
@@ -284,7 +288,7 @@ def test_live_dispatch_entry_keeps_exact_alert_limit(dispatch_rig: tuple, ask: s
     assert result.status == "LIVE_CYCLE_COMPLETED"
     assert result.entry_orders_submitted == 1
     assert len(mcp.orders) == 1
-    assert list(mcp.orders.values())[0]["price"] == "1.20"
+    assert Decimal(list(mcp.orders.values())[0]["price"]) == Decimal("1.20")
 
     with sqlite3.connect(str(db_path)) as db:
         assert db.execute("SELECT limit_price FROM order_intents").fetchall() == [("1.20",)]
@@ -307,17 +311,18 @@ def test_live_dispatch_non_entry_alert_ignored(dispatch_rig: tuple) -> None:
 
 
 def test_t3_live_dispatch_cumulative_loss_ceiling_blocks_new_entries(dispatch_rig: tuple) -> None:
-    """T3-05: Concurrent positions reaching ceiling suppresses subsequent entry orders."""
+    """T3-05: An optional operator open-signal cap, when configured, suppresses later entries.
+
+    The owner contract imposes no default cap (see test_no_arbitrary_open_trade_count_cap);
+    this proves a voluntary cap is still honoured end to end.
+    """
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
 
-    # Set ceiling to 1 position
     dispatcher.limits = RiskCeilings(
         contracts_per_signal=1,
-        premium_per_signal_usd=Decimal("5000"),
-        total_exposure_usd=Decimal("10000"),
+        premium_per_signal_usd=Decimal("999"),
         open_signal_count=1,
-        max_concurrent_positions=1,
-        max_daily_loss_usd=Decimal("500"),
+        daily_net_loss_usd=Decimal("500"),
     )
     dispatcher.engine.limits = dispatcher.limits
 
@@ -358,6 +363,8 @@ def test_t3_live_dispatch_daily_loss_limit_blocks_new_entries(dispatch_rig: tupl
     exit_order_id = list(mcp.orders.keys())[1]
     mcp.fill_order(exit_order_id, filled_quantity=1, fill_price=Decimal("2.50"))
 
+    # The broker reports the same realized loss for the New York day.
+    mcp.realized_pnl, mcp.realized_trades = "-550.00", 2
     # Reconcile exit fill and verify realized daily loss
     clock.advance(5.0)
     res_reconcile = asyncio.run(dispatcher.run_once())
@@ -379,7 +386,9 @@ def test_t3_live_dispatch_daily_loss_limit_blocks_new_entries(dispatch_rig: tupl
             "SELECT outcome, reason FROM paper_engine_decisions ORDER BY decided_at_utc DESC"
         ).fetchall()
         assert decisions[0][0] == "BLOCKED"
-        assert decisions[0][1] == "DAILY_LOSS_LIMIT_REACHED"
+        assert decisions[0][1] == "DAILY_LOSS_CEILING_REACHED"
+    # The broker-side realized+unrealized latch is independently engaged and persisted.
+    assert dispatcher.live_broker.refresh_daily_risk() is True
 
 
 def test_t3_live_dispatch_paused_engine_skips_entries(dispatch_rig: tuple) -> None:
@@ -395,18 +404,17 @@ def test_t3_live_dispatch_paused_engine_skips_entries(dispatch_rig: tuple) -> No
     assert len(mcp.orders) == 0
 
 
-@pytest.mark.parametrize("field", ["max_premium_per_signal_usd", "max_total_exposure_usd"])
-def test_live_dispatch_refuses_missing_owner_caps(tmp_path: Path, live_settings: Settings, field: str) -> None:
-    """A zero cap is refused, never silently replaced by a default ceiling."""
+@pytest.mark.parametrize("value", ["0", "-1", "NaN"])
+def test_live_dispatch_refuses_missing_owner_premium_cap(tmp_path: Path, live_settings: Settings, value: str) -> None:
+    """A zero/invalid premium cap is refused, never silently replaced by a default ceiling."""
     from dataclasses import replace
-    mcp = StatefulFakeMCP()
-    broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
-    account = MCPAccount("acc", True, "option_level_2")
-    with pytest.raises(PermissionError, match="explicit positive premium and exposure caps"):
+    broker = RobinhoodMCPBroker(StatefulFakeMCP())
+    account = MCPAccount("synthetic-account", True, "option_level_2")
+    with pytest.raises(PermissionError, match="explicit positive premium ceiling"):
         LiveDispatcher(
             tmp_path / "data" / "swift.sqlite3", CHANNEL_ID, broker, account,
             MockQuoteFeed(FakeClock()),  # type: ignore[arg-type]
-            replace(live_settings, **{field: Decimal("0")}),
+            replace(live_settings, max_premium_per_signal_usd=Decimal(value)),
         )
 
 
@@ -414,3 +422,31 @@ def test_live_dispatch_uses_configured_caps_exactly(dispatch_rig: tuple) -> None
     _, _, _, _, _, dispatcher = dispatch_rig
     assert dispatcher.limits.premium_per_signal_usd == dispatcher.settings.max_premium_per_signal_usd
     assert dispatcher.limits.total_exposure_usd == dispatcher.settings.max_total_exposure_usd
+
+
+def test_broker_preflight_refusal_is_terminal_and_never_wedges_later_cycles(dispatch_rig: tuple) -> None:
+    """A LiveBroker preflight refusal (10% ask guard) is a recorded unsent refusal.
+
+    Regression: it used to raise as an uncertain submission, then every later cycle
+    failed reconciliation, blocking exits as well as entries.
+    """
+    db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
+    mcp.set_quote("opt-spy-680c", "1.60", "1.65")  # broker ask > 110% of the 1.20 alert
+    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+
+    first = asyncio.run(dispatcher.run_once())
+    assert first.status == "LIVE_CYCLE_COMPLETED"
+    assert first.entry_orders_submitted == 0
+    assert not any(name == "place_option_order" for name, _ in mcp.calls)
+    with sqlite3.connect(str(db_path)) as db:
+        assert db.execute("SELECT state FROM order_intents").fetchall() == [("REJECTED",)]
+        assert db.execute(
+            "SELECT code FROM paper_engine_alerts WHERE code='SUBMISSION_REFUSED_PRE_PLACEMENT'"
+        ).fetchone()
+
+    clock.advance(5.0)
+    mcp.set_quote("opt-spy-680c", "1.20", "1.22")  # a later quote never resurrects the refusal
+    second = asyncio.run(dispatcher.run_once())
+    assert second.status == "LIVE_CYCLE_COMPLETED"
+    assert second.entry_orders_submitted == 0
+    assert not mcp.orders

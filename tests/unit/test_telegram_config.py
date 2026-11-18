@@ -74,13 +74,18 @@ def _session_env(path):
     }
 
 
-def test_session_in_cwd_without_git_is_allowed(tmp_path, monkeypatch):
-    """The service runs with cwd=<install root>, where secrets/telegram.session lives."""
+def test_unmanaged_session_in_cwd_is_refused(tmp_path, monkeypatch):
+    """Without SWIFT_INSTALL_ROOT, a session under cwd is refused even without .git.
+
+    The Windows service always sets SWIFT_INSTALL_ROOT and uses the managed slot
+    (see test_managed_credential_paths), so this stricter rule cannot crash-loop it.
+    """
     session = tmp_path / "secrets" / "telegram.session"
     session.parent.mkdir()
     session.write_text("x", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    assert Settings.from_env(_session_env(session)).telegram_enabled
+    with pytest.raises(ConfigurationError, match="checkout"):
+        Settings.from_env(_session_env(session))
 
 
 def test_session_inside_git_checkout_denied(tmp_path):

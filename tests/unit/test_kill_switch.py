@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from swift_autotrader.broker.base import OrderSide
-from swift_autotrader.broker.paper import PaperBroker
+from swift_autotrader.broker.live_broker import LiveBroker
 from swift_autotrader.notifications.kill_switch import TelegramKillSwitchBot
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.risk import PaperPreflight, RiskCeilings
@@ -36,16 +36,16 @@ def mock_bot() -> TelegramKillSwitchBot:
 
 
 @pytest.fixture
-def test_engine(live_db: Path) -> PaperOrderEngine:
-    """PaperOrderEngine in LIVE mode with PaperBroker."""
-    broker = PaperBroker(live_db)
-    ceilings = RiskCeilings(max_daily_loss_usd=Decimal("500"), max_concurrent_positions=3)
+def test_engine(live_db: Path, fake_live_broker: LiveBroker, fake_clock) -> PaperOrderEngine:
+    """PaperOrderEngine in LIVE mode with the canonical LiveBroker on the offline MCP fake."""
+    broker = fake_live_broker
+    ceilings = RiskCeilings(daily_net_loss_usd=Decimal("500"))
     return PaperOrderEngine(
         live_db,
         broker,
         preflight=PaperPreflight(),
         limits=ceilings,
-        clock=lambda: datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC),
+        clock=fake_clock,
         live_mode=True,
     )
 

@@ -534,7 +534,7 @@ def test_synthetic_broker_not_network_adapter(rig):
     path, _, _, engine = rig
     class FakeBroker:
         db_path = path
-    with pytest.raises(TypeError, match="only the concrete PaperBroker"):
+    with pytest.raises(TypeError, match="ONLY the concrete PaperBroker"):
         PaperOrderEngine(path, FakeBroker(), preflight=engine.preflight)
 
 
@@ -790,11 +790,18 @@ def test_unverifiable_exit_basis_fails_closed(rig):
 # --- One contract per trade; trade count bounded only by buying power ---
 
 
+def distinct_contract(index: int) -> OptionContract:
+    # A second ENTRY on an identical held contract is blocked (DUPLICATE_CONTRACT_POSITION,
+    # no scale-in); the no-cap property is about distinct original entries.
+    return OptionContract(CONTRACT.underlying, CONTRACT.right,
+                          CONTRACT.strike + index, CONTRACT.expiration)
+
+
 def uncapped_engine(rig, buying_power: str) -> PaperOrderEngine:
     path, clock, _, _ = rig
-    checks = {CONTRACT: Preflight(
-        True, True, True, Decimal(buying_power), Decimal("0.01"), CONTRACT,
-    )}
+    checks = {distinct_contract(i): Preflight(
+        True, True, True, Decimal(buying_power), Decimal("0.01"), distinct_contract(i),
+    ) for i in range(0, 20)}
     return PaperOrderEngine(
         path, PaperBroker(path, clock=clock), preflight=PaperPreflight(checks),
         limits=RiskCeilings.from_environment({"MAX_PREMIUM_PER_SIGNAL_USD": "999"}),
@@ -806,7 +813,7 @@ def test_no_trade_count_cap_one_contract_each_with_ample_buying_power(rig):
     path = rig[0]
     engine = uncapped_engine(rig, "100000")
     for mid in range(1, 13):
-        synthetic_signal(path, mid=mid)
+        synthetic_signal(path, mid=mid, contract=distinct_contract(mid))
     assert engine.limits.open_signal_count is None
     assert engine.limits.total_exposure_usd is None
     assert engine.run_cycle().entry_submissions == 12
@@ -818,7 +825,7 @@ def test_buying_power_alone_stops_further_trades(rig):
     path = rig[0]
     engine = uncapped_engine(rig, "300")  # $120 premium per trade: two fit, third does not
     for mid in range(1, 6):
-        synthetic_signal(path, mid=mid)
+        synthetic_signal(path, mid=mid, contract=distinct_contract(mid))
     assert engine.run_cycle().entry_submissions == 2
     blocked = get(
         path, "SELECT COUNT(*) FROM paper_engine_decisions "

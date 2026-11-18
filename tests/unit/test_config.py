@@ -58,7 +58,7 @@ def test_live_configuration_validation_success(tmp_path: Path) -> None:
         "TELEGRAM_API_HASH": "0123456789abcdef0123456789abcdef",
         "TELEGRAM_SESSION_PATH": str(session.resolve()),
         "MAX_DAILY_LOSS_USD": "750",
-        "MAX_CONCURRENT_POSITIONS": "4",
+        "LIVE_JOURNAL_PATH": str((tmp_path / "live_journal.sqlite3").resolve()),
         "KILL_SWITCH_ENABLED": "true",
     }
     settings = Settings.from_env(env)
@@ -66,7 +66,8 @@ def test_live_configuration_validation_success(tmp_path: Path) -> None:
     assert settings.mode == "LIVE"
     assert settings.robinhood_mcp_account == "RH_ACC_123456"
     assert settings.max_daily_loss_usd == Decimal("750")
-    assert settings.max_concurrent_positions == 4
+    # Owner contract: no trade-count or aggregate-exposure cap is configured or implied.
+    assert not hasattr(settings, "max_concurrent_positions")
     assert settings.public_summary()["entry_price_policy"] == "EXACT_ALERT_LIMIT"
     summary = settings.public_summary()
     assert summary["mode"] == "LIVE"
@@ -88,24 +89,39 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
         "TELEGRAM_API_ID": "12345",
         "TELEGRAM_API_HASH": "0123456789abcdef0123456789abcdef",
         "TELEGRAM_SESSION_PATH": str(session.resolve()),
+        "LIVE_JOURNAL_PATH": str((tmp_path / "live_journal.sqlite3").resolve()),
     }
 
-    # Live never inherits an implicit premium or exposure ceiling.
-    for key in ("MAX_PREMIUM_PER_SIGNAL_USD", "MAX_TOTAL_EXPOSURE_USD"):
-        for value in (None, "0", "-1", "NaN"):
-            env = dict(base_env)
-            if value is None:
-                env.pop(key)
-            else:
-                env[key] = value
-            with pytest.raises(ConfigurationError):
-                Settings.from_env(env)
-    env = dict(base_env, MAX_PREMIUM_PER_SIGNAL_USD="10000", MAX_TOTAL_EXPOSURE_USD="9999")
-    with pytest.raises(ConfigurationError, match="cannot exceed MAX_TOTAL_EXPOSURE_USD"):
-        Settings.from_env(env)
+    # Live never inherits an implicit premium ceiling; it must be explicit, positive, <= $999.
+    for value in (None, "0", "-1", "NaN", "999.01", "10000"):
+        env = dict(base_env)
+        if value is None:
+            env.pop("MAX_PREMIUM_PER_SIGNAL_USD")
+        else:
+            env["MAX_PREMIUM_PER_SIGNAL_USD"] = value
+        with pytest.raises(ConfigurationError):
+            Settings.from_env(env)
+    # No aggregate-exposure cap is required: buying power is the bound. An optional
+    # voluntary value must still be finite and non-negative.
+    uncapped = Settings.from_env({k: v for k, v in base_env.items()
+                                  if k != "MAX_TOTAL_EXPOSURE_USD"})
+    assert uncapped.is_live and uncapped.max_total_exposure_usd is None
+    for value in ("-1", "NaN"):
+        with pytest.raises(ConfigurationError):
+            Settings.from_env(dict(base_env, MAX_TOTAL_EXPOSURE_USD=value))
     configured = Settings.from_env(base_env)
     assert (configured.max_premium_per_signal_usd, configured.max_total_exposure_usd) == (
         Decimal("999"), Decimal("9999"))
+
+    # The live journal is mandatory and must be absolute.
+    for value in (None, "relative/journal.sqlite3"):
+        env = dict(base_env)
+        if value is None:
+            env.pop("LIVE_JOURNAL_PATH")
+        else:
+            env["LIVE_JOURNAL_PATH"] = value
+        with pytest.raises(ConfigurationError, match="LIVE_JOURNAL_PATH"):
+            Settings.from_env(env)
 
     # Missing account
     env = dict(base_env, ROBINHOOD_MCP_ACCOUNT="")
@@ -147,14 +163,10 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="MAX_DAILY_LOSS_USD must be positive"):
         Settings.from_env(env)
 
-    # Invalid concurrent positions (0 or > 10)
-    env = dict(base_env, MAX_CONCURRENT_POSITIONS="0")
-    with pytest.raises(ConfigurationError, match="MAX_CONCURRENT_POSITIONS"):
-        Settings.from_env(env)
-
-    env = dict(base_env, MAX_CONCURRENT_POSITIONS="11")
-    with pytest.raises(ConfigurationError, match="MAX_CONCURRENT_POSITIONS"):
-        Settings.from_env(env)
+    # $750 is the hard ceiling; 750.01 is refused, 750 accepted.
+    with pytest.raises(ConfigurationError, match="MAX_DAILY_LOSS_USD cannot exceed"):
+        Settings.from_env(dict(base_env, MAX_DAILY_LOSS_USD="750.01"))
+    assert Settings.from_env(dict(base_env, MAX_DAILY_LOSS_USD="750")).max_daily_loss_usd == 750
 
     # Slippage tolerance > 25%
     env = dict(base_env, SLIPPAGE_TOLERANCE_PCT="25.5")
@@ -168,7 +180,7 @@ def test_env_example_documents_all_live_risk_settings() -> None:
     content = example_path.read_text(encoding="utf-8")
     for expected_key in [
         "MAX_DAILY_LOSS_USD",
-        "MAX_CONCURRENT_POSITIONS",
+        "LIVE_JOURNAL_PATH",
         "SLIPPAGE_TOLERANCE_PCT",
         "ROBINHOOD_MCP_ACCOUNT",
         "LIVE_ENABLED",
@@ -179,3 +191,9 @@ def test_env_example_documents_all_live_risk_settings() -> None:
         assert expected_key in content, f"Missing {expected_key} in .env.example"
 
 
+
+
+@pytest.mark.parametrize("value", ["750.01", "0", "-1", "NaN"])
+def test_daily_loss_hard_maximum_enforced_in_paper_mode_too(value: str) -> None:
+    with pytest.raises(ConfigurationError, match="MAX_DAILY_LOSS_USD"):
+        Settings.from_env({"MAX_DAILY_LOSS_USD": value})

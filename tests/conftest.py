@@ -18,6 +18,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import pytest
 
+from swift_autotrader.broker.live_broker import LiveBroker
 from swift_autotrader.config import Settings
 from swift_autotrader.database.migrate import apply_migrations
 from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP
@@ -52,6 +53,24 @@ def mock_mcp() -> StatefulFakeMCP:
 
 
 @pytest.fixture
+def fake_live_broker(
+    tmp_path: Path, mock_mcp: StatefulFakeMCP, fake_clock: FakeClock,
+) -> Generator[LiveBroker, None, None]:
+    """The one canonical live writer, wired to the offline real-shape MCP fake."""
+    journal = tmp_path / "data" / "live_journal.sqlite3"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    LiveBroker.create_journal(journal)
+    mock_mcp.clock = fake_clock
+    for instrument_id, quote in list(mock_mcp.quotes.items()):  # restamp quotes on the fake clock
+        mock_mcp.set_quote(instrument_id, quote["bid_price"], quote["ask_price"])
+    broker = LiveBroker(journal, mock_mcp, account_number=mock_mcp.account_number,
+                        writes_enabled=True, kill_switch=lambda: False,
+                        signal_gate=lambda _signal: "ENTRY", clock=fake_clock)
+    yield broker
+    broker.close()
+
+
+@pytest.fixture
 def live_db(tmp_path: Path) -> Path:
     """Isolated SQLite database with all schema migrations applied."""
     db_file = tmp_path / "data" / "swift.sqlite3"
@@ -73,13 +92,13 @@ def live_settings(live_db: Path, tmp_path: Path) -> Settings:
         paper_only=False,
         live_enabled=True,
         max_premium_per_signal_usd=Decimal("999"),
-        max_total_exposure_usd=Decimal("9999"),
         allow_broker_writes=True,
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="synthetic-account",
         db_path=live_db,
         max_daily_loss_usd=Decimal("500"),
-        max_concurrent_positions=3,
+        # Owner contract: no trade-count or aggregate-exposure cap; buying power bounds it.
+        live_journal_path=tmp_path / "data" / "live_journal.sqlite3",
         kill_switch_enabled=True,
         kill_switch_telegram_bot_token="test_bot_token_secret",
         kill_switch_telegram_chat_id=123456789,

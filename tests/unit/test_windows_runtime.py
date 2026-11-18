@@ -393,9 +393,10 @@ def test_paper_supervisor_rejects_fully_live_settings(install: Path, tmp_path: P
     session.write_bytes(b"synthetic")
     env = {
         "PAPER_ONLY": "false", "LIVE_ENABLED": "true", "ALLOW_BROKER_WRITES": "true",
-        "MAX_PREMIUM_PER_SIGNAL_USD": "999", "MAX_TOTAL_EXPOSURE_USD": "9999",
+        "MAX_PREMIUM_PER_SIGNAL_USD": "999",
         "BROKER_BACKEND": "robinhood_mcp", "ROBINHOOD_MCP_ACCOUNT": "synthetic",
         "DB_PATH": str(install / "data/swift.sqlite3"),
+        "LIVE_JOURNAL_PATH": str(install / "data/live_journal.sqlite3"),
         "TELEGRAM_ENABLED": "true", "SWIFT_TELEGRAM_CHANNEL_ID": "-1001234567890",
         "TELEGRAM_API_ID": "123", "TELEGRAM_API_HASH": "a" * 32,
         "TELEGRAM_SESSION_PATH": str(session),

@@ -1,11 +1,10 @@
 """Unit test suite for PaperOrderEngine in Live Mode (R2 / Feature 3 & 4).
 
 Covers:
-- Acceptance of non-PaperBroker when live_mode=True (and rejection when live_mode=False).
-- Slippage-adjusted limit price calculation from live entry quotes.
+- Live mode accepts only the canonical, enabled LiveBroker; paper mode only PaperBroker.
 - Exact alert-premium entry limits regardless of the current ask.
 - Cumulative realized daily loss calculation via FIFO matching of closed positions.
-- Daily loss limit enforcement triggering DAILY_LOSS_LIMIT_REACHED rejection.
+- Daily loss limit enforcement triggering DAILY_LOSS_CEILING_REACHED rejection.
 - Isolation of previous days' realized losses from today's ceiling.
 - Partial close loss calculations.
 """
@@ -19,14 +18,14 @@ from pathlib import Path
 
 import pytest
 
-from swift_autotrader.broker.base import BrokerFill, BrokerOrderState, BrokerOrderStatus
-from swift_autotrader.broker.paper import iso
+from swift_autotrader.broker.live_broker import LiveBroker
+from swift_autotrader.broker.paper import PaperBroker, iso
 from swift_autotrader.database.migrate import apply_migrations
-from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.risk import PaperPreflight, Preflight, RiskCeilings
 from swift_autotrader.paper_dispatch import VerifiedQuote
 from swift_autotrader.signals.identity import OptionContract, OptionRight
+from tests.fixtures.live_mocks import StatefulFakeMCP
 
 NOW = datetime(2026, 11, 16, 14, 30, tzinfo=UTC)
 CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
@@ -42,55 +41,6 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self.current += timedelta(seconds=seconds)
-
-
-class MockLiveBroker:
-    """Offline test broker fulfilling the Broker protocol for live engine tests."""
-
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
-        self.submitted_orders: list[OrderIntent] = []
-        self.statuses: dict[str, BrokerOrderStatus] = {}
-
-    def submit_order(self, intent: OrderIntent) -> BrokerOrderStatus:
-        self.submitted_orders.append(intent)
-        status = BrokerOrderStatus(
-            logical_order_id=intent.logical_order_id,
-            state=BrokerOrderState.ACCEPTED,
-            filled_quantity=0,
-            contract=intent.contract,
-            side=intent.side,
-            requested_quantity=intent.quantity,
-            limit_price=intent.limit_price,
-            idempotency_key=intent.idempotency_key,
-            accepted_at_utc=datetime.now(UTC),
-            fills=[],
-        )
-        self.statuses[intent.logical_order_id] = status
-        return status
-
-    def get_order(self, logical_order_id: str) -> BrokerOrderStatus:
-        return self.statuses.get(
-            logical_order_id,
-            BrokerOrderStatus(logical_order_id, BrokerOrderState.UNKNOWN, 0, None),
-        )
-
-    def cancel_order(self, logical_order_id: str) -> BrokerOrderStatus:
-        status = self.get_order(logical_order_id)
-        new_status = BrokerOrderStatus(
-            logical_order_id=logical_order_id,
-            state=BrokerOrderState.CANCELED,
-            filled_quantity=status.filled_quantity,
-            contract=status.contract,
-            side=status.side,
-            requested_quantity=status.requested_quantity,
-            limit_price=status.limit_price,
-            idempotency_key=status.idempotency_key,
-            accepted_at_utc=status.accepted_at_utc,
-            fills=status.fills,
-        )
-        self.statuses[logical_order_id] = new_status
-        return new_status
 
 
 def insert_test_signal(
@@ -142,7 +92,7 @@ def insert_test_signal(
 
 def simulate_closed_trade(
     db_path: Path,
-    broker: MockLiveBroker,
+    broker: object,
     mid: int,
     contract: OptionContract,
     buy_price: Decimal,
@@ -179,30 +129,6 @@ def simulate_closed_trade(
         )
         db.execute("UPDATE option_signals SET state='CLOSED' WHERE signal_id=?", (sid,))
 
-    broker.statuses[entry_id] = BrokerOrderStatus(
-        logical_order_id=entry_id,
-        state=BrokerOrderState.FILLED,
-        filled_quantity=quantity,
-        accepted_at_utc=closed_at,
-        contract=contract,
-        side=OrderSide.BUY_TO_OPEN,
-        requested_quantity=quantity,
-        limit_price=buy_price,
-        idempotency_key=f"k_buy_{mid}",
-        fills=(BrokerFill(f"fill_b_{mid}", quantity, buy_price, closed_at),),
-    )
-    broker.statuses[close_id] = BrokerOrderStatus(
-        logical_order_id=close_id,
-        state=BrokerOrderState.FILLED,
-        filled_quantity=quantity,
-        accepted_at_utc=closed_at,
-        contract=contract,
-        side=OrderSide.SELL_TO_CLOSE,
-        requested_quantity=quantity,
-        limit_price=sell_price,
-        idempotency_key=f"k_close_{mid}",
-        fills=(BrokerFill(f"fill_s_{mid}", quantity, sell_price, closed_at),),
-    )
     return sid
 
 
@@ -219,13 +145,8 @@ def make_quote(contract: OptionContract, ask: str, bid: str = "1.00", at: dateti
     )
 
 
-@pytest.fixture
-def engine_rig(tmp_path: Path):
-    db_path = tmp_path / "swift.sqlite3"
-    apply_migrations(db_path)
-    clock = FakeClock(NOW)
-    broker = MockLiveBroker(db_path)
-    preflight = PaperPreflight({
+def _preflight() -> PaperPreflight:
+    return PaperPreflight({
         CONTRACT: Preflight(
             instrument_verified=True,
             options_permission=True,
@@ -243,65 +164,106 @@ def engine_rig(tmp_path: Path):
             contract=OTHER,
         ),
     })
-    limits = RiskCeilings(
-        contracts_per_signal=1,
-        premium_per_signal_usd=Decimal("5000"),
-        total_exposure_usd=Decimal("10000"),
-        open_signal_count=3,
-        entry_max_age_seconds=120,
-        max_daily_loss_usd=Decimal("500"),
-        max_concurrent_positions=3,
-    )
-    engine = PaperOrderEngine(
-        db_path,
-        broker,
-        preflight=preflight,
-        limits=limits,
-        clock=clock,
-        live_mode=True,
-    )
-    return db_path, clock, broker, engine, preflight, limits
+
+
+LIMITS = RiskCeilings(
+    contracts_per_signal=1,
+    premium_per_signal_usd=Decimal("999"),
+    entry_max_age_seconds=120,
+    daily_net_loss_usd=Decimal("500"),
+)
+
+
+@pytest.fixture
+def engine_rig(tmp_path: Path):
+    """Live engine on the canonical LiveBroker and the offline real-shape MCP fake."""
+    db_path = tmp_path / "swift.sqlite3"
+    apply_migrations(db_path)
+    clock = FakeClock(NOW)
+    mcp = StatefulFakeMCP(clock=clock)
+    journal = tmp_path / "live_journal.sqlite3"
+    LiveBroker.create_journal(journal)
+    broker = LiveBroker(journal, mcp, account_number=mcp.account_number, writes_enabled=True,
+                        kill_switch=lambda: False, signal_gate=lambda _signal: "ENTRY",
+                        clock=clock)
+    preflight = _preflight()
+    engine = PaperOrderEngine(db_path, broker, preflight=preflight, limits=LIMITS,
+                              clock=clock, live_mode=True)
+    yield db_path, clock, mcp, engine, preflight, LIMITS
+    broker.close()
+
+
+@pytest.fixture
+def ledger_rig(tmp_path: Path):
+    """Engine daily-loss ledger (shared by paper and live) over synthetic closed trades."""
+    db_path = tmp_path / "swift.sqlite3"
+    apply_migrations(db_path)
+    clock = FakeClock(NOW)
+    broker = PaperBroker(db_path, clock=clock)
+    engine = PaperOrderEngine(db_path, broker, preflight=_preflight(), limits=LIMITS, clock=clock)
+    return db_path, clock, broker, engine, None, LIMITS
 
 
 def test_live_mode_broker_validation(tmp_path: Path):
+    """One canonical live writer: live mode accepts only an enabled LiveBroker."""
     db_path = tmp_path / "test.sqlite3"
     apply_migrations(db_path)
-    broker = MockLiveBroker(db_path)
     preflight = PaperPreflight()
+    journal = tmp_path / "live_journal.sqlite3"
+    LiveBroker.create_journal(journal)
+    mcp = StatefulFakeMCP()
 
-    # live_mode=False rejects non-PaperBroker
-    with pytest.raises(TypeError, match="Phase 3 engine accepts ONLY the concrete PaperBroker"):
-        PaperOrderEngine(db_path, broker, preflight=preflight, live_mode=False)
+    class LookalikeBroker:  # protocol-shaped, but not the canonical writer
+        def submit_order(self, intent): raise AssertionError
+        def get_order(self, logical_order_id): raise AssertionError
+        def cancel_order(self, logical_order_id): raise AssertionError
 
-    # live_mode=True accepts live Broker
-    engine = PaperOrderEngine(db_path, broker, preflight=preflight, live_mode=True)
-    assert engine.live_mode is True
+    with pytest.raises(TypeError, match="ONLY the concrete PaperBroker"):
+        PaperOrderEngine(db_path, LookalikeBroker(), preflight=preflight, live_mode=False)
+    for candidate in (LookalikeBroker(), PaperBroker(db_path),
+                      LiveBroker(journal, mcp, account_number=mcp.account_number)):
+        with pytest.raises(TypeError, match="only an enabled LiveBroker"):
+            PaperOrderEngine(db_path, candidate, preflight=preflight, live_mode=True)
+    enabled = LiveBroker(journal, mcp, account_number=mcp.account_number, writes_enabled=True)
+    try:
+        engine = PaperOrderEngine(db_path, enabled, preflight=preflight, live_mode=True)
+        assert engine.live_mode is True
+    finally:
+        enabled.close()
 
 
-@pytest.mark.parametrize("ask", ["1.10", "1.25", "1.40", "9.99"])
-def test_live_engine_entry_limit_is_exact_alert_premium_for_any_ask(engine_rig, ask):
-    """The quote never moves the entry: the limit is the original alert premium."""
-    db_path, clock, broker, engine, _, _ = engine_rig
+@pytest.mark.parametrize(("ask", "within_tolerance"),
+                         [("1.10", True), ("1.25", True), ("1.32", True),
+                          ("1.33", False), ("9.99", False)])
+def test_live_engine_entry_limit_is_exact_alert_premium_for_any_ask(engine_rig, ask, within_tolerance):
+    """The quote never moves the entry: the limit is the original alert premium.
+
+    An ask above 110% of the alert is a REJECTION guard at LiveBroker, never a reason to
+    raise the limit: the refused entry is recorded unsent and nothing reaches Robinhood.
+    """
+    db_path, clock, mcp, engine, _, _ = engine_rig
     sid = insert_test_signal(db_path, mid=101, contract=CONTRACT, price="1.20", sent=clock())
+    mcp.set_quote("opt-spy-680c", "1.00", ask)
 
     quote = make_quote(CONTRACT, ask=ask, at=clock())
     result = engine.run_cycle(entry_quotes={CONTRACT: quote})
 
-    assert result.entry_submissions == 1
-    assert result.blocked_entries == 0
-    assert len(broker.submitted_orders) == 1
-    submitted = broker.submitted_orders[0]
-    assert submitted.limit_price == Decimal("1.20")
-
+    placed = [args for name, args in mcp.calls if name == "place_option_order"]
     with sqlite3.connect(str(db_path)) as db:
-        row = db.execute(
-            "SELECT limit_price, state FROM order_intents WHERE logical_order_id=?",
-            (submitted.logical_order_id,),
-        ).fetchone()
+        row = db.execute("SELECT limit_price, state FROM order_intents WHERE signal_id=?",
+                         (sid,)).fetchone()
+        alerts = {r[0] for r in db.execute(
+            "SELECT code FROM paper_engine_alerts WHERE signal_id=?", (sid,))}
+    if within_tolerance:
+        assert result.entry_submissions == 1 and result.blocked_entries == 0
+        assert len(placed) == 1 and Decimal(placed[0]["price"]) == Decimal("1.20")
         assert row == ("1.20", "ACCEPTED")
-        assert db.execute(
-            "SELECT count(*) FROM paper_engine_alerts WHERE signal_id=?", (sid,),
-        ).fetchone()[0] == 0
+        assert alerts == set()
+    else:
+        assert result.entry_submissions == 0
+        assert placed == []
+        assert row == ("1.20", "REJECTED")
+        assert alerts == {"SUBMISSION_REFUSED_PRE_PLACEMENT"}
 
 
 def test_live_engine_off_tick_alert_premium_is_rejected_not_rounded(engine_rig):
@@ -313,7 +275,7 @@ def test_live_engine_off_tick_alert_premium_is_rejected_not_rounded(engine_rig):
     result = engine.run_cycle(entry_quotes={CONTRACT: quote})
 
     assert result.entry_submissions == 0
-    assert len(broker.submitted_orders) == 0
+    assert not any(name == "place_option_order" for name, _ in broker.calls)
     with sqlite3.connect(str(db_path)) as db:
         decision = db.execute(
             "SELECT outcome, reason FROM paper_engine_decisions WHERE signal_id=?", (sid,),
@@ -321,8 +283,8 @@ def test_live_engine_off_tick_alert_premium_is_rejected_not_rounded(engine_rig):
     assert decision == ("BLOCKED", "INVALID_PREMIUM_TICK")
 
 
-def test_live_engine_cumulative_daily_loss_calculation(engine_rig):
-    db_path, clock, broker, engine, _, _ = engine_rig
+def test_live_engine_cumulative_daily_loss_calculation(ledger_rig):
+    db_path, clock, broker, engine, _, _ = ledger_rig
     now = clock()
     yesterday = now - timedelta(days=1)
 
@@ -340,8 +302,8 @@ def test_live_engine_cumulative_daily_loss_calculation(engine_rig):
     assert today_loss == Decimal("250.00")
 
 
-def test_live_engine_daily_loss_limit_blocks_new_entry(engine_rig):
-    db_path, clock, broker, engine, _, _ = engine_rig
+def test_live_engine_daily_loss_limit_blocks_new_entry(ledger_rig):
+    db_path, clock, broker, engine, _, _ = ledger_rig
     now = clock()
 
     # Closed trade today realizing $550 loss (Buy 8.00, Sell 2.50 = -$550.00)
@@ -357,20 +319,19 @@ def test_live_engine_daily_loss_limit_blocks_new_entry(engine_rig):
     result = engine.run_cycle()
     assert result.entry_submissions == 0
     assert result.blocked_entries == 1
-    assert len(broker.submitted_orders) == 0
 
-    # Verify decision in SQLite is DAILY_LOSS_LIMIT_REACHED
+    # Verify decision in SQLite is DAILY_LOSS_CEILING_REACHED
     with sqlite3.connect(str(db_path)) as db:
         decision = db.execute(
             "SELECT outcome, reason FROM paper_engine_decisions WHERE signal_id=?",
             (sid,),
         ).fetchone()
         assert decision[0] == "BLOCKED"
-        assert decision[1] == "DAILY_LOSS_LIMIT_REACHED"
+        assert decision[1] == "DAILY_LOSS_CEILING_REACHED"
 
 
-def test_live_engine_profitable_day_returns_zero_loss(engine_rig):
-    db_path, clock, broker, engine, _, _ = engine_rig
+def test_live_engine_profitable_day_returns_zero_loss(ledger_rig):
+    db_path, clock, broker, engine, _, _ = ledger_rig
     now = clock()
 
     # Winning trade: Buy 1 @ 1.00, Sell 1 @ 2.50 -> Gain = +$150.00
@@ -379,8 +340,8 @@ def test_live_engine_profitable_day_returns_zero_loss(engine_rig):
     assert engine.cumulative_realized_daily_loss(now) == Decimal("0")
 
 
-def test_mvp_net_realized_loss_offsets_winners(engine_rig):
-    db_path, clock, broker, engine, _, _ = engine_rig
+def test_mvp_net_realized_loss_offsets_winners(ledger_rig):
+    db_path, clock, broker, engine, _, _ = ledger_rig
     now = clock()
     for mid, buy, sell in ((601,"1","5"),(602,"4","0.50"),(603,"4","0.50")):
         simulate_closed_trade(db_path, broker, mid, CONTRACT, Decimal(buy), Decimal(sell), now)

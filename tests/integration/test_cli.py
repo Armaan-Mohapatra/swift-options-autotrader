@@ -37,13 +37,13 @@ def test_migrate_is_explicit(monkeypatch, capsys, tmp_path):
     assert json.loads(capsys.readouterr().out)["applied_versions"] == []
 
 
-def test_cli_incomplete_live_request_defaults_to_paper(monkeypatch, capsys):
+def test_cli_incomplete_live_request_is_refused(monkeypatch, capsys):
+    """A partial live request fails closed at startup (exit 2); it never runs live."""
     monkeypatch.setenv("ALLOW_BROKER_WRITES", "true")
-    assert main(["dry-run"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["configuration"]["mode"] == "PAPER"
-    assert payload["configuration"]["allow_broker_writes"] is False
-    assert "LIVE_ACCOUNT_NUMBER" in payload["configuration"]["live_fallback"]
+    assert main(["dry-run"]) == 2
+    captured = capsys.readouterr()
+    assert '"mode": "LIVE"' not in captured.out
+    assert "DRY_RUN_ONLY" not in captured.out
 
 
 def test_cli_rejects_malformed_broker_flag(monkeypatch, capsys):

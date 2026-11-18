@@ -16,13 +16,14 @@ from tests.unit.test_supervisor import make_supervisor
 
 def test_defaults():
     s = Settings.from_env({})
-    assert s.max_daily_loss_usd == RiskCeilings.from_environment({}).max_daily_loss_usd == Decimal('750')
+    assert s.max_daily_loss_usd == RiskCeilings.from_environment({}).daily_net_loss_usd == Decimal('750')
     assert s.kill_switch_enabled is False and not s.allow_broker_writes and not s.live_enabled
 
 
-@pytest.mark.parametrize('loss,expected', [('749.99',None),('750','DAILY_LOSS_LIMIT_REACHED'),('750.01','DAILY_LOSS_LIMIT_REACHED')])
+@pytest.mark.parametrize('loss,expected', [('749.99',None),('750','DAILY_LOSS_CEILING_REACHED'),('750.01','DAILY_LOSS_CEILING_REACHED')])
 def test_loss_boundary(loss,expected):
-    assert rejection_reason(CONTRACT, Decimal('1'), 1, make_ceilings(max_daily_loss='750'), make_preflight(),outstanding_usd=Decimal(0),active_signals=0,cumulative_realized_loss_usd=Decimal(loss)) == expected
+    # Net P&L is signed: a $750 loss is -750.
+    assert rejection_reason(CONTRACT, Decimal('1'), 1, make_ceilings(max_daily_loss='750'), make_preflight(),outstanding_usd=Decimal(0),active_signals=0,realized_net_pnl_today_usd=-Decimal(loss)) == expected
 
 
 @pytest.mark.parametrize('reply,allowed', [({'order_checks':{},'customer_approval_required':False},True),({'order_checks':{},'customer_approval_required':True},False),({'order_checks':[],'approval_required':False},True),({'order_checks':{},'approval_required':False,'customer_approval_required':False},True),({'order_checks':[{'severity':'warning','code':'REVIEW'}],'customer_approval_required':False},False)])

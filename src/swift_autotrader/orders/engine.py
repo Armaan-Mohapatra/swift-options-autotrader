@@ -829,7 +829,12 @@ class PaperOrderEngine:
                 "INSERT OR IGNORE INTO paper_engine_decisions(signal_id,outcome,decided_at_utc) "
                 "VALUES(?,'INTENT_RECORDED',?)", (sid, iso(now)),
             )
-        self._submit_existing(intent, now)
+        try:
+            self._submit_existing(intent, now)
+        except PrePlacementRefusal:
+            # Durable unsent refusal and alert were recorded; the entry is never resent
+            # and the cycle continues so exits and reconciliation keep running.
+            return False
         return True
 
     def _close_signal(

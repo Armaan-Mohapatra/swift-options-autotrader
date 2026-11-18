@@ -55,3 +55,51 @@ Engineering and GitHub changes do not authorize placing real orders. After all r
 After another explicit approval for unattended mode and successful uptime/restart and failure-drill acceptance, allow automatic entries with NO arbitrary trade-count cap while preserving one contract, $999 entry limit, $750 loss latch, buying power, exact alert price, quote tolerance, daily risk reconciliation, account pinning, kill switch, safe exits and idempotency. Unrestricted does not mean bypassing risk limits or broker permissions.
 
 Final report must include: candidate SHA, full audit lineage, changed files, tests by platform, Windows root/backups, masked account proof, read-only MCP schema and rehearsal evidence, monitored worker/restart results, supervised results only if separately authorized, and explicit GO/NO-GO.
+
+## Regression migration to the canonical LiveBroker, 2026-11-18 (engineering only)
+
+Starting point 66939874: 773 passed, 79 failed, 90 errors (Windows, Python 3.13); GitHub
+regression 4/4 and isolated Windows job failed. Root causes, grouped:
+
+1. Tests still imported/constructed the removed second writer (`RobinhoodLiveBroker`,
+   `allow_live_writes`). Migrated to `LiveBroker` on the real-shape fakes; the read adapter
+   now has a test proving it has no write unlock of any kind.
+2. API drift: `RiskCeilings.max_daily_loss_usd`/`max_concurrent_positions`,
+   `cumulative_realized_loss_usd`, `DAILY_LOSS_LIMIT_REACHED`, receipt v1, `robinhood_live`,
+   `LIVE_ACCOUNT_NUMBER`. Migrated to the owner contract (no trade-count or exposure cap,
+   signed realized-net P&L, receipt v2, `robinhood_mcp`, mandatory live journal).
+3. PR #34 "incomplete live falls back to paper" tests: the canonical contract REFUSES an
+   incomplete live request at startup; tests now assert the refusal (never live).
+
+Real defects found and fixed (each has a regression test):
+
+- `LiveBroker._tool_schema` rejected the MCP SDK `ListToolsResult` object, so every real
+  entry would have failed closed. Now normalized with the adapter's `_obj`.
+- A LiveBroker preflight refusal (10% ask guard, loss latch, kill switch) raised as an
+  "uncertain submission"; every later cycle then failed reconciliation, wedging exits too.
+  Preflight refusals are now `LivePreflightRefusal` (a `PrePlacementRefusal`): recorded as a
+  terminal unsent refusal, never resent, and the cycle continues.
+- `app.py`: a local `from pathlib import Path` shadowed the module name, so
+  `pin-account`, `paper-dispatch-service`, `telegram-enroll` and replay CLI crashed.
+- `startup_self_check` read a removed `Settings.live_fallback`: paper-dispatch-service
+  would crash at startup.
+- Status notifications and `phase7_verify` still recognized `BROKER_BACKEND=robinhood_live`.
+- `MAX_DAILY_LOSS_USD` above $750 was only refused in live mode; now refused in every mode.
+- Money-path `assert`s replaced by explicit `LiveSafetyError` (asserts vanish under -O).
+- Fixture defect: derived position quantity rendered as `"1.0000.0000"`.
+
+Added coverage: order history beyond 10 pages (overnight execution on page 14 is found),
+>100 pages / repeated cursor / mid-pagination outage all fail closed (entries, risk refresh,
+reconciliation stays UNKNOWN and is never resent); exact $750 realized+unrealized boundary
+(-749.99 allowed, -750 latched, gains never mask losses, latch survives restart); full exit
+after a partial fill sells exactly the owned filled quantity; review/approval blocks; broker
+order-ID change refused.
+
+OWNER DECISION POINT: the engine blocks a second original ENTRY on an identical contract
+that is still held (`DUPLICATE_CONTRACT_POSITION`, from PR #34). It is kept as a no-scale-in
+and exit-attribution protection; "no trade-count cap" is tested with distinct contracts.
+Confirm, or request removal.
+
+Gates run locally on this candidate: see the PR #36 description for exact counts per
+interpreter, Ruff, compileall, phase7_verify, lock audit, secret scan and history scan.
+Real brokerage writes remain disabled; nothing here authorizes live trading.

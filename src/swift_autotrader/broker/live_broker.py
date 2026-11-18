@@ -35,7 +35,8 @@ INTEGRATION ASSUMPTIONS (MUST BE VERIFIED AGAINST THE LIVE MCP SCHEMAS):
    has NO ref_id, filled_quantity, fills or accepted_at (created_at stands in for
    acceptance). Orders are matched on option, side, quantity, limit, created time and
    agent_initiated; >1 candidate is ambiguous and an unknown outcome is never
-   resent. Pagination must terminate within 10 pages. Absence NEVER proves no order.
+   resent. History is read to exhaustion (``next`` absent) within _ORDER_HISTORY_PAGES;
+   an unexhausted, cyclic or interrupted read fails closed. Absence NEVER proves no order.
 6. ``get_option_positions`` is authoritative for long quantity. Instrument
    ``multiplier`` and ``minimum_tick`` are mandatory. ``review_option_order``
    must be unblocked; order payload must match the reviewed payload.
@@ -77,7 +78,12 @@ from typing import Any
 from uuid import UUID, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from swift_autotrader.broker.base import BrokerFill, BrokerOrderState, BrokerOrderStatus
+from swift_autotrader.broker.base import (
+    BrokerFill,
+    BrokerOrderState,
+    BrokerOrderStatus,
+    PrePlacementRefusal,
+)
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
     MCPAsyncClient,
@@ -87,6 +93,7 @@ from swift_autotrader.broker.robinhood_mcp import (
     RobinhoodMCPBroker,
     _data,
     _next_cursor,
+    _obj,
 )
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.risk_limits import (
@@ -115,6 +122,14 @@ _TERMINAL = {BrokerOrderState.FILLED, BrokerOrderState.CANCELED,
 
 class LiveSafetyError(RuntimeError):
     """Missing evidence/authorization; no new live order is allowed."""
+
+
+class LivePreflightRefusal(LiveSafetyError, PrePlacementRefusal):
+    """Refused in preflight, before any reservation or write: provably never sent.
+
+    The engine records it as a terminal unsent refusal instead of an uncertain
+    submission, so one refused entry cannot wedge later cycles (exits included).
+    """
 
 
 @dataclass(frozen=True)
@@ -484,11 +499,15 @@ class LiveBroker:
                                                 timeout=self.timeout_seconds)
         except Exception as exc:
             raise LiveSafetyError('MCP tool discovery failed') from exc
-        tools = advertised if isinstance(advertised, list) else (
-            advertised.get('tools') if isinstance(advertised, Mapping) else None)
+        # The MCP SDK returns ListToolsResult(tools=[Tool, ...]) objects, not plain dicts.
+        try:
+            tools = advertised if isinstance(advertised, list) else _obj(advertised).get('tools')
+            tools = [_obj(t) for t in tools] if isinstance(tools, list) else None
+        except MCPContractError:
+            tools = None
         if not isinstance(tools, list):
             raise LiveSafetyError('tool list contract missing')
-        matches = [t for t in tools if isinstance(t, Mapping) and t.get('name') == name]
+        matches = [t for t in tools if t.get('name') == name]
         if len(matches) != 1:
             raise LiveSafetyError(f'tool {name} unavailable or ambiguous')
         schema = matches[0].get('inputSchema', matches[0].get('input_schema'))
@@ -660,7 +679,8 @@ class LiveBroker:
             if position.get('type') != 'long' or multiplier <= 0 or quote is None:
                 raise LiveSafetyError('open position cannot be marked to a current quote')
             mark = quote['mark']
-            assert mark is not None
+            if mark is None:  # explicit: asserts vanish under python -O
+                raise LiveSafetyError('open position mark unavailable')
             opened_today = bought.get(option_id, Decimal(0))
             closed_today = sold.get(option_id, Decimal(0))
             prior_inventory = quantity - opened_today + closed_today
@@ -980,7 +1000,11 @@ class LiveBroker:
         return self.run(self._submit_once(intent))
 
     async def _submit_once(self, intent: OrderIntent) -> BrokerOrderStatus:
-        account, instrument, available = await self._preflight(intent)
+        try:
+            account, instrument, available = await self._preflight(intent)
+        except Exception as exc:  # nothing reserved or sent yet
+            raise LivePreflightRefusal(str(exc) if isinstance(exc, LiveSafetyError)
+                                       else type(exc).__name__) from exc
         record, new = self._reserve(intent, option_id=instrument.option_id,
                                     multiplier=instrument.multiplier, available=available)
         if not new:
@@ -1057,7 +1081,8 @@ class LiveBroker:
         if current.state in _TERMINAL:
             return current
         record = self._load(record.intent.logical_order_id)
-        assert record is not None
+        if record is None:
+            raise LiveSafetyError('journal record vanished')
         if record.broker_id is None:  # outcome unknown: cannot safely target cancellation
             return self._status(record, unknown=True)
         if record.cancel_requested:

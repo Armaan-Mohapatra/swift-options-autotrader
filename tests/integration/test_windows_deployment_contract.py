@@ -15,9 +15,12 @@ def test_legacy_windows_settings_are_normalized_without_enabling_live():
     # StrictMode must not crash simply because those optional keys are missing.
     common = (WINDOWS / "common.ps1").read_text(encoding="utf-8")
     assert "$cfg.PSObject.Properties[$name]" in common
-    assert "'live_account_number', 'live_journal_path'" in common
-    assert "$cfg.mode -eq 'LIVE'" in common
-    assert "LIVE requires the explicitly enabled" in common
+    assert "'live_journal_path', 'telegram_enabled'" in common  # optional fields normalized
+    assert "$config.mode -eq 'LIVE'" in common
+    assert "Invalid or unsafe live installation manifest." in common
+    # The dedicated account comes from the DPAPI pin, never from plaintext settings.json.
+    assert "live_account_number" not in common
+    assert "Live execution requires live_journal_path" in common
 
 
 def test_required_scripts_are_present_and_readable():
@@ -44,7 +47,9 @@ def test_phase6_preserves_paper_only_no_unapproved_order_worker():
     assert '"telegram-listen"' in source
     assert '"paper-cycle"' not in source
     assert '"parse-replay"' not in source
-    assert '"broker_writes_enabled": mode == "LIVE"' in source  # paper unless manifest is LIVE
+    # The PAPER supervisor never reports or enables writes; live runs only in live-dispatch.
+    assert '"mode": "PAPER_ONLY", "live_enabled": False,' in source
+    assert '"broker_writes_enabled": False,' in source
 
 
 def test_task_user_only_and_bounded_restarts():

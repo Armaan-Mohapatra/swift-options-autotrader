@@ -15,7 +15,7 @@ from swift_autotrader.broker.mcp_local_auth import LocalAuthNotConfigured
 from swift_autotrader.config import ConfigurationError, Settings
 from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.live_service import run_live_service, write_live_health
-from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP
+from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP, live_journal
 
 
 @pytest.fixture
@@ -45,6 +45,7 @@ def test_env(tmp_path: Path):
         broker_backend="robinhood_mcp",
         robinhood_mcp_account="live-acc-123",
         db_path=db_path,
+        live_journal_path=live_journal(db_path.parent / "live_journal.sqlite3"),
         telegram_enabled=True,
         telegram_channel_id=-1001234000001,
         telegram_api_id=12345,
@@ -175,13 +176,12 @@ NOW = datetime(2026, 11, 17, 15, 0, tzinfo=UTC)
 
 def _receipt(account: str, **overrides) -> dict:
     doc = {
-        "version": 1,
+        "version": 2,
         "account_sha256": hashlib.sha256(account.encode()).hexdigest(),
         "issued_at": (NOW - timedelta(hours=1)).isoformat(),
         "expires_at": (NOW + timedelta(days=2)).isoformat(),
         "max_contracts_per_signal": 1,
         "max_premium_per_signal_usd": "999",
-        "max_total_exposure_usd": "9999",
         "max_daily_loss_usd": "750",
     }
     doc.update(overrides)
@@ -203,14 +203,15 @@ def test_unattended_receipt_accepts_exact_binding(tmp_path, test_env):
 
 @pytest.mark.parametrize("change", [
     {"account_sha256": "0" * 64},
-    {"version": 2},
+    {"version": 1},  # v1 carried an exposure cap; it is no longer accepted
+    {"version": 3},
+    {"max_total_exposure_usd": "9999"},  # retired v1 field is refused, not ignored
     {"expires_at": (NOW - timedelta(seconds=1)).isoformat()},
     {"issued_at": (NOW + timedelta(minutes=5)).isoformat()},
     {"issued_at": (NOW - timedelta(days=1)).isoformat(),
      "expires_at": (NOW + timedelta(days=7)).isoformat()},
     {"expires_at": "2026-11-19T00:00:00"},
     {"max_premium_per_signal_usd": "500"},
-    {"max_total_exposure_usd": "1000"},
     {"max_daily_loss_usd": "100"},
     {"max_contracts_per_signal": 0},
     {"max_premium_per_signal_usd": 999},
@@ -227,7 +228,7 @@ def test_unattended_receipt_rejections(tmp_path, test_env, change):
 def test_unattended_receipt_rejects_missing_duplicate_and_garbage(tmp_path, test_env):
     _, settings, _ = test_env
     acct = settings.robinhood_mcp_account
-    for doc in ('{"version": 1, "version": 1}', "not json", "[]"):
+    for doc in ('{"version": 2, "version": 2}', "not json", "[]"):
         with pytest.raises(UnattendedApprovalError):
             load_unattended_approval(_write(tmp_path / "r.json", doc), account=acct,
                                      settings=settings, now=NOW)
@@ -269,9 +270,8 @@ def test_unrestricted_live_receipt_passes_gate_then_still_needs_oauth(test_env, 
 
 def test_unrestricted_live_receipt_with_looser_config_refused(test_env, monkeypatch):
     root, settings, _ = test_env
-    live = dataclasses.replace(_production_root(root, settings, monkeypatch),
-                               max_premium_per_signal_usd=Decimal("2000"))
+    live = _production_root(root, settings, monkeypatch)  # configured premium cap: 999
     _write(root / "secrets" / "unattended-live-approval.json",
-           _receipt(settings.robinhood_mcp_account))
+           _receipt(settings.robinhood_mcp_account, max_premium_per_signal_usd="500"))
     with pytest.raises(LocalAuthNotConfigured, match="MAX_PREMIUM_PER_SIGNAL_USD"):
         asyncio.run(run_live_service(live, root, clock=lambda: NOW))

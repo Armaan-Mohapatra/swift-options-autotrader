@@ -145,11 +145,6 @@ class Settings:
                 raise ConfigurationError("Live mode requires broker_backend='robinhood_mcp'")
             if not self.robinhood_mcp_account or len(self.robinhood_mcp_account.strip()) < 3:
                 raise ConfigurationError("Live mode requires a valid ROBINHOOD_MCP_ACCOUNT")
-            if not self.max_daily_loss_usd.is_finite() or self.max_daily_loss_usd <= 0:
-                raise ConfigurationError("MAX_DAILY_LOSS_USD must be positive and finite")
-            if self.max_daily_loss_usd > DAILY_NET_LOSS_LIMIT_USD:
-                raise ConfigurationError(
-                    f"MAX_DAILY_LOSS_USD cannot exceed {DAILY_NET_LOSS_LIMIT_USD}")
             if self.live_journal_path is None or not self.live_journal_path.is_absolute():
                 raise ConfigurationError("LIVE_JOURNAL_PATH must be an absolute local path")
             if not self.telegram_enabled:
@@ -166,6 +161,12 @@ class Settings:
                 raise ConfigurationError("Paper-only mode is mandatory unless explicitly configured for live")
             if self.broker_backend != "paper":
                 raise ConfigurationError("Only the paper broker backend is permitted in paper mode")
+        # Hard maximum in every mode (risk_limits): a value above it fails closed.
+        if not self.max_daily_loss_usd.is_finite() or self.max_daily_loss_usd <= 0:
+            raise ConfigurationError("MAX_DAILY_LOSS_USD must be positive and finite")
+        if self.max_daily_loss_usd > DAILY_NET_LOSS_LIMIT_USD:
+            raise ConfigurationError(
+                f"MAX_DAILY_LOSS_USD cannot exceed {DAILY_NET_LOSS_LIMIT_USD}")
         if not 1 <= self.max_contracts_per_signal <= MAX_CONTRACTS_PER_ALERT:
             raise ConfigurationError(
                 f"MAX_CONTRACTS_PER_SIGNAL must be between 1 and {MAX_CONTRACTS_PER_ALERT}")

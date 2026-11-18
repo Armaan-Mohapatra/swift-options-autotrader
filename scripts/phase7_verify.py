@@ -65,26 +65,6 @@ def _unconditional_guard(statements: list[ast.stmt], guard: str) -> bool:
 
 
 
-def _guarded_by_write_flag(statements: list[ast.stmt], attribute: str) -> bool:
-    """First executable statement must refuse writes unless explicitly enabled."""
-    body = list(statements)
-    if (body and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)):
-        body = body[1:]
-    if not body or not isinstance(body[0], ast.If):
-        return False
-    test = body[0].test
-    if not isinstance(test, ast.UnaryOp) or not isinstance(test.op, ast.Not):
-        return False
-    if ast.unparse(test.operand) != attribute:
-        return False
-    first = body[0].body[0] if body[0].body else None
-    return (isinstance(first, ast.Raise) and isinstance(first.exc, ast.Call)
-            and isinstance(first.exc.func, ast.Name)
-            and first.exc.func.id == "BrokerWritesDisabledError")
-
-
 def verify() -> list[str]:
     issues: list[str] = []
     for name in REQUIRED:
@@ -98,64 +78,93 @@ def verify() -> list[str]:
     live = ROOT / "src/swift_autotrader/broker/robinhood_mcp.py"
     if live.is_file():
         text = live.read_text(encoding="utf-8")
+        # The read adapter can NEVER write: no unlock flag, no second writer class.
+        if "allow_live_writes" in text or "class RobinhoodLiveBroker" in text:
+            issues.append("Read adapter exposes a write unlock or a second live writer")
         try:
-            for cls, guard_attr in (
-                ("RobinhoodMCPBroker", "self.allow_live_writes"),
-                ("RobinhoodLiveBroker", "self.mcp.allow_live_writes"),
-            ):
-                for method in ("submit_order", "cancel_order"):
-                    statements = _function_body(text, cls, method)
-                    if not _guarded_by_write_flag(statements, guard_attr):
-                        issues.append("Missing pre-write authorization guard: " + cls + "." + method)
-            statements = _function_body(text, "RobinhoodMCPBroker", "get_order")
-            if not _unconditional_guard(statements, "BrokerWritesDisabledError"):
-                issues.append("Read-only adapter get_order must deny direct broker access")
+            for method in ("submit_order", "cancel_order", "get_order"):
+                statements = _function_body(text, "RobinhoodMCPBroker", method)
+                if not _unconditional_guard(statements, "BrokerWritesDisabledError"):
+                    issues.append("Read adapter must unconditionally deny " + method)
         except (SyntaxError, ValueError) as exc:
-            issues.append("Unable to audit real broker guard: " + type(exc).__name__)
-        # Explicit write opt-in and an unknown-tool denylist both precede network I/O.
+            issues.append("Unable to audit read adapter guard: " + type(exc).__name__)
         if not re.search(
-            r"if name in WRITE_TOOLS and not self\.allow_live_writes\s*:\s*\n\s*raise BrokerWritesDisabledError",
-            text,
+            r"if name in WRITE_TOOLS\s*:\s*\n\s*raise BrokerWritesDisabledError", text,
         ):
-            issues.append("MCP write-tool authorization gate missing")
+            issues.append("MCP write-tool denial on the read adapter missing")
         if not re.search(
             r"if name not in READ_TOOLS and name not in WRITE_TOOLS\s*:\s*\n\s*raise MCPContractError",
             text,
         ):
             issues.append("MCP unknown-tool deny-by-default gate missing")
+    writer = ROOT / "src/swift_autotrader/broker/live_broker.py"
+    if writer.is_file():
+        text = writer.read_text(encoding="utf-8")
+        # The one canonical writer: writes default OFF, entries default KILLED, rehearsal
+        # never writes, and only the two supported write tools exist.
+        for needle, problem in (
+            ("writes_enabled: bool = False", "LiveBroker writes are not off by default"),
+            ("self.kill_switch = kill_switch or (lambda: True)",
+             "LiveBroker entry kill switch does not default to engaged"),
+            ("self.writes_enabled = writes_enabled and not rehearsal",
+             "LiveBroker rehearsal can enable writes"),
+            ("if name not in {'place_option_order', 'cancel_option_order'}:",
+             "LiveBroker write-tool allowlist missing"),
+        ):
+            if needle not in text:
+                issues.append(problem)
+        if not re.search(
+            r"if self\.rehearsal or not self\.writes_enabled\s*:\s*\n\s*raise LiveSafetyError",
+            text,
+        ):
+            issues.append("LiveBroker write boundary does not refuse disabled writes first")
+    else:
+        issues.append("Required audited source missing: src/swift_autotrader/broker/live_broker.py")
     engine = ROOT / "src/swift_autotrader/orders/engine.py"
     if engine.is_file():
         source = engine.read_text(encoding="utf-8")
-        # The audited engine now allows exactly two concrete broker types:
-        # PaperBroker, or a LiveBroker explicitly configured with writes enabled.
-        if ("if type(broker) is PaperBroker:" not in source
-                or "type(broker) is LiveBroker and broker.writes_enabled" not in source
-                or 'raise TypeError("engine accepts only' not in source):
+        # Live mode accepts only an enabled LiveBroker; paper mode only the PaperBroker.
+        if ("type(broker) is LiveBroker and broker.writes_enabled" not in source
+                or 'raise TypeError("live engine accepts only an enabled LiveBroker")' not in source
+                or "elif type(broker) is PaperBroker:" not in source
+                or 'raise TypeError("paper engine accepts ONLY the concrete PaperBroker' not in source):
             issues.append("Engine does not restrict broker to paper or enabled live")
     settings = ROOT / "src/swift_autotrader/config.py"
     if settings.is_file():
         try:
-            from swift_autotrader.config import Settings
+            from swift_autotrader.config import ConfigurationError, Settings
 
             paper = Settings.from_env({})
-            if paper.live_mode or paper.mode != "PAPER":
+            if paper.live_mode or paper.mode != "PAPER_ONLY" or paper.allow_broker_writes:
                 issues.append("Default configuration is not paper-only")
             synthetic = {
                 "PAPER_ONLY": "false", "LIVE_ENABLED": "true",
                 "ALLOW_BROKER_WRITES": "true",
-                "BROKER_BACKEND": "robinhood_live",
-                "LIVE_ACCOUNT_NUMBER": "SYNTHETIC-ACCOUNT-NOT-REAL",
+                "BROKER_BACKEND": "robinhood_mcp",
+                "ROBINHOOD_MCP_ACCOUNT": "SYNTHETIC-ACCOUNT-NOT-REAL",
                 "LIVE_JOURNAL_PATH": str((ROOT / "nonexistent-test-journal.sqlite").resolve()),
+                "MAX_PREMIUM_PER_SIGNAL_USD": "999",
+                "TELEGRAM_ENABLED": "true",
             }
-            if not Settings.from_env(synthetic).live_mode:
-                issues.append("Complete synthetic live configuration cannot be recognized")
-            # Test every individually absent authorization component. A partial
-            # request must never accidentally become a live-enabled Settings.
+            # Every individually absent authorization component must be REFUSED (never
+            # silently live). A partial request is a startup error.
             for field in synthetic:
                 partial = dict(synthetic)
                 del partial[field]
-                if Settings.from_env(partial).live_mode:
-                    issues.append("Incomplete live configuration enabled writes: " + field)
+                try:
+                    if Settings.from_env(partial).live_mode:
+                        issues.append("Incomplete live configuration enabled writes: " + field)
+                except ConfigurationError:
+                    pass
+            for key, value in (("SLIPPAGE_TOLERANCE_PCT", "10"),
+                               ("MAX_PREMIUM_PER_SIGNAL_USD", "1000"),
+                               ("MAX_DAILY_LOSS_USD", "751"),
+                               ("MAX_CONTRACTS_PER_SIGNAL", "2")):
+                try:
+                    Settings.from_env({key: value})
+                    issues.append("Hard maximum not enforced at startup: " + key)
+                except ConfigurationError:
+                    pass
         except (ImportError, TypeError, ValueError) as exc:
             issues.append("Cannot verify paper/live settings boundary: " + type(exc).__name__)
     dashboard = ROOT / "src/swift_autotrader/dashboard/app.py"

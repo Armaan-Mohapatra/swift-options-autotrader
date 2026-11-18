@@ -30,17 +30,17 @@ QQQ_CONTRACT = OptionContract("QQQ", OptionRight.CALL, Decimal("500"), date(2026
 
 @pytest.fixture
 def unit_engine(live_db: Path) -> tuple[PaperOrderEngine, FakeClock, PaperBroker]:
-    """Provide a isolated PaperOrderEngine in live_mode with PaperBroker and FakeClock."""
+    """Isolated engine with PaperBroker: flatten logic is broker-agnostic (live gate: test_order_engine_live)."""
     clock = FakeClock(datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC))
     broker = PaperBroker(live_db, clock=clock)
-    ceilings = RiskCeilings(max_daily_loss_usd=Decimal("1000"), max_concurrent_positions=5)
+    ceilings = RiskCeilings(daily_net_loss_usd=Decimal("750"))
     engine = PaperOrderEngine(
         live_db,
         broker,
         preflight=PaperPreflight(),
         limits=ceilings,
         clock=clock,
-        live_mode=True,
+        live_mode=False,
     )
     return engine, clock, broker
 

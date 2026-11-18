@@ -16,13 +16,8 @@ from pathlib import Path
 import pytest
 
 from swift_autotrader.broker.base import OrderIntent, OrderSide
+from swift_autotrader.broker.live_broker import LiveBroker
 from swift_autotrader.broker.paper import PaperBroker
-from swift_autotrader.broker.robinhood_mcp import (
-    MCPAccount,
-    RobinhoodLiveBroker,
-    RobinhoodMCPBroker,
-)
-from swift_autotrader.database.migrate import apply_migrations
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.orders.risk import PaperPreflight, Preflight, RiskCeilings
 from swift_autotrader.signals.identity import OptionContract, OptionRight
@@ -88,7 +83,6 @@ def seed_signal_and_entry(
         premium_per_signal_usd=Decimal("10000"),
         total_exposure_usd=Decimal("20000"),
         open_signal_count=10,
-        max_concurrent_positions=10,
     )
 
     engine.run_cycle(allow_entries=True, process_closes=False)
@@ -107,7 +101,9 @@ def seed_signal_and_entry(
                 engine.broker.manual_fill(loid, fill_id=f"fill_{loid}", quantity=filled_quantity, price=price, at=now)
             else:
                 target_mcp = None
-                if hasattr(engine.broker, "mcp"):
+                if hasattr(getattr(engine.broker, "client", None), "fill_order"):
+                    target_mcp = engine.broker.client  # LiveBroker on StatefulFakeMCP
+                elif hasattr(engine.broker, "mcp"):
                     if hasattr(engine.broker.mcp, "fill_order"):
                         target_mcp = engine.broker.mcp
                     elif hasattr(engine.broker.mcp, "client") and hasattr(engine.broker.mcp.client, "fill_order"):
@@ -134,17 +130,17 @@ def sqlite3_row_mock(signal_id: str, contract: OptionContract, price: Decimal, n
 
 @pytest.fixture
 def flatten_engine(live_db: Path) -> tuple[PaperOrderEngine, FakeClock, PaperBroker]:
-    """Test engine with paper broker for deterministic liquidation testing."""
+    """Paper engine for deterministic liquidation logic; live path: test_t3_flatten_positions_broker_integration."""
     clock = FakeClock(datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC))
     broker = PaperBroker(live_db, clock=clock)
-    ceilings = RiskCeilings(max_daily_loss_usd=Decimal("500"), max_concurrent_positions=5)
+    ceilings = RiskCeilings(daily_net_loss_usd=Decimal("500"))
     engine = PaperOrderEngine(
         live_db,
         broker,
         preflight=PaperPreflight(),
         limits=ceilings,
         clock=clock,
-        live_mode=True,
+        live_mode=False,
     )
     return engine, clock, broker
 
@@ -349,35 +345,28 @@ def test_t3_kill_switch_to_engine_flatten(flatten_engine: tuple) -> None:
     assert stopped is True
 
 
-def test_t3_flatten_positions_broker_integration(tmp_path: Path) -> None:
-    """T3-10: Engine flatten submits liquidation order through RobinhoodLiveBroker to StatefulFakeMCP."""
-    db_path = tmp_path / "data" / "swift.sqlite3"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    apply_migrations(db_path)
-
-    clock = FakeClock(datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC))
-    mcp = StatefulFakeMCP(account_number="live-acc", clock=clock)
-    mcp_broker = RobinhoodMCPBroker(mcp, allow_live_writes=True)
-    account = MCPAccount("live-acc", True, "option_level_2")
-    live_broker = RobinhoodLiveBroker(mcp_broker, account)
-
+def test_t3_flatten_positions_broker_integration(
+    live_db: Path, fake_live_broker: LiveBroker, mock_mcp: StatefulFakeMCP, fake_clock: FakeClock,
+) -> None:
+    """T3-10: Engine flatten submits the full owned exit through the canonical LiveBroker."""
     engine = PaperOrderEngine(
-        db_path,
-        live_broker,
+        live_db,
+        fake_live_broker,
         preflight=PaperPreflight(),
-        limits=RiskCeilings(max_concurrent_positions=5),
-        clock=clock,
+        limits=RiskCeilings(),
+        clock=fake_clock,
         live_mode=True,
     )
 
-    now = clock.now()
-    seed_signal_and_entry(engine, "sig_live_flatten", SPY_CONTRACT, 2, Decimal("1.20"), now, filled_quantity=2)
+    now = fake_clock.now()
+    seed_signal_and_entry(engine, "sig_live_flatten", SPY_CONTRACT, 1, Decimal("1.20"), now, filled_quantity=1)
 
     intents = engine.flatten_positions(now)
     assert len(intents) == 1
-    # Verify MCP received place_option_order for the liquidation SELL_TO_CLOSE (order 1 = seed buy, order 2 = flatten sell)
-    assert len(mcp.orders) == 2
-    mcp_sell_order = list(mcp.orders.values())[1]
-    assert mcp_sell_order["direction"] == "sell"
-    assert mcp_sell_order["quantity"] == "2"
+    # Order 1 = seed buy, order 2 = flatten sell of the full owned quantity.
+    assert len(mock_mcp.orders) == 2
+    mcp_sell_order = list(mock_mcp.orders.values())[1]
+    assert mcp_sell_order["legs"][0]["side"] == "sell"
+    assert mcp_sell_order["legs"][0]["position_effect"] == "close"
+    assert Decimal(mcp_sell_order["quantity"]) == 1
     assert mcp_sell_order["state"] == "confirmed"

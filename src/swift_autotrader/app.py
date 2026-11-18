@@ -10,6 +10,7 @@ import sqlite3
 import sys
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from swift_autotrader import __version__
 from swift_autotrader.config import ConfigurationError, Settings
@@ -114,8 +115,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             # Emergency entry controls must work even when the live service's
             # environment is malformed or its broker credentials have expired.
             # This command only reads/writes the explicitly selected SQLite DB.
-            from pathlib import Path
-
             config = Settings(db_path=Path(os.environ.get(
                 "DB_PATH", "data/swift_autotrader.sqlite3")))
         else:
@@ -166,8 +165,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             LiveBroker.create_journal(config.live_journal_path)  # never overwrites
             payload = {"status": "LIVE_JOURNAL_CREATED"}
         elif args.command == "live-rehearsal":
-            from pathlib import Path
-
             from swift_autotrader.paper_service import run_live_rehearsal
             results = run_live_rehearsal(config, Path(args.root), limit=args.limit)
             payload = {"status": "LIVE_REHEARSAL_COMPLETE", "real_broker_writes": 0,

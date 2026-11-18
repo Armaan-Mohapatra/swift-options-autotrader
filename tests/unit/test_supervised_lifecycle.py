@@ -30,7 +30,6 @@ import pytest
 from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
 from swift_autotrader.broker.robinhood_mcp import (
     MCPAccount,
-    MCPReadError,
     RobinhoodMCPBroker,
 )
 from swift_autotrader.config import Settings
@@ -48,7 +47,7 @@ from swift_autotrader.signals.identity import OptionContract, OptionRight
 from swift_autotrader.supervisor import run_supervisor
 from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMessage
 from swift_autotrader.windows_runtime import PaperSupervisor, single_instance
-from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP
+from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP, live_journal
 
 
 class OpenMarketCalendar:
@@ -101,8 +100,8 @@ def managed_live_env(tmp_path: Path):
         telegram_api_hash="a" * 32,
         telegram_session_path=session_file,
         managed_install_root=root,
+        live_journal_path=live_journal(root / "data" / "live_journal.sqlite3"),
         max_daily_loss_usd=Decimal("750"),
-        max_concurrent_positions=3,
     )
     return root, settings, paper_db, live_db
 
@@ -159,7 +158,7 @@ def test_multiple_simultaneous_alerts_scoped_to_authorized_symbol(managed_live_e
     assert len(fake_mcp.orders) == 1
     order = next(iter(fake_mcp.orders.values()))
     assert order["direction"] == "buy"
-    assert order["quantity"] == "1"
+    assert Decimal(order["quantity"]) == 1
     # Verify underlying is QQQ
     with sqlite3.connect(live_db) as conn:
         row = conn.execute(
@@ -254,7 +253,7 @@ def test_previously_recorded_signals_with_no_qualifying_parser_decisions(managed
     )
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
-    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
     provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
 
     # Dispatcher in single_entry mode with authorized_symbol='SPY' (no SPY alerts in DB)
@@ -294,7 +293,7 @@ def test_no_new_qualifying_parser_decisions_fails_closed(managed_live_env) -> No
     )
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
-    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
     provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
 
     dispatcher = LiveDispatcher(
@@ -339,7 +338,7 @@ def test_unmatched_authorization_scope_fails_closed(managed_live_env) -> None:
     )
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
-    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
     provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
 
     # Dispatcher authorized ONLY for TSLA
@@ -534,7 +533,7 @@ def test_complete_supervised_order_lifecycle(managed_live_env, exit_origin) -> N
     )
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
-    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
     provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
 
     dispatcher = LiveDispatcher(
@@ -635,7 +634,7 @@ def test_cancellation_and_watchdog_unfilled_order(managed_live_env) -> None:
     )
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
-    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
     provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
 
     dispatcher = LiveDispatcher(
@@ -702,9 +701,14 @@ def test_competing_service_mutual_exclusion(managed_live_env) -> None:
             supervisor.run(max_cycles=1)
 
 
-@pytest.mark.parametrize("echo_ref", [True, False])
-def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_env, echo_ref) -> None:
-    """Verify uncertain brokerage outcomes do not cause duplicates and reconcile cleanly on restart."""
+@pytest.mark.parametrize("appears_in_history", [True, False])
+def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_env, appears_in_history) -> None:
+    """An uncertain placement is never resent; after restart it reconciles from real-shape history.
+
+    Real get_option_orders responses do not echo ref_id, so LiveBroker matches by account,
+    contract, side, quantity, exact limit and agent-created time. Absence never proves
+    "not placed": the order stays unresolved and blocks, it is never placed again.
+    """
     _, settings, _, live_db = managed_live_env
     store = TelegramStore(live_db, settings.telegram_channel_id)
     now = datetime(2026, 11, 16, 15, 0, 0, tzinfo=UTC)
@@ -728,7 +732,7 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
     )
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
-    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account, allow_live_writes=True)
+    mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
     provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
 
     dispatcher = LiveDispatcher(
@@ -742,57 +746,43 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
         single_entry=True,
     )
 
-    # 1. Simulate network failure / timeout during order placement
+    # 1. The placement call times out: its disposition is unknown.
     fake_mcp.fail_tool("place_option_order", TimeoutError("Broker gateway timeout"))
-
-    with pytest.raises(MCPReadError):
+    with pytest.raises(ReconciliationError, match="Unresolved live order"):
         asyncio.run(dispatcher.run_once())
 
-    # Verify intent was durably recorded before the broker call
     with sqlite3.connect(live_db) as conn:
         rows = conn.execute("SELECT logical_order_id, state FROM order_intents").fetchall()
         assert len(rows) == 1
         order_id, state = rows[0]
         assert state == "INTENT_RECORDED"
+    assert sum(name == "place_option_order" for name, _ in fake_mcp.calls) == 1
 
-    # 2. Broker actually received the order and it is confirmed
+    # 2. The broker did receive it: it appears in history in the real response shape.
     fake_mcp.clear_faults()
-    # Extract exact ref_id that was submitted by the live broker
-    ref_id = next(args["ref_id"] for name, args in fake_mcp.calls if name == "place_option_order")
-    broker_order = {
-        "id": "rh_ord_recovered_980",
-        "ref_id": ref_id,
-        "account_number": settings.robinhood_mcp_account,
-        "state": "confirmed",
-        "direction": "buy",
-        "quantity": "1",
-        "filled_quantity": "0",
-        "price": "1.20",
-        "created_at": now.isoformat(),
-        "updated_at": now.isoformat(),
-        "accepted_at": now.isoformat(),
-        "fills": [],
-        "executions": [],
-    }
-    if not echo_ref:
-        # Real provider evidence may omit ref_id. Without a persisted broker ID,
-        # there is no safe identity match; never guess from symbol or price.
-        broker_order.pop("ref_id")
-    fake_mcp.orders["rh_ord_recovered_980"] = broker_order
+    placed = next(args for name, args in fake_mcp.calls if name == "place_option_order")
+    if appears_in_history:
+        fake_mcp.orders["rh_ord_recovered_980"] = {
+            "id": "rh_ord_recovered_980",
+            "account_number": settings.robinhood_mcp_account,
+            "state": "confirmed", "type": "limit",
+            "quantity": "1.0000", "price": "1.2000", "processed_quantity": "0.0000",
+            "agent_initiated": True, "placed_agent": "agent",
+            "created_at": now.isoformat(), "updated_at": now.isoformat(),
+            "legs": [dict(leg, executions=[]) for leg in placed["legs"]],
+        }
 
-    # Reconstruct ALL application-side objects from the durable database.
-    # Only the synthetic exchange survives; no broker ID injection.
+    # Reconstruct ALL application-side objects from the durable databases.
     del dispatcher, provider, mcp_broker
     restarted_mcp = RobinhoodMCPBroker(
         fake_mcp, approved_account_number=settings.robinhood_mcp_account,
-        allow_live_writes=True,
     )
     restarted = LiveDispatcher(
         live_db, settings.telegram_channel_id, restarted_mcp, account,
         MCPReadOnlyOptionData(restarted_mcp, calendar=OpenMarketCalendar()),
         settings, clock=clock, single_entry=True,
     )
-    if echo_ref:
+    if appears_in_history:
         assert asyncio.run(restarted.run_once()).entry_orders_submitted == 0
     else:
         with pytest.raises(ReconciliationError, match="Unresolved live order"):
@@ -801,15 +791,9 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
     assert sum(name == "place_option_order" for name, _args in fake_mcp.calls) == 1
     with sqlite3.connect(live_db) as conn:
         all_intents = conn.execute(
-            "SELECT logical_order_id,state,broker_order_id FROM order_intents"
+            "SELECT logical_order_id,state FROM order_intents"
         ).fetchall()
-        assert len(all_intents) == 1
-        assert all_intents[0][0] == order_id
-        if echo_ref:
-            assert all_intents[0][1:] == ("ACCEPTED", "rh_ord_recovered_980")
-        else:
-            assert all_intents[0][1:] == ("INTENT_RECORDED", None)
-
+    assert all_intents == [(order_id, "ACCEPTED" if appears_in_history else "INTENT_RECORDED")]
 
 
 @pytest.mark.parametrize("mismatch", ["none", "strike", "expiry", "right", "limit", "expired"])
@@ -853,7 +837,7 @@ def test_exact_supervised_receipt_enforced_before_broker_submission(managed_live
         account_number=settings.robinhood_mcp_account, buying_power=Decimal("10000"), clock=clock,
     )
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
-    mcp = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account, allow_live_writes=True)
+    mcp = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
     dispatcher = LiveDispatcher(
         live_db, settings.telegram_channel_id, mcp, account,
         MCPReadOnlyOptionData(mcp, calendar=OpenMarketCalendar()), settings,
