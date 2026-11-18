@@ -204,7 +204,8 @@ def backup_live_journal(root: Path, *, keep: int = 7) -> Path | None:
         if install_mode(root) == "LIVE":
             raise RuntimeError("LIVE settings missing; live journal not backed up")
         return None
-    settings = json.loads(settings_file.read_text(encoding="utf-8"))
+    # utf-8-sig: Windows PowerShell 5.1 rewrites settings.json with a BOM.
+    settings = json.loads(settings_file.read_text(encoding="utf-8-sig"))
     raw = settings.get("live_journal_path")
     if not isinstance(raw, str) or not raw.strip():
         if install_mode(root) == "LIVE":

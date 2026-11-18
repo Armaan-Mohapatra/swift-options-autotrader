@@ -133,6 +133,16 @@ def test_live_journal_has_separate_verified_backup_and_no_cross_restore(install:
     assert control.is_file() and second.exists()
 
 
+def test_live_backup_reads_settings_written_with_a_bom(install: Path):
+    journal = install / 'data' / 'live-journal.sqlite3'
+    with closing(sqlite3.connect(journal)) as con, con:
+        con.execute('CREATE TABLE t (v INTEGER)')
+    (install / 'config').mkdir()
+    (install / 'config' / 'settings.json').write_text(
+        json.dumps({'live_journal_path': str(journal)}), encoding='utf-8-sig')
+    assert backup_live_journal(install) is not None
+
+
 def test_live_backup_fails_closed_when_configured_journal_missing(install: Path):
     assert backup_live_journal(install) is None  # PAPER without journal
     (install / 'config').mkdir()
