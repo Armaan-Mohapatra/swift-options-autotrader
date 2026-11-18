@@ -32,7 +32,6 @@ from swift_autotrader.notifications.kill_switch import TelegramKillSwitchBot
 from swift_autotrader.orders.engine import PaperOrderEngine
 from swift_autotrader.supervisor import ServiceSupervisor
 
-
 # Advertised input properties of the real Robinhood MCP tools (LiveBroker verifies these).
 _TOOL_PROPERTIES: dict[str, set[str]] = {
     "get_accounts": set(),
