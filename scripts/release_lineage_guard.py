@@ -24,6 +24,14 @@ PROTECTED_PATHS = (
 )
 
 
+# The historic installed SHA predates the separate unattended-approval receipt.
+# Its absence in that baseline is expected; every candidate must contain it.
+BASELINE_PATHS = tuple(
+    p for p in PROTECTED_PATHS
+    if p != "src/swift_autotrader/orders/unattended_approval.py"
+)
+
+
 class GitGateError(RuntimeError):
     """An inspectable Git read failed; never treat it as a pass."""
 
@@ -77,7 +85,7 @@ def audit(root: Path, protected_ref: str, candidate_ref: str) -> dict[str, objec
     except ValueError as exc:
         raise GitGateError("Invalid Git divergence count") from exc
     missing_candidate = [p for p in PROTECTED_PATHS if not _contains(root, candidate, p)]
-    missing_protected = [p for p in PROTECTED_PATHS if not _contains(root, protected, p)]
+    missing_protected = [p for p in BASELINE_PATHS if not _contains(root, protected, p)]
     reasons = []
     if protected_only:
         reasons.append("PROTECTED_COMMITS_NOT_IN_CANDIDATE")
