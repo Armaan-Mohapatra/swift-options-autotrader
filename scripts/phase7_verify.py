@@ -64,6 +64,27 @@ def _unconditional_guard(statements: list[ast.stmt], guard: str) -> bool:
                 and statements[0].exc.func.id == guard)
 
 
+
+def _guarded_by_write_flag(statements: list[ast.stmt], attribute: str) -> bool:
+    """First executable statement must refuse writes unless explicitly enabled."""
+    body = list(statements)
+    if (body and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        body = body[1:]
+    if not body or not isinstance(body[0], ast.If):
+        return False
+    test = body[0].test
+    if not isinstance(test, ast.UnaryOp) or not isinstance(test.op, ast.Not):
+        return False
+    if ast.unparse(test.operand) != attribute:
+        return False
+    first = body[0].body[0] if body[0].body else None
+    return (isinstance(first, ast.Raise) and isinstance(first.exc, ast.Call)
+            and isinstance(first.exc.func, ast.Name)
+            and first.exc.func.id == "BrokerWritesDisabledError")
+
+
 def verify() -> list[str]:
     issues: list[str] = []
     for name in REQUIRED:
@@ -78,16 +99,30 @@ def verify() -> list[str]:
     if live.is_file():
         text = live.read_text(encoding="utf-8")
         try:
-            for method in ("submit_order", "cancel_order", "get_order"):
-                statements = _function_body(text, "RobinhoodMCPBroker", method)
-                if not _unconditional_guard(statements, "BrokerWritesDisabledError"):
-                    issues.append("Real adapter not unconditionally denied: " + method)
+            for cls, guard_attr in (
+                ("RobinhoodMCPBroker", "self.allow_live_writes"),
+                ("RobinhoodLiveBroker", "self.mcp.allow_live_writes"),
+            ):
+                for method in ("submit_order", "cancel_order"):
+                    statements = _function_body(text, cls, method)
+                    if not _guarded_by_write_flag(statements, guard_attr):
+                        issues.append("Missing pre-write authorization guard: " + cls + "." + method)
+            statements = _function_body(text, "RobinhoodMCPBroker", "get_order")
+            if not _unconditional_guard(statements, "BrokerWritesDisabledError"):
+                issues.append("Read-only adapter get_order must deny direct broker access")
         except (SyntaxError, ValueError) as exc:
             issues.append("Unable to audit real broker guard: " + type(exc).__name__)
+        # Explicit write opt-in and an unknown-tool denylist both precede network I/O.
         if not re.search(
-            r"if name not in READ_TOOLS\s*:\s*\n\s*raise BrokerWritesDisabledError", text
+            r"if name in WRITE_TOOLS and not self\.allow_live_writes\s*:\s*\n\s*raise BrokerWritesDisabledError",
+            text,
         ):
-            issues.append("MCP tool allowlist deny-by-default guard is missing")
+            issues.append("MCP write-tool authorization gate missing")
+        if not re.search(
+            r"if name not in READ_TOOLS and name not in WRITE_TOOLS\s*:\s*\n\s*raise MCPContractError",
+            text,
+        ):
+            issues.append("MCP unknown-tool deny-by-default gate missing")
     engine = ROOT / "src/swift_autotrader/orders/engine.py"
     if engine.is_file():
         source = engine.read_text(encoding="utf-8")
