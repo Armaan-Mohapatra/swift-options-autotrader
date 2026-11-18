@@ -4,7 +4,8 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Start','Stop','Restart','Status','Health','Backup','Restore','Rollback','Uninstall','Logs','RegisterLiveTask','UnregisterLiveTask','Migrate')]
+    [ValidateSet('Start','Stop','Restart','Status','Health','Backup','Restore','Rollback','Uninstall','Logs','RegisterLiveTask','UnregisterLiveTask','Migrate',
+        'PauseEntries','ResumeEntries','EntriesStatus','Rehearse','InitLiveJournal')]
     [string]$Action,
     [string]$InstallRoot = '',
     [ValidateSet('Paper', 'Live')][string]$Mode = 'Paper',
@@ -58,7 +59,38 @@ function Invoke-PythonRuntime {
     & $exe -m swift_autotrader.windows_runtime @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Windows runtime command failed; see local logs.' }
 }
+function Invoke-SwiftCli {
+    param([string[]]$Arguments)
+    Set-SwiftEnvironment -InstallRoot $root
+    & (Get-SwiftPython $root) -m swift_autotrader @Arguments
+    if ($LASTEXITCODE -ne 0) { throw 'Swift command failed; see the JSON error above.' }
+}
+function Invoke-SwiftControl {
+    param([string[]]$Arguments)
+    # Emergency pause/status/resume must not depend on a healthy OAuth token,
+    # source session, live settings, market-data feed or trading configuration.
+    # The CLI's control-only path consults only this managed local SQLite DB.
+    $dbName = if ($Mode -eq 'Live') { 'live.sqlite3' } else { 'swift.sqlite3' }
+    $env:DB_PATH = Join-Path $root "data\$dbName"
+    & (Get-SwiftPython $root) -m swift_autotrader @Arguments
+    if ($LASTEXITCODE -ne 0) { throw 'Swift entry-control command failed.' }
+}
 switch ($Action) {
+    # Entry kill switch: takes effect on the next entry, no restart. Exits are never blocked.
+    'PauseEntries' { Invoke-SwiftControl -Arguments @('entries-pause') }
+    'EntriesStatus' { Invoke-SwiftControl -Arguments @('entries-status') }
+    'ResumeEntries' {
+        if ($PSCmdlet.ShouldProcess($root, 'Allow new entries again')) {
+            Invoke-SwiftControl -Arguments @('entries-resume')
+        }
+    }
+    # One-time: create the empty live journal at live_journal_path (never overwrites).
+    'InitLiveJournal' { Invoke-SwiftCli -Arguments @('live-journal-init') }
+    # Real MCP, writes forced off: logs what WOULD be sent. Never places or cancels.
+    'Rehearse' {
+        $env:LIVE_REHEARSAL = 'true'
+        Invoke-SwiftCli -Arguments @('live-rehearsal', '--root', $root)
+    }
     'Start' {
         if ($null -eq $task) { throw 'No scheduled task. Install with scheduling enabled.' }
         $opposingTaskName = if ($Mode -eq 'Live') { 'SwiftAutoTrader-Paper-Local' } else { 'SwiftAutoTrader-Live-Local' }

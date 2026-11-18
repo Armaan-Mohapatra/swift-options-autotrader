@@ -1,4 +1,4 @@
-"""Offline, non-mutating final PAPER release boundary audit.
+"""Offline, non-mutating paper-default and explicit-live boundary audit.
 
 A passing result is *not* a substitute for CI, Windows PowerShell execution,
 external supply-chain attestations or local OAuth/market field validation.
@@ -126,13 +126,38 @@ def verify() -> list[str]:
     engine = ROOT / "src/swift_autotrader/orders/engine.py"
     if engine.is_file():
         source = engine.read_text(encoding="utf-8")
-        if "type(broker) is not PaperBroker" not in source:
-            issues.append("Paper engine missing concrete PaperBroker-only guard")
+        # The audited engine now allows exactly two concrete broker types:
+        # PaperBroker, or a LiveBroker explicitly configured with writes enabled.
+        if ("if type(broker) is PaperBroker:" not in source
+                or "type(broker) is LiveBroker and broker.writes_enabled" not in source
+                or 'raise TypeError("engine accepts only' not in source):
+            issues.append("Engine does not restrict broker to paper or enabled live")
     settings = ROOT / "src/swift_autotrader/config.py"
     if settings.is_file():
-        source = settings.read_text(encoding="utf-8")
-        if "not self.paper_only or self.live_enabled or self.allow_broker_writes" not in source:
-            issues.append("Fail-closed live trading configuration guard missing")
+        try:
+            from swift_autotrader.config import Settings
+
+            paper = Settings.from_env({})
+            if paper.live_mode or paper.mode != "PAPER":
+                issues.append("Default configuration is not paper-only")
+            synthetic = {
+                "PAPER_ONLY": "false", "LIVE_ENABLED": "true",
+                "ALLOW_BROKER_WRITES": "true",
+                "BROKER_BACKEND": "robinhood_live",
+                "LIVE_ACCOUNT_NUMBER": "SYNTHETIC-ACCOUNT-NOT-REAL",
+                "LIVE_JOURNAL_PATH": str((ROOT / "nonexistent-test-journal.sqlite").resolve()),
+            }
+            if not Settings.from_env(synthetic).live_mode:
+                issues.append("Complete synthetic live configuration cannot be recognized")
+            # Test every individually absent authorization component. A partial
+            # request must never accidentally become a live-enabled Settings.
+            for field in synthetic:
+                partial = dict(synthetic)
+                del partial[field]
+                if Settings.from_env(partial).live_mode:
+                    issues.append("Incomplete live configuration enabled writes: " + field)
+        except (ImportError, TypeError, ValueError) as exc:
+            issues.append("Cannot verify paper/live settings boundary: " + type(exc).__name__)
     dashboard = ROOT / "src/swift_autotrader/dashboard/app.py"
     if dashboard.is_file() and "127.0.0.1" not in dashboard.read_text(encoding="utf-8"):
         issues.append("Local dashboard loopback restriction missing")
@@ -149,4 +174,4 @@ if __name__ == "__main__":
         print(item, file=sys.stderr)
     if violations:
         raise SystemExit(1)
-    print("Offline phase 7 PAPER safety boundary checks passed (not release certification)")
+    print("Offline phase 7 paper/live safety boundary checks passed (not release certification)")

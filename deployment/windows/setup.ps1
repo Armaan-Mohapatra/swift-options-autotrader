@@ -9,7 +9,7 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
-    [string]$SourceRoot = (Join-Path $PSScriptRoot '..\..'),
+    [string]$SourceRoot = '',
     [string]$InstallRoot = '',
     [ValidatePattern('^[0-9a-fA-F]{40}$')][string]$ExpectedCommit = '',
     [switch]$Apply,
@@ -21,6 +21,8 @@ param(
 )
 . (Join-Path $PSScriptRoot 'common.ps1')
 Assert-SwiftWindows
+# PS 5.1 leaves $PSScriptRoot empty inside param defaults when CmdletBinding is used.
+if ([string]::IsNullOrWhiteSpace($SourceRoot)) { $SourceRoot = Join-Path $PSScriptRoot '..\..' }
 $source = [System.IO.Path]::GetFullPath($SourceRoot)
 $packageMode = -not [string]::IsNullOrWhiteSpace($PackageZip)
 $root = Resolve-SwiftInstallRoot -InstallRoot $InstallRoot
@@ -185,8 +187,9 @@ if (-not (Test-Path -LiteralPath $settingsFile)) {
         telegram_enabled = $false; telegram_channel_id = $null; telegram_api_id = $null
         status_notifications_enabled = $false; status_chat_id = $null
         paper_dispatch_enabled = $false; paper_data_source = 'none'
-        paper_max_contracts = 1; paper_max_premium_usd = '0'
-        paper_max_exposure_usd = '0'; paper_max_open_signals = 1
+        paper_max_contracts = 1; paper_max_premium_usd = '999'
+        paper_max_daily_net_loss_usd = '750'
+        # No exposure or open-trade cap: buying power alone bounds the trade count.
     }
     [System.IO.File]::WriteAllText($settingsFile, ($settings | ConvertTo-Json -Depth 3), ([System.Text.UTF8Encoding]::new($false)))
 }

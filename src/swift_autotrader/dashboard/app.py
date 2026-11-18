@@ -14,7 +14,7 @@ from swift_autotrader.analytics.metrics import CostModel, PaperAnalytics
 HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Swift Paper Console</title><style>
+<title>Swift Local Monitor</title><style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;
 background:#0c1220;color:#e5ebfa}body{margin:0;max-width:1250px;padding:30px 28px 75px}
 h1{font-size:26px;letter-spacing:-.035em;margin:0}p,small{color:#a0b0d0}

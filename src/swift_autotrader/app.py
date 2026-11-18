@@ -5,11 +5,11 @@ import argparse
 import asyncio
 import importlib.util
 import json
+import os
 import sqlite3
 import sys
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 
 from swift_autotrader import __version__
 from swift_autotrader.config import ConfigurationError, Settings
@@ -68,6 +68,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     live_cmd.add_argument("--authorized-symbol", default=None, help="Explicit underlying symbol authorized for single-entry execution")
     live_cmd.add_argument("--target-message-id", type=int, default=None, help="Explicit Telegram message ID authorized for single-entry execution")
+    for name, text in (("entries-pause", "Block NEW entries now (kill switch ON)"),
+                       ("entries-status", "Show whether entries are allowed or blocked"),
+                       ("entries-resume", "Allow entries again (not after an emergency stop)")):
+        commands.add_parser(name, help=text)
+    commands.add_parser("live-journal-init", help="Create the empty live journal once")
+    rehearsal = commands.add_parser(
+        "live-rehearsal", help="Real MCP, writes forced off: log what would be sent")
+    rehearsal.add_argument("--root", required=True)
+    rehearsal.add_argument("--limit", type=int, default=50)
     paper_cycle = commands.add_parser("paper-cycle", help="Run one guarded local PAPER cycle")
     paper_cycle.add_argument("--confirm-simulation", action="store_true")
     enroll = commands.add_parser("telegram-enroll", help="Interactive Telegram MTProto session enrollment")
@@ -101,7 +110,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(review_status(frozenset(commands.choices)), sort_keys=True))
         return 0
     try:
-        config = Settings.from_env()
+        if args.command in {"entries-pause", "entries-status", "entries-resume"}:
+            # Emergency entry controls must work even when the live service's
+            # environment is malformed or its broker credentials have expired.
+            # This command only reads/writes the explicitly selected SQLite DB.
+            from pathlib import Path
+
+            config = Settings(db_path=Path(os.environ.get(
+                "DB_PATH", "data/swift_autotrader.sqlite3")))
+        else:
+            config = Settings.from_env()
         configure_logging(config.log_level)
         if args.command == "smoke":
             payload = {"status": "OK", "version": __version__, "mode": "PAPER_ONLY"}
@@ -132,6 +150,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "connection_attempted": False,
                     "real_broker_writes_enabled": False,
                 }
+        elif args.command in {"entries-pause", "entries-status", "entries-resume"}:
+            from swift_autotrader import entry_control
+
+            action = {"entries-pause": entry_control.pause_entries,
+                      "entries-status": entry_control.entries_status,
+                      "entries-resume": entry_control.resume_entries}[args.command]
+            payload = {"status": "ENTRY_CONTROL", "mode": "CONTROL_ONLY",
+                       "live_account_ending": "", **action(config.db_path)}
+        elif args.command == "live-journal-init":
+            from swift_autotrader.broker.live_broker import LiveBroker
+
+            if config.live_journal_path is None:
+                raise ConfigurationError("Set LIVE_JOURNAL_PATH first")
+            LiveBroker.create_journal(config.live_journal_path)  # never overwrites
+            payload = {"status": "LIVE_JOURNAL_CREATED"}
+        elif args.command == "live-rehearsal":
+            from pathlib import Path
+
+            from swift_autotrader.paper_service import run_live_rehearsal
+            results = run_live_rehearsal(config, Path(args.root), limit=args.limit)
+            payload = {"status": "LIVE_REHEARSAL_COMPLETE", "real_broker_writes": 0,
+                       "would_send": sum(r["status"] == "WOULD_SEND" for r in results),
+                       "denied": sum(r["status"] == "DENIED" for r in results),
+                       "results": results}
         elif args.command == "paper-dispatch-service":
             from swift_autotrader.paper_service import run_paper_service
             asyncio.run(run_paper_service(config, Path(args.root)))

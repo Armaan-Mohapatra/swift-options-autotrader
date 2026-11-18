@@ -17,10 +17,6 @@ def test_default_is_paper_only_and_disabled():
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"PAPER_ONLY": "false"},
-        {"LIVE_ENABLED": "true"},
-        {"ALLOW_BROKER_WRITES": "true"},
-        {"BROKER_BACKEND": "robinhood"},
         {"TELEGRAM_ENABLED": "true"},
         {"ENTRY_TIMEOUT_SECONDS": "3599"},
         {"MAX_CONTRACTS_PER_SIGNAL": "0"},

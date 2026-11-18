@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import zipfile
 from pathlib import Path
-
-import pytest
 
 BUILDER_PATH = Path(__file__).resolve().parents[2] / "scripts/build_windows_package.py"
 spec = importlib.util.spec_from_file_location("builder_from_reviewed_github_blob", BUILDER_PATH)
@@ -51,7 +50,7 @@ def _repo(tmp_path: Path) -> tuple[Path, str]:
     return root, _git(root, "rev-parse", "HEAD").decode().strip()
 
 
-def test_clean_crlf_git_checkout_cannot_claim_different_source_bytes(tmp_path: Path):
+def test_clean_crlf_checkout_packages_only_exact_committed_blob(tmp_path: Path):
     root, sha = _repo(tmp_path)
     relative = "src/swift_autotrader/verified.py"
     committed = _git(root, "show", f"HEAD:{relative}")
@@ -59,8 +58,10 @@ def test_clean_crlf_git_checkout_cannot_claim_different_source_bytes(tmp_path: P
     assert committed == b"approved\n"
     assert checkout == b"approved\r\n"
     assert _git(root, "status", "--porcelain") == b""
-    with pytest.raises(RuntimeError, match="committed Git blob"):
-        module.create_package(
-            root, tmp_path / "release.zip", expected_commit=sha,
-        )
-    assert not (tmp_path / "release.zip").exists()
+    archive = tmp_path / "release.zip"
+    manifest = module.create_package(root, archive, expected_commit=sha)
+    assert manifest["source_commit"] == sha
+    with zipfile.ZipFile(archive) as built:
+        # Worktree CRLF was NOT shipped; only reviewed HEAD bytes were signed.
+        assert built.read(relative) == committed
+        assert built.read(relative) != checkout

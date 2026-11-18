@@ -22,6 +22,7 @@ ALLOWED_DOCS = (
     "docs/PROJECT_SPEC.md", "docs/SOURCE_SPRINT_PLAN.md", "docs/ARCHITECTURE.md",
     "docs/WINDOWS_RUNBOOK.md", "docs/OPERATIONS.md", "docs/ROLLBACK.md",
     "docs/SECURITY.md", "docs/CONFIGURATION.md",
+    "docs/LIVE_OPERATIONS.md", "docs/PRODUCTION_ACCEPTANCE_HANDOFF.md",
     "docs/PAPER_EXECUTION_PHASE3.md", "docs/PAPER_ANALYTICS_PHASE5.md",
     "docs/PHASE_REPORTS/PHASE_6.md", "docs/PHASE_REPORTS/PHASE_7.md",
     "docs/PHASE_REPORTS/PHASE_8.md", "docs/PAPER_DISPATCH_PHASE8.md",
@@ -119,9 +120,27 @@ def create_package(source: Path, output: Path, *, expected_commit: str | None = 
             except (OSError, subprocess.SubprocessError) as exc:
                 raise RuntimeError("Cannot verify committed release blob") from exc
             if payload != committed:
-                raise RuntimeError(
-                    f"Release source bytes differ from committed Git blob: {relative}"
-                )
+                # A clean Windows checkout may contain CRLF while HEAD stores LF.
+                # Compare Git's filtered (normalized) worktree object ID with
+                # the reviewed HEAD blob, then package the committed bytes.
+                # Neither an uncommitted edit nor an ignored file can pass.
+                try:
+                    filtered = subprocess.run(
+                        ["git", "-C", str(source), "hash-object",
+                         f"--path={relative}", "--stdin"],
+                        input=payload, capture_output=True, check=True, timeout=10,
+                    ).stdout.decode("ascii").strip()
+                    reviewed = subprocess.run(
+                        ["git", "-C", str(source), "rev-parse", f"HEAD:{relative}"],
+                        capture_output=True, text=True, check=True, timeout=10,
+                    ).stdout.strip()
+                except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
+                    raise RuntimeError("Cannot verify normalized release bytes") from exc
+                if filtered != reviewed:
+                    raise RuntimeError(
+                        f"Release source bytes differ from committed Git blob: {relative}"
+                    )
+                sources[relative] = committed
     version = tomllib.loads(sources["pyproject.toml"].decode("utf-8"))["project"]["version"]
     if not isinstance(version, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", version):
         raise RuntimeError("Unsupported release package version")

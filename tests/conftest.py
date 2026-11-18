@@ -22,7 +22,6 @@ from swift_autotrader.config import Settings
 from swift_autotrader.database.migrate import apply_migrations
 from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP
 
-
 _AMBIENT_PREFIXES = (
     "PAPER_", "LIVE_", "ALLOW_", "BROKER_", "TELEGRAM_", "SWIFT_", "KILL_SWITCH_", "MAX_",
     "SLIPPAGE_", "ENTRY_", "ROBINHOOD_", "DB_PATH", "LOG_LEVEL",

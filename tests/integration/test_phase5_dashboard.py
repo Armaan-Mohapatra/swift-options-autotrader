@@ -37,7 +37,7 @@ def test_dashboard_is_read_only_and_local_only(tmp_path):
         with urlopen(url + "/") as response:
             html = response.read().decode()
             assert response.status == 200
-            assert "Swift / Paper Console" in html
+            assert "Swift / Local Monitor" in html
             assert "form action" not in html
             assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
         with urlopen(url + "/static/dashboard.js") as response:

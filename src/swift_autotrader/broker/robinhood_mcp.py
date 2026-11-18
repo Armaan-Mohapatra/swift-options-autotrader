@@ -89,11 +89,22 @@ def _data(response: Any) -> dict[str, Any]:
     result = _obj(response)
     if result.get("isError") or result.get("is_error"):
         raise MCPReadError("MCP tool returned an error")
+    levels = [result]
     content = result.get("structuredContent", result.get("structured_content"))
     if content is not None:
         result = _obj(content)
+        levels.append(result)
     if "data" in result:
         result = _obj(result["data"])
+        levels.append(result)
+    # `next` may sit beside `data` or inside it. Surface it on the returned object;
+    # two different values are ambiguous, so never pick one.
+    for key in ("next", "next_cursor"):
+        values = {repr(level[key]) for level in levels if level.get(key) is not None}
+        if len(values) > 1:
+            raise MCPContractError("Conflicting pagination fields in MCP response")
+        if values and result.get(key) is None:
+            result[key] = next(level[key] for level in levels if level.get(key) is not None)
     return result
 
 
