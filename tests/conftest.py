@@ -23,6 +23,20 @@ from swift_autotrader.database.migrate import apply_migrations
 from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP
 
 
+_AMBIENT_PREFIXES = (
+    "PAPER_", "LIVE_", "ALLOW_", "BROKER_", "TELEGRAM_", "SWIFT_", "KILL_SWITCH_", "MAX_",
+    "SLIPPAGE_", "ENTRY_", "ROBINHOOD_", "DB_PATH", "LOG_LEVEL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Machine-wide variables (e.g. PAPER_ONLY=0 set for another bot) must never leak in."""
+    for name in list(os.environ):
+        if name.upper().startswith(_AMBIENT_PREFIXES):
+            monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def fake_clock() -> FakeClock:
     """Deterministic UTC test clock."""
