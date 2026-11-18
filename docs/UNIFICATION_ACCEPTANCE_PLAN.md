@@ -37,6 +37,16 @@ This guard blocks missing protected commits/modules. Its output PASS_LINEAGE_ONL
 6. Read-only field-check Robinhood agentic-account pin, actual MCP tool schemas/pagination, options orders/positions/quotes, realized P&L, token refresh and original Telegram event freshness. Never upload account identifiers, paid source bodies, tokens, private database or DPAPI files.
 7. Deliver evidence by SHA and a strict GO/NO-GO. Fix real bugs and repeat all affected gates until results are demonstrable. Do not describe synthetic CI as production certification.
 
+
+## Tool-contract review, 2026-11-18 (read-only definitions; no live account accessed)
+
+- Robinhood get_option_orders is account-scoped; accepts order_id, state, created_at_gte, and cursor. The cursor must be taken from the prior response's next URL.
+- get_option_positions is account-scoped, with nonzero, option_ids and cursor; no paging completion may be silently assumed.
+- get_realized_pnl reports aggregate bucketed realized return for the account, with inclusive start_date/end_date and optional America/New_York timezone. It is not a per-fill cost ledger.
+- get_portfolio exposes buying_power as a nested object, not just a primitive amount.
+- PR #34's RobinhoodMCPBroker.orders has a hard 10-page cap. Its LiveBroker._today_activity calls orders(limit_pages=10) without a date filter. For sufficiently deep order history, this fails closed and may prevent unattended entries. Do NOT simply filter by today's ORDER CREATION time: an older order could fill today. Require a complete coverage proof based on EXECUTION timestamps and adversarial tests spanning >10 pages and overnight orders. No guessed P&L.
+- These definitions come from the connected tool interface; actual broker response bodies, local OAuth and billing/permission behavior have NOT been verified.
+
 ## Live activation boundary
 
 Engineering and GitHub changes do not authorize placing real orders. After all read-only gates pass, get a separate owner signoff bound to the installed SHA and dedicated account. Begin entries PAUSED; conduct at most ONE separately approved supervised live test, verify broker order ID, fills, 60-minute expiry, account P&L, full owned-position exit and kill switch, then pause.
