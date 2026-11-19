@@ -288,6 +288,13 @@ try {
     Write-Output 'ACTIVATION_COMPLETE'
 } catch {
     Write-Output ('ACTIVATION_NOT_COMPLETED: ' + $_.Exception.Message)
-    Invoke-ActivationRollback -Reason $_.Exception.Message
+    # Dry runs and failed preflight/owner confirmation must never mutate Task Scheduler.
+    # Rollback only after this invocation actually began transitioning services/config.
+    if ($script:paperWasRunning -or $script:configChanged -or
+            $script:receiptCreated -or $script:liveStarted) {
+        Invoke-ActivationRollback -Reason $_.Exception.Message
+    } else {
+        Write-Output 'NO_ACTIVATION_CHANGES: existing paper/live task states preserved.'
+    }
     exit 2
 }
