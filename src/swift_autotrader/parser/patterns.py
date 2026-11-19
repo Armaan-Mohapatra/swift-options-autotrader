@@ -53,6 +53,15 @@ EXIT = re.compile(
     r"RUNNERS\s+OUT|ALL\s+OUT|CLOSED\s+ALL|FULL\s+EXIT|OUT\s+OF\s+(?:IT|THIS))(?=$|[\s.,!?])",
     re.IGNORECASE,
 )
+# A bare, ticker-qualified SOLD instruction is a possible exit, never an
+# entry. Do not match commentary or category words as a ticker. The signal
+# matcher must independently prove one positive bot-owned filled balance.
+BARE_SOLD = re.compile(
+    rf"^\\s*\\$?(?P<symbol>(?!(?:LOTTO|SWING|SCALP|DAYTRADE)\\b){SYMBOL})\\s+SOLD"
+    rf"(?:\\s*@\\s*\\$?{AMOUNT})?"
+    r"(?:\\s*\\(\\s*[+-]?\\d+(?:\\.\\d+)?\\s*%\\s*\\))?\\s*$",
+    re.IGNORECASE,
+)
 CORRECTION = re.compile(r"\b(?:CORRECT(?:ION|ED)?|FIX(?:ED)?|REPLACE(?:D)?|INSTEAD)\b", re.I)
 NON_OPTION = re.compile(
     r"\b(?:SHARES?|STOCK\s+ONLY|EQUITY\s+ONLY|FUTURES?|PERPS?|CRYPTO|"
