@@ -254,7 +254,9 @@ try {
         if (Test-Path -LiteralPath $healthFile -PathType Leaf) {
             $health = Get-Content -LiteralPath $healthFile -Raw -Encoding UTF8 | ConvertFrom-Json
             $asOf = [DateTimeOffset]::Parse([string]$health.as_of_utc).UtcDateTime
-            if ($asOf -ge $startedAt.UtcDateTime) {
+            # Both operands are UTC DateTime values; DateTime has no UtcDateTime member.
+            # A missing property can produce a null comparison and false startup verification.
+            if ($asOf -ge $startedAt) {
                 if ($health.status -eq 'FAILED') { throw 'REFUSED: the live worker reported FAILED at startup. See logs\supervisor.log.' }
                 if ($health.mode -eq 'LIVE' -and $health.status -in @('RUNNING','DEGRADED') -and $null -ne $health.last_dispatch_status) {
                     $verified = $true
@@ -286,6 +288,12 @@ try {
     Write-Output 'ACTIVATION_COMPLETE'
 } catch {
     Write-Output ('ACTIVATION_NOT_COMPLETED: ' + $_.Exception.Message)
-    Invoke-ActivationRollback -Reason $_.Exception.Message
+    # Dry runs and failed preflight/owner confirmation must never mutate Task Scheduler.
+    # Rollback only after this invocation actually began transitioning services/config.
+    if ($script:paperWasRunning -or $script:configChanged -or $script:receiptCreated -or $script:liveStarted) {
+        Invoke-ActivationRollback -Reason $_.Exception.Message
+    } else {
+        Write-Output 'NO_ACTIVATION_CHANGES: existing paper/live task states preserved.'
+    }
     exit 2
 }
