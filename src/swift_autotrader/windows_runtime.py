@@ -447,6 +447,12 @@ class PaperSupervisor:
             backup_live_journal(self.root, keep=7)
             self._last_backup_at = self.now()
             self.log.info("daily_sqlite_backup_complete")
+            try:
+                from swift_autotrader.notifications.alerts import NotificationCenter
+                NotificationCenter(self.root / "data" / "swift.sqlite3").resolve(
+                    "APPLICATION", "BACKUP_FAILED", source_key="daily-backup")
+            except (OSError, sqlite3.Error):
+                pass
         except (OSError, sqlite3.Error, RuntimeError, ValueError):
             self.log.error("daily_sqlite_backup_failed")
             try:

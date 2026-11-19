@@ -133,6 +133,12 @@ function Set-SwiftEnvironment {
             throw 'Forbidden configuration: only paper mode is allowed.'
         }
         $env:SWIFT_INSTALL_ROOT = $InstallRoot
+        # Drop inherited live-identifying variables (e.g. from another project) so
+        # the paper service can never be pointed at a live journal or account.
+        foreach ($v in 'LIVE_TRADING', 'LIVE_JOURNAL_PATH', 'LIVE_ACCOUNT_NUMBER',
+                       'ROBINHOOD_MCP_ACCOUNT') {
+            Remove-Item -LiteralPath "Env:$v" -ErrorAction SilentlyContinue
+        }
         $env:PAPER_ONLY = 'true'
         $env:LIVE_ENABLED = 'false'
         $env:ALLOW_BROKER_WRITES = 'false'

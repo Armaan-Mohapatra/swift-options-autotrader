@@ -226,13 +226,15 @@ def normalize_read_only_review(result: Mapping[str, Any]) -> OrderReview:
     checks = result.get("order_checks")
     if isinstance(checks, Mapping) and not checks:
         checks = []
+    elif isinstance(checks, Mapping) and "alertType" in checks:
+        checks = [checks]  # live shape: one alert dict, e.g. OPTION_WIDE_BID_ASK_SPREAD
     if not isinstance(checks, list):
         raise MCPContractError("Broker review checks missing or unsupported")
     problems: list[str] = []
     for check in checks:
         record = _obj(check)
         if record.get("severity") not in {"pass", "ok", "info"}:
-            problems.append(str(record.get("code") or "UNKNOWN_ALERT"))
+            problems.append(str(record.get("code") or record.get("alertType") or "UNKNOWN_ALERT"))
     keys = [k for k in ("customer_approval_required", "approval_required") if k in result]
     if not keys or any(type(result[k]) is not bool for k in keys):
         raise MCPContractError("Broker approval state not verified")

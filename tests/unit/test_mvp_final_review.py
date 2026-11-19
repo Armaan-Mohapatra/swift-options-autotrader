@@ -34,6 +34,15 @@ def test_observed_and_legacy_review(reply,allowed):
     assert not any(n in WRITE_TOOLS for n,_ in fake.calls)
 
 
+def test_live_shape_alert_dict_blocks_with_its_code():
+    reply = {'order_checks': {'alertType': 'OPTION_WIDE_BID_ASK_SPREAD', 'details': {'isSingleLeg': True}},
+             'customer_approval_required': False}
+    fake, adapter = setup(); fake.responses['review_option_order'] = reply
+    result = wait(adapter.review_order(ACCOUNT, INSTRUMENT, intent()))
+    assert not result.unblocked and result.alerts == ('OPTION_WIDE_BID_ASK_SPREAD',)
+    assert not any(n in WRITE_TOOLS for n, _ in fake.calls)
+
+
 @pytest.mark.parametrize('reply',[{'order_checks':{}},{'order_checks':{},'customer_approval_required':'false'},{'order_checks':{},'customer_approval_required':False,'approval_required':True},{'order_checks':{'unknown':'warning'},'customer_approval_required':False},{'customer_approval_required':False}])
 def test_ambiguous_review_denied(reply):
     fake,adapter=setup();fake.responses['review_option_order']=reply

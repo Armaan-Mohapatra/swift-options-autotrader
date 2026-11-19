@@ -60,6 +60,21 @@ class NotificationCenter:
                 "VALUES(?,?,?,?,?)",
                 (fingerprint, category, severity, code, iso(at or datetime.now(UTC))),
             )
+            inserted = bool(db.execute("SELECT changes()").fetchone()[0])
+            if inserted:
+                return True
+            # A recurrence after resolve() must surface again, not stay suppressed.
+            db.execute("UPDATE local_notifications SET acknowledged=0,created_at_utc=? "
+                       "WHERE fingerprint=? AND acknowledged=1",
+                       (iso(at or datetime.now(UTC)), fingerprint))
+            return bool(db.execute("SELECT changes()").fetchone()[0])
+
+    def resolve(self, category: str, code: str, *, source_key: str) -> bool:
+        """Mark a notification resolved once its condition has recovered."""
+        with closing(self._connect()) as db, db:
+            db.execute("UPDATE local_notifications SET acknowledged=1 "
+                       "WHERE fingerprint=? AND acknowledged=0",
+                       (self._fingerprint(category, source_key, code),))
             return bool(db.execute("SELECT changes()").fetchone()[0])
 
     def scan(self, *, at: datetime | None = None) -> int:
@@ -73,6 +88,15 @@ class NotificationCenter:
                 "SELECT channel_id,state,last_error_code FROM telegram_runtime_state "
                 "WHERE state IN ('DEGRADED','DISCONNECTED')"
             ).fetchall()
+            recovered = db.execute(
+                "SELECT channel_id FROM telegram_runtime_state "
+                "WHERE state NOT IN ('DEGRADED','DISCONNECTED')"
+            ).fetchall()
+        for (channel,) in recovered:
+            channel_ref = hashlib.sha256(str(channel).encode()).hexdigest()[:24]
+            for state in ("DEGRADED", "DISCONNECTED"):
+                self.resolve("TELEGRAM_SERVICE", "TELEGRAM_" + state,
+                             source_key=channel_ref + ":" + state)
         count = 0
         for alert_id, code in paper:
             severity = "CRITICAL" if code in {

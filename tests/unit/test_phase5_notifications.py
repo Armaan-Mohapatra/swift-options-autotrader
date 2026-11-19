@@ -29,6 +29,32 @@ def test_notifications_are_persisted_and_deduplicated(tmp_path):
     assert NotificationCenter(path).scan(at=NOW) == 0  # durable across restart
 
 
+def test_resolved_notification_clears_and_a_recurrence_resurfaces(tmp_path):
+    path = tmp_path / "notifications.sqlite3"
+    apply_migrations(path)
+    center = NotificationCenter(path)
+    assert center.record("APPLICATION", "BACKUP_FAILED", source_key="daily-backup", at=NOW)
+    assert center.resolve("APPLICATION", "BACKUP_FAILED", source_key="daily-backup")
+    assert center.pending() == []
+    assert not center.resolve("APPLICATION", "BACKUP_FAILED", source_key="daily-backup")
+    assert center.record("APPLICATION", "BACKUP_FAILED", source_key="daily-backup", at=NOW)
+    assert [x.code for x in center.pending()] == ["BACKUP_FAILED"]
+
+
+def test_telegram_alert_resolves_when_the_channel_recovers(tmp_path):
+    path = tmp_path / "notifications.sqlite3"
+    apply_migrations(path)
+    with sqlite3.connect(path) as db:
+        db.execute("INSERT INTO telegram_runtime_state(channel_id,state,updated_at_utc)"
+                   "VALUES('-1001234567000','DISCONNECTED','2026-11-12T15:00:00Z')")
+    center = NotificationCenter(path)
+    assert center.scan(at=NOW) == 1 and len(center.pending()) == 1
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE telegram_runtime_state SET state='CONNECTED'")
+    center.scan(at=NOW)
+    assert center.pending() == []
+
+
 def test_application_failure_is_metadata_only(tmp_path):
     path = tmp_path / "notifications.sqlite3"
     apply_migrations(path)
