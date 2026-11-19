@@ -108,10 +108,12 @@ You do the browser sign-in and approval yourself; nothing here handles a passwor
    account. The token is stored encrypted for your Windows user in
    `<install>\secrets\oauth.dpapi`, so the scheduled task must run as the same user.
 4. `Remove-Item Env:ROBINHOOD_MCP_INTERACTIVE`
-5. In Notepad, edit `<install>\config\settings.json`: add `"live_account_number"` (the full
-   number of the MCP account, from the Robinhood app) and `"live_journal_path"`
+5. In Notepad, edit `<install>\config\settings.json`: add `"live_journal_path"`
    (for example `C:\\Users\\YOU\\AppData\\Local\\SwiftAutoTraderPaper\\data\\live\\journal.sqlite`).
-   Leave `"mode": "PAPER_ONLY"` and `"live_enabled": false` for now.
+   The LIVE loader reads the account from the key `"robinhood_mcp_account"` (the full MCP
+   account number; it must equal the DPAPI-pinned account or the service refuses to start).
+   Keep that key out of the paper `settings.json`; stage it in a separate LIVE candidate file
+   (see "Going live"). Leave `"mode": "PAPER_ONLY"` and `"live_enabled": false` for now.
 6. Create the empty journal once: `.\deployment\windows\manage.ps1 -Action InitLiveJournal`
 7. Before running an unattended service, confirm that the Telegram source is
    enrolled and `telegram_enabled=true`, `paper_dispatch_enabled=true`, and
@@ -163,16 +165,25 @@ Do these yourself; no tool or agent should set them. First run `-Action PauseEnt
 service starts blocked.
 
 1. In `config\settings.json` set `"mode": "LIVE"`, `"live_enabled": true`,
-   `"broker_backend": "robinhood_live"`, with `live_account_number` and `live_journal_path`
-   present.
+   `"broker_writes_enabled": true`, with `robinhood_mcp_account`, `live_journal_path`,
+   `max_premium_per_signal_usd` (<= 999), `max_daily_loss_usd` (<= 750) and
+   `max_contracts_per_signal` (1) present. The LIVE loader then forces
+   `DB_PATH=<install>\data\live.sqlite3`, a control database separate from the paper one.
 2. In `deployment.json` set `"mode": "LIVE"`, `"live_enabled": true`,
    `"broker_writes_enabled": true`. The supervisor refuses to start if the two files
    disagree about live mode.
-3. Restart: `.\deployment\windows\manage.ps1 -Action Restart -Confirm:$false`
-4. Check the worker output for `MODE=LIVE account=...XXXX` and `self-check ok`. It refuses
+3. Write the owner's expiring unrestricted-execution receipt
+   `<install>\secrets\unattended-live-approval.json` (version 2: `account_sha256` of the pinned
+   account, `issued_at`, `expires_at` at most 7 days later, and `max_contracts_per_signal`,
+   `max_premium_per_signal_usd`, `max_daily_loss_usd` caps that the configured values may not
+   exceed). Without a valid receipt `live-dispatch` refuses to start; it stops when it expires.
+4. Stop `SwiftAutoTrader-Paper-Local`, enable and start `SwiftAutoTrader-Live-Local`
+   (`manage.ps1 -Action RegisterLiveTask` if it is not registered). The paper and live tasks
+   refuse to run together.
+5. Check the worker output for `MODE=LIVE account=...XXXX` and `self-check ok`. It refuses
    to start live if the journal is missing, the kill switch cannot be read, or the account is
    not the pinned one.
-5. Only then: `-Action ResumeEntries`.
+6. Only then: `-Action ResumeEntries`.
 
 To stop new entries at any time: `-Action PauseEntries`. To go back to paper: set both files
 back to `PAPER_ONLY` / `false` and restart.

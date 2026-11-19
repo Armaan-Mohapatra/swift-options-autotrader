@@ -617,6 +617,8 @@ class LiveBroker:
             processed = _decimal(order.get('processed_quantity'))
             if processed == 0:
                 continue
+            if self._settled_before(order, today):
+                continue  # no activity today, so it cannot move today's realized/unrealized P/L
             legs = order.get('legs')
             if not isinstance(legs, list) or len(legs) != 1 or not isinstance(legs[0], Mapping):
                 raise LiveSafetyError('filled multi-leg order cannot establish daily risk')
@@ -697,6 +699,19 @@ class LiveBroker:
                 average = _decimal(position.get('average_price'))  # per contract already
                 unrealized += (mark * multiplier - average) * quantity
         return realized + unrealized
+
+    def _settled_before(self, order: Mapping[str, Any], today: str) -> bool:
+        """True only when created_at AND updated_at both parse and fall before today (New York).
+
+        updated_at is never earlier than an order's last execution (checked against the
+        broker's real history), so older orders - e.g. manual multi-leg spreads - cannot
+        affect today's risk. Any missing/unparseable stamp returns False and stays fail-closed.
+        """
+        try:
+            return all(self._ny_date(_parse_time(order.get(key))) < today
+                       for key in ('created_at', 'updated_at'))
+        except Exception:
+            return False
 
     def _ny_date(self, moment: datetime) -> str:
         try:

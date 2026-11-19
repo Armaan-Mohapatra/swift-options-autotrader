@@ -831,6 +831,32 @@ def test_daily_risk_uses_execution_date_not_order_creation_date(scenario):
     assert broker.refresh_daily_risk() is False
 
 
+def _spread(fake: FakeMCPClient, **change) -> dict[str, Any]:
+    leg = {'option_id': fake.instrument_id, 'side': 'buy', 'position_effect': 'open',
+           'ratio_quantity': 1, 'executions': []}
+    return broker_order(fake, state='filled', processed_quantity='1.0000',
+                        legs=[leg, dict(leg, side='sell')], **change)
+
+
+def test_old_manual_multileg_fill_does_not_block_daily_risk(scenario):
+    broker, fake, clock = scenario
+    old = (clock() - timedelta(days=20)).isoformat()
+    fake.orders.append(_spread(fake, created_at=old, updated_at=old))
+    assert broker.submit_order(entry()).state is BrokerOrderState.ACCEPTED
+
+
+@pytest.mark.parametrize('stamps', [{}, {'updated_at': None}])
+def test_multileg_fill_with_activity_today_or_unknown_age_still_denies(scenario, stamps):
+    broker, fake, clock = scenario
+    old = (clock() - timedelta(days=20)).isoformat()
+    order = _spread(fake, created_at=old, updated_at=old) if stamps else _spread(fake)
+    order.update(stamps)
+    fake.orders.append(order)
+    with pytest.raises(LiveSafetyError, match='multi-leg'):
+        broker.submit_order(entry())
+    assert fake.place_count == 0
+
+
 def test_realized_null_gain_needs_zero_trades(scenario):
     broker, fake, _ = scenario
     fake.realized, fake.realized_null_trades = '0', 0  # null gain, no trades: zero
