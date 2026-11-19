@@ -208,10 +208,15 @@ if ($LASTEXITCODE -ne 0 -or $uvVersion -notmatch '^uv 0\.10\.0(\s|$)') {
     throw 'Unexpected or unverified uv installer version.'
 }
 if ($NoDependencyDownload) { $env:UV_OFFLINE = '1' }
+# uv writes normal notices (e.g. "Using CPython") to stderr. Under the global Stop preference,
+# Windows PowerShell 5.1 turns that first line into a terminating error, so relax it here only.
+$prevEap = $ErrorActionPreference
 try {
-    & $uvexe sync --project $release --locked --no-dev --extra telegram --extra paper-market --no-editable --no-managed-python --python 3.11
+    $ErrorActionPreference = 'Continue'
+    & $uvexe sync --project $release --locked --no-dev --extra telegram --extra paper-market --no-editable --no-managed-python --python 3.11 2>&1 | ForEach-Object { Write-Host ([string]$_) }
     if ($LASTEXITCODE -ne 0) { throw 'Locked dependency installation failed.' }
 } finally {
+    $ErrorActionPreference = $prevEap
     Remove-Item Env:UV_OFFLINE -ErrorAction SilentlyContinue
 }
 $python = Join-Path $release '.venv\Scripts\python.exe'
