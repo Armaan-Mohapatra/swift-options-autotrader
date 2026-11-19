@@ -311,6 +311,7 @@ async def run_live_service(
             mcp_broker,
             calendar=calendar or ExchangeCalendarsSession(),
             contracts_per_signal=config.max_contracts_per_signal,
+            clock=clock,
         )
 
         dispatcher = LiveDispatcher(

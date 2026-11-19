@@ -7,8 +7,9 @@ exchange-calendar session. No undocumented fallback or fake depth is allowed.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
-from datetime import datetime
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -57,6 +58,14 @@ class ExchangeCalendarsSession:
             raise MarketEvidenceUnavailable("Verified exchange session unavailable") from exc
 
 
+def _tick_for(instrument, price: Decimal) -> Decimal:
+    """Exact tick for an order price: the broker's constant tick, else the price tier."""
+    if instrument.minimum_tick is not None:
+        return instrument.minimum_tick
+    below, above, cutoff = instrument.tick_schedule
+    return above if price >= cutoff else below
+
+
 class MCPReadOnlyOptionData:
     """Adapter from documented read-only Robinhood tool calls to evidence.
 
@@ -66,11 +75,14 @@ class MCPReadOnlyOptionData:
     """
 
     def __init__(self, broker: RobinhoodMCPBroker, *, calendar: SessionCalendar,
-                 contracts_per_signal: int = 1):
+                 contracts_per_signal: int = 1,
+                 clock: Callable[[], datetime] | None = None):
         if not isinstance(broker, RobinhoodMCPBroker):
             raise TypeError("Official Robinhood read-only MCP adapter required")
         self.broker = broker
         self.calendar = calendar
+        # Same clock as the dispatcher; quote age is judged at response time.
+        self.clock = clock or (lambda: datetime.now(UTC))
         if not 1 <= contracts_per_signal <= 100:
             raise ValueError("Unapproved paper review quantity")
         self.contracts_per_signal = contracts_per_signal
@@ -134,29 +146,37 @@ class MCPReadOnlyOptionData:
         quotes: dict[OptionContract, VerifiedQuote] = {}
         for contract in candidates:
             instrument = await self.broker.resolve_instrument(contract)
-            if (not instrument.tradable or instrument.minimum_tick is None or
-                instrument.multiplier != 100 or
-                not instrument.minimum_tick.is_finite() or instrument.minimum_tick <= 0):
+            has_tick = instrument.minimum_tick is not None or instrument.tick_schedule is not None
+            if (not instrument.tradable or not has_tick or instrument.multiplier != 100 or
+                (instrument.minimum_tick is not None and (
+                    not instrument.minimum_tick.is_finite() or instrument.minimum_tick <= 0))):
                 raise MarketEvidenceUnavailable("Tick, tradability or 100 multiplier unverified")
-            quote = await self.broker.quote(instrument, now=now, max_age_seconds=15)
+            # Freshness is judged when the quote arrives, not against the cycle start.
+            quote = await self.broker.quote(instrument, max_age_seconds=15, clock=self.clock)
             if quote.bid_size is None or quote.ask_size is None:
                 raise MarketEvidenceUnavailable("Option bid/ask displayed depth unavailable")
-            instruments[contract] = Preflight(
-                instrument_verified=True, options_permission=account.eligible,
-                market_session_open=market_open, available_buying_power_usd=available,
-                premium_tick=instrument.minimum_tick, contract=contract,
-            )
             # Match the exact contract including expiration YEAR. A same-strike
             # alert on a different expiration must never be reviewed as this leg.
+            matched = []
             for alert in entries:
                 resolved, problem = resolve_entry(
                     alert, StaticInstrumentCatalog((contract,)),
                     as_of=now.astimezone(ZoneInfo("America/New_York")).date(),
                 )
-                if resolved != contract or problem is not None:
-                    continue
-                if alert.premium is None:
-                    raise MarketEvidenceUnavailable("Swift limit missing")
+                if resolved == contract and problem is None:
+                    if alert.premium is None:
+                        raise MarketEvidenceUnavailable("Swift limit missing")
+                    matched.append(alert)
+            # A price-dependent tick is selected for the prices this contract is
+            # actually priced at: each entry limit, or the bid for an existing position.
+            prices = [a.premium for a in matched] or [quote.bid]
+            premium_tick = max(_tick_for(instrument, p) for p in prices)
+            instruments[contract] = Preflight(
+                instrument_verified=True, options_permission=account.eligible,
+                market_session_open=market_open, available_buying_power_usd=available,
+                premium_tick=premium_tick, contract=contract,
+            )
+            for alert in matched:
                 test_intent = OrderIntent(
                     "paper-review", "paper-review", contract,
                     OrderSide.BUY_TO_OPEN, self.contracts_per_signal, alert.premium,
@@ -177,4 +197,6 @@ class MCPReadOnlyOptionData:
                 observed_at_utc=quote.observed_at_utc,
                 source="MCP_READONLY", evidence_reference=evidence,
             )
-        return MarketSnapshot(instruments, quotes, "MCP_READONLY", now)
+        # Completion time: quotes were observed during this call, so the snapshot
+        # must not be dated earlier than the evidence it carries.
+        return MarketSnapshot(instruments, quotes, "MCP_READONLY", self.clock())

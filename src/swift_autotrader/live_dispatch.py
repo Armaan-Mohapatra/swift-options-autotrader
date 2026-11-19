@@ -26,7 +26,12 @@ from swift_autotrader.broker.live_broker import (
     entry_signal_gate,
 )
 from swift_autotrader.broker.mcp_paper_data import MCPReadOnlyOptionData
-from swift_autotrader.broker.robinhood_mcp import MCPAccount, RobinhoodMCPBroker
+from swift_autotrader.broker.robinhood_mcp import (
+    MCPAccount,
+    MCPContractError,
+    MCPReadError,
+    RobinhoodMCPBroker,
+)
 from swift_autotrader.config import Settings
 from swift_autotrader.live_runtime import BorrowedMCPLoop
 from swift_autotrader.notifications.alerts import NotificationCenter
@@ -41,6 +46,28 @@ from swift_autotrader.signals.identity import OptionContract
 from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCatalog
 
 log = logging.getLogger("swift_autotrader.live_dispatch")
+
+# Sequential read-only MCP calls (discover, account, buying power, chains, instruments,
+# quote, review per contract) measured 0.4-1.5 s each. 15 s overall was too tight
+# for a multi-contract cycle, and the timeout surfaced as an empty error message.
+SNAPSHOT_TIMEOUT_SECONDS = 30.0
+MARKET_FAILURE_CODES = (
+    "MARKET_DATA_UNAVAILABLE",
+    "MARKET_DATA_TIMEOUT",
+    "MARKET_CONTRACT_UNVERIFIED",
+    "MARKET_BROKER_READ_FAILED",
+)
+
+
+def _market_failure_code(exc: BaseException) -> str:
+    """Fixed, actionable code per failure class; exception text is never stored."""
+    if isinstance(exc, asyncio.TimeoutError):
+        return "MARKET_DATA_TIMEOUT"
+    if isinstance(exc, MCPContractError):
+        return "MARKET_CONTRACT_UNVERIFIED"
+    if isinstance(exc, MCPReadError):
+        return "MARKET_BROKER_READ_FAILED"
+    return "MARKET_DATA_UNAVAILABLE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,7 +272,8 @@ class LiveDispatcher:
         # Broker-side housekeeping: 60-minute expiry backstop and broker-sourced
         # realized-plus-unrealized P&L (latches the daily stop). Failure to read P&L is
         # logged only; the write-boundary preflight independently denies entries without it.
-        await asyncio.to_thread(self._broker_housekeeping)
+        housekeeping_failures = await asyncio.to_thread(self._broker_housekeeping)
+        self._record_daily_pnl_status(housekeeping_failures)
 
         # Check durable acceptance state in database
         import sqlite3
@@ -277,18 +305,22 @@ class LiveDispatcher:
             allowed_signal_ids = None
             entries = [p[2] for p in pending_entries]
 
-        # 3. Fetch live market data snapshot from Robinhood MCP
+        # 3. Fetch live market data snapshot from Robinhood MCP. The clock is read
+        # here, after watchdog and housekeeping, so quote freshness is measured
+        # against this snapshot rather than the cycle start.
         snapshot = None
         if entries or active:
             try:
                 snapshot = await asyncio.wait_for(
-                    self.provider.snapshot(entries, active, now),
-                    timeout=15.0,
+                    self.provider.snapshot(entries, active, self.clock()),
+                    timeout=SNAPSHOT_TIMEOUT_SECONDS,
                 )
-                snapshot.validate(now, max_age_seconds=30)
+                snapshot.validate(self.clock(), max_age_seconds=30)
             except Exception as exc:
-                log.warning("Market snapshot unavailable: %s", exc)
-                self.notifications.record("APPLICATION", "MARKET_DATA_UNAVAILABLE", source_key="live-dispatch")
+                code = _market_failure_code(exc)
+                # Exception text is not stored: it can carry broker detail.
+                log.warning("Market snapshot unavailable (%s)", type(exc).__name__)
+                self.notifications.record("APPLICATION", code, source_key="live-dispatch")
                 realized_loss = await asyncio.to_thread(
                     self.engine.cumulative_realized_daily_loss, now
                 )
@@ -307,6 +339,8 @@ class LiveDispatcher:
         decisions = []
         exit_quotes: dict[OptionContract, ExitQuote] = {}
         if snapshot:
+            for code in MARKET_FAILURE_CODES:  # recovered: clear earlier market-data alerts
+                self.notifications.resolve("APPLICATION", code, source_key="live-dispatch")
             self.preflight.instruments.clear()
             self.preflight.instruments.update(snapshot.instruments)
             catalog = StaticInstrumentCatalog(snapshot.instruments.keys())
@@ -368,6 +402,19 @@ class LiveDispatcher:
         realized_loss = await asyncio.to_thread(
             self.engine.cumulative_realized_daily_loss, now
         )
+        # Broker submission and risk-denial outcomes, one notification per event.
+        if cycle.entry_submissions:
+            self.notifications.record("APPLICATION", "ENTRY_SUBMITTED", severity="INFO",
+                                      source_key=f"live-dispatch:entry:{now.isoformat()}")
+        if cycle.close_submissions:
+            self.notifications.record("APPLICATION", "CLOSE_SUBMITTED", severity="INFO",
+                                      source_key=f"live-dispatch:close:{now.isoformat()}")
+        if realized_loss >= self.settings.max_daily_loss_usd:
+            self.notifications.record("APPLICATION", "DAILY_LOSS_CEILING_REACHED",
+                                      source_key="live-dispatch", severity="CRITICAL")
+        else:
+            self.notifications.resolve("APPLICATION", "DAILY_LOSS_CEILING_REACHED",
+                                       source_key="live-dispatch")
 
         return LiveDispatchResult(
             status="LIVE_CYCLE_COMPLETED",
@@ -380,14 +427,57 @@ class LiveDispatcher:
             unresolved_exit_count=await asyncio.to_thread(self.engine.unresolved_exit_count),
         )
 
-    def _broker_housekeeping(self) -> None:
+    def _broker_housekeeping(self) -> dict[str, str]:
+        """Run housekeeping steps; return {step: fixed reason} for each failure."""
+        failures: dict[str, str] = {}
         for step in (self.live_broker.review_expired_entries, self.live_broker.refresh_daily_risk):
             try:
                 step()
             except Exception as exc:  # noqa: BLE001 - entries stay denied by the write preflight
                 # LiveSafetyError messages are fixed, non-secret reasons (e.g. "stale option quote").
                 reason = str(exc) if isinstance(exc, LiveSafetyError) else type(exc).__name__
+                failures[step.__name__] = reason
                 log.warning("Broker housekeeping step %s failed: %s", step.__name__, reason)
+        return failures
+
+    def _record_daily_pnl_status(self, failures: dict[str, str]) -> None:
+        """Surface why entries are denied for P/L, with an actionable code, until it recovers."""
+        reason = failures.get("refresh_daily_risk")
+        code = None
+        if reason is not None:
+            code = ("DAILY_PNL_OVERNIGHT_UNVERIFIED" if "overnight" in reason
+                    else "DAILY_PNL_UNVERIFIED")
+        for name in ("DAILY_PNL_UNVERIFIED", "DAILY_PNL_OVERNIGHT_UNVERIFIED"):
+            if name != code:
+                self.notifications.resolve("APPLICATION", name, source_key="live-dispatch")
+        if code is not None:
+            self.notifications.record("APPLICATION", code, source_key="live-dispatch",
+                                      severity="WARNING")
+
+    def _entry_fresh(self, sent_at: str | None, now: datetime) -> bool:
+        """Same 0..limit rule as the receipt and the engine; unparseable time fails closed."""
+        try:
+            sent = datetime.fromisoformat(str(sent_at).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if sent.tzinfo is None:
+            return False
+        return 0 <= (now - sent).total_seconds() <= self.settings.telegram_max_live_age_seconds
+
+    def _expire_entry(self, revision_id: int, message_id: int) -> None:
+        """Close a stale pending ENTRY so it can never become actionable later."""
+        import sqlite3
+        from contextlib import closing
+        with closing(sqlite3.connect(str(self.db_path), timeout=10)) as db, db:
+            db.execute(
+                "INSERT OR IGNORE INTO signal_parser_decisions(revision_id,channel_id,message_id,"
+                "intent,status,reason,signal_id,processed_at_utc) "
+                "VALUES(?,?,?,'ENTRY','SKIPPED','ALERT_STALE_EXPIRED',NULL,"
+                "strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                (revision_id, str(self.channel_id), message_id),
+            )
+        self.notifications.record("APPLICATION", "ALERT_STALE_EXPIRED",
+                                  source_key=f"live-dispatch:{revision_id}", severity="WARNING")
 
     def _get_pending_and_active(
         self, now: datetime
@@ -422,8 +512,13 @@ class LiveDispatcher:
         ]
         entries = []
         followup_rev_ids = []
-        for rid, mid, body, eligible, _sent_at in pending:
+        for rid, mid, body, eligible, sent_at in pending:
             alert = parse_message(body)
+            if alert.intent is SignalIntent.ENTRY and not self._entry_fresh(sent_at, now):
+                # Explicit outcome: a stale entry is never later actionable, even if the
+                # market data that would have been needed returns.
+                self._expire_entry(rid, mid)
+                continue
             if alert.intent is SignalIntent.ENTRY:
                 if not eligible:
                     continue

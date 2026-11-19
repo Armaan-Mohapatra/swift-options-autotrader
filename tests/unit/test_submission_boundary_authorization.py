@@ -82,7 +82,7 @@ def _setup(settings, live_db, *, expires_in=90, hooks=None, review_override=None
     mcp = RobinhoodMCPBroker(fake, approved_account_number=settings.robinhood_mcp_account)
     dispatcher = LiveDispatcher(
         live_db, settings.telegram_channel_id, mcp, account,
-        MCPReadOnlyOptionData(mcp, calendar=OpenMarketCalendar()), settings,
+        MCPReadOnlyOptionData(mcp, calendar=OpenMarketCalendar(), clock=clock), settings,
         clock=clock, single_entry=True, acceptance_scope=scope,
     )
     return dispatcher, fake

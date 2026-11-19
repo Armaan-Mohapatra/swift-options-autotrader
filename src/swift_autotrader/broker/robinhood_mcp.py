@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -195,6 +195,9 @@ class MCPInstrument:
     minimum_tick: Decimal | None = None
     multiplier: int | None = None
     underlying_type: str = "equity"
+    # Broker's price-dependent tick schedule (below_tick, above_tick, cutoff_price).
+    # The applicable tier depends on the order price, so the snapshot selects it.
+    tick_schedule: tuple[Decimal, Decimal, Decimal] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,24 +454,27 @@ class RobinhoodMCPBroker:
                 tick_raw = item.get("minimum_tick")
                 tick = _money(tick_raw, "minimum_tick") if tick_raw is not None else None
                 # Robinhood exposes a two-tier price-dependent tick schedule.
-                # Without the order premium here, only a constant schedule can
-                # safely be collapsed to a single minimum tick.
+                # A constant schedule collapses to one tick; a two-tier one is kept
+                # whole and the snapshot picks the tier for the actual order price.
                 tiers = item.get("min_ticks")
+                tick_schedule = None
                 if tiers is not None:
                     if not isinstance(tiers, Mapping):
                         raise MCPContractError("Malformed option tick schedule")
                     above = _money(tiers.get("above_tick"), "above_tick")
                     below = _money(tiers.get("below_tick"), "below_tick")
-                    _money(tiers.get("cutoff_price"), "cutoff_price")
-                    if above <= 0 or below <= 0:
+                    cutoff = _money(tiers.get("cutoff_price"), "cutoff_price")
+                    if above <= 0 or below <= 0 or cutoff < 0:
                         raise MCPContractError("Nonpositive option tick")
                     if above == below:
                         if tick is not None and tick != above:
                             raise MCPContractError("Conflicting option ticks")
                         tick = above
                     else:
-                        # An order-price-dependent tick cannot be checked here.
+                        if cutoff <= 0:
+                            raise MCPContractError("Two-tier option tick lacks a cutoff")
                         tick = None
+                        tick_schedule = (below, above, cutoff)
                 if tick is not None and tick <= 0:
                     raise MCPContractError("Nonpositive option tick")
                 multiplier_raw = item.get("multiplier")
@@ -485,13 +491,17 @@ class RobinhoodMCPBroker:
                         raise MCPContractError("Conflicting option multipliers")
                     multiplier = int(primary)
                 matches.append(MCPInstrument(_identifier(option_id), contract, tradable,
-                                             chain_id, tick, multiplier, underlying_type=underlying_type))
+                                             chain_id, tick, multiplier, underlying_type=underlying_type,
+                                             tick_schedule=tick_schedule))
         if len(matches) != 1 or not matches[0].tradable:
             raise MCPContractError("Exact, unique, tradable option instrument not verified")
         return matches[0]
 
     async def quote(self, instrument: MCPInstrument, *, max_age_seconds: int = 30,
-                    now: datetime | None = None) -> MCPQuote:
+                    now: datetime | None = None,
+                    clock: Callable[[], datetime] | None = None) -> MCPQuote:
+        # clock() is read AFTER the response, so a quote that arrives during the call is
+        # judged by its real age rather than the time the snapshot started.
         data = await self._call("get_option_quotes", {"instrument_ids": [instrument.option_id]})
         rows = _rows(data, "quotes", "results")
         # Official quote tool returns results[].quote plus an optional close;
@@ -503,7 +513,7 @@ class RobinhoodMCPBroker:
         bid = _money(matches[0].get("bid_price"), "bid")
         ask = _money(matches[0].get("ask_price"), "ask")
         observed = _timestamp(matches[0].get("updated_at"))
-        current = now or datetime.now(UTC)
+        current = now or (clock() if clock is not None else datetime.now(UTC))
         if current.utcoffset() is None:
             raise ValueError("Current time must be timezone-aware")
         age = (current.astimezone(UTC) - observed).total_seconds()

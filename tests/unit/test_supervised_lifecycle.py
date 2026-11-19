@@ -254,7 +254,7 @@ def test_previously_recorded_signals_with_no_qualifying_parser_decisions(managed
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
     mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
-    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
+    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar(), clock=clock)
 
     # Dispatcher in single_entry mode with authorized_symbol='SPY' (no SPY alerts in DB)
     dispatcher = LiveDispatcher(
@@ -294,7 +294,7 @@ def test_no_new_qualifying_parser_decisions_fails_closed(managed_live_env) -> No
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
     mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
-    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
+    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar(), clock=clock)
 
     dispatcher = LiveDispatcher(
         live_db,
@@ -339,7 +339,7 @@ def test_unmatched_authorization_scope_fails_closed(managed_live_env) -> None:
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
     mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
-    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
+    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar(), clock=clock)
 
     # Dispatcher authorized ONLY for TSLA
     dispatcher = LiveDispatcher(
@@ -534,7 +534,7 @@ def test_complete_supervised_order_lifecycle(managed_live_env, exit_origin) -> N
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
     mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
-    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
+    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar(), clock=clock)
 
     dispatcher = LiveDispatcher(
         live_db,
@@ -635,7 +635,7 @@ def test_cancellation_and_watchdog_unfilled_order(managed_live_env) -> None:
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
     mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
-    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
+    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar(), clock=clock)
 
     dispatcher = LiveDispatcher(
         live_db,
@@ -733,7 +733,7 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
 
     account = MCPAccount(settings.robinhood_mcp_account, agentic_allowed=True, options_level="option_level_2")
     mcp_broker = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
-    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar())
+    provider = MCPReadOnlyOptionData(mcp_broker, calendar=OpenMarketCalendar(), clock=clock)
 
     dispatcher = LiveDispatcher(
         live_db,
@@ -779,7 +779,7 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
     )
     restarted = LiveDispatcher(
         live_db, settings.telegram_channel_id, restarted_mcp, account,
-        MCPReadOnlyOptionData(restarted_mcp, calendar=OpenMarketCalendar()),
+        MCPReadOnlyOptionData(restarted_mcp, calendar=OpenMarketCalendar(), clock=clock),
         settings, clock=clock, single_entry=True,
     )
     if appears_in_history:
@@ -840,7 +840,7 @@ def test_exact_supervised_receipt_enforced_before_broker_submission(managed_live
     mcp = RobinhoodMCPBroker(fake_mcp, approved_account_number=settings.robinhood_mcp_account)
     dispatcher = LiveDispatcher(
         live_db, settings.telegram_channel_id, mcp, account,
-        MCPReadOnlyOptionData(mcp, calendar=OpenMarketCalendar()), settings,
+        MCPReadOnlyOptionData(mcp, calendar=OpenMarketCalendar(), clock=clock), settings,
         clock=clock, single_entry=True, acceptance_scope=scope,
     )
     if mismatch == "none":

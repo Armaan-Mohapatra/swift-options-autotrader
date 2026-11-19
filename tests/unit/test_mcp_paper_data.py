@@ -82,9 +82,10 @@ class FakeReadBroker(RobinhoodMCPBroker):
             contract, self.allowed, 'synthetic-chain', self.tick, self.multiplier,
         )
 
-    async def quote(self, instrument, *, now=None, max_age_seconds=30):
+    async def quote(self, instrument, *, now=None, max_age_seconds=30, clock=None):
         self.calls.append('quote')
-        assert now == NOW and max_age_seconds == 15
+        # Freshness is judged at quote-response time through the injected clock.
+        assert now is None and clock is not None and max_age_seconds == 15
         return MCPQuote(
             instrument.option_id, Decimal('1.10'), Decimal('1.15'), NOW,
             self.depth, self.depth,
@@ -194,7 +195,7 @@ def test_bounded_review_rejects_excessive_candidate_set_before_mcp_calls():
 def test_same_option_timestamp_with_changed_quote_content_has_distinct_evidence():
     broker = FakeReadBroker()
     def custom_quote(bid, ask):
-        async def quote(instrument, *, now=None, max_age_seconds=30):
+        async def quote(instrument, *, now=None, max_age_seconds=30, clock=None):
             return MCPQuote(instrument.option_id, bid, ask, NOW, 6, 6)
         return quote
     broker.quote = custom_quote(Decimal('1.10'), Decimal('1.15'))

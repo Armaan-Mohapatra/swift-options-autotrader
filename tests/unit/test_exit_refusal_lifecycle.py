@@ -26,7 +26,7 @@ def test_refused_exit_blocks_new_entries_and_survives_dispatcher_reconstruction(
     def dispatcher():
         mcp = RobinhoodMCPBroker(fake, approved_account_number=settings.robinhood_mcp_account)
         return LiveDispatcher(live_db, settings.telegram_channel_id, mcp, account,
-                              MCPReadOnlyOptionData(mcp, calendar=OpenMarketCalendar()),
+                              MCPReadOnlyOptionData(mcp, calendar=OpenMarketCalendar(), clock=clock),
                               settings, clock=clock)
 
     def ingest(mid, body, reply=None):

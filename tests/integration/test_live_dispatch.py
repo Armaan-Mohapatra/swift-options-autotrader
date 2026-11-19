@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from contextlib import closing
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -450,3 +451,64 @@ def test_broker_preflight_refusal_is_terminal_and_never_wedges_later_cycles(disp
     assert second.status == "LIVE_CYCLE_COMPLETED"
     assert second.entry_orders_submitted == 0
     assert not mcp.orders
+
+
+# ============================================================================
+# Market-data failure outcomes: pending entries, expiry, retry and recovery
+# ============================================================================
+
+
+def _decisions(db_path: Path) -> list[tuple]:
+    import sqlite3
+
+    with closing(sqlite3.connect(str(db_path))) as db:
+        return db.execute("SELECT intent,status,reason FROM signal_parser_decisions").fetchall()
+
+
+def test_fresh_entry_stays_pending_during_outage_then_recovers(dispatch_rig: tuple) -> None:
+    db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
+    feed.down = True
+    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+
+    result = asyncio.run(dispatcher.run_once())
+    assert result.status == "MARKET_DATA_UNAVAILABLE"
+    assert _decisions(db_path) == []  # undecided while still inside the alert-age window
+    assert "MARKET_DATA_UNAVAILABLE" in [n.code for n in dispatcher.notifications.pending(10)]
+
+    feed.down = False
+    clock.advance(5.0)
+    result = asyncio.run(dispatcher.run_once())
+    assert result.entry_orders_submitted == 1
+    assert "MARKET_DATA_UNAVAILABLE" not in [n.code for n in dispatcher.notifications.pending(10)]
+
+
+def test_entry_pending_past_alert_age_expires_and_never_trades(dispatch_rig: tuple) -> None:
+    db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
+    feed.down = True
+    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    asyncio.run(dispatcher.run_once())
+
+    clock.advance(121.0)
+    feed.down = False  # data recovers only after the alert is stale
+    result = asyncio.run(dispatcher.run_once())
+    assert result.entry_orders_submitted == 0
+    assert mcp.orders == {}
+    assert _decisions(db_path) == [("ENTRY", "SKIPPED", "ALERT_STALE_EXPIRED")]
+    assert "ALERT_STALE_EXPIRED" in [n.code for n in dispatcher.notifications.pending(10)]
+
+    asyncio.run(dispatcher.run_once())  # later cycles never replay the expired revision
+    assert mcp.orders == {}
+
+
+def test_market_data_timeout_reports_its_own_code(dispatch_rig: tuple) -> None:
+    db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
+
+    async def timed_out(*_args, **_kwargs):
+        raise asyncio.TimeoutError()
+
+    feed.snapshot = timed_out
+    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    result = asyncio.run(dispatcher.run_once())
+    assert result.status == "MARKET_DATA_UNAVAILABLE"
+    assert "MARKET_DATA_TIMEOUT" in [n.code for n in dispatcher.notifications.pending(10)]
+    assert _decisions(db_path) == []
