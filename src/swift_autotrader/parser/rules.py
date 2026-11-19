@@ -129,7 +129,8 @@ def parse_message(text: str) -> ParsedAlert:
         return ParsedAlert(SignalIntent.REVIEW_REQUIRED, reason="MULTIPLE_CONTRACTS")
     if patterns.CORRECTION.search(uppercase):
         return ParsedAlert(SignalIntent.REVIEW_REQUIRED, reason="CORRECTION_REVIEW")
-    close = bool(patterns.EXIT.search(uppercase))
+    bare_sold = patterns.BARE_SOLD.fullmatch(uppercase)
+    close = bool(patterns.EXIT.search(uppercase)) or bare_sold is not None
     add = bool(patterns.NO_ADD.search(uppercase))
     avg_marker = bool(patterns.AVG_MARKER.search(uppercase))
     avg_match = patterns.AVG.search(uppercase)
@@ -148,7 +149,8 @@ def parse_message(text: str) -> ParsedAlert:
     if close or add or avg_marker:
         intent = SignalIntent.CLOSE_100_PERCENT if close else SignalIntent.METADATA_ONLY
         match = patterns.EXPLICIT_CONTRACT.search(uppercase)
-        symbol = match.group("symbol").upper() if match else _symbol_prefix(uppercase)
+        symbol = (bare_sold.group("symbol").upper() if bare_sold is not None
+                  else match.group("symbol").upper() if match else _symbol_prefix(uppercase))
         if symbol is not None and symbol in NON_TICKER_LEADING_WORDS:
             symbol = None
         try:
@@ -159,6 +161,7 @@ def parse_message(text: str) -> ParsedAlert:
                 strike=_decimal(match.group("strike")) if match else None,
                 expiry=_expiry(match.group("expiry")) if match else None,
                 swift_average=swift_avg,
+                reason="BARE_SOLD_OWNERSHIP_REQUIRED" if bare_sold is not None else None,
             )
         except (ValueError, OverflowError):
             return ParsedAlert(SignalIntent.REVIEW_REQUIRED, reason="INVALID_CONTRACT_REFERENCE")
