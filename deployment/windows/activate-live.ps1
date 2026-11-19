@@ -73,11 +73,25 @@ function Get-SwiftProcesses {
 }
 
 function Get-LiveDispatcherCount {
+    param([Parameter(Mandatory = $true)][int]$HealthPid)
+
+    # The Python live supervisor is also a Swift process and is the parent of
+    # the dispatcher launcher. Excluding every Swift parent incorrectly counts
+    # a healthy supervisor -> dispatcher process tree as zero.
     $all = @(Get-SwiftProcesses)
-    $ids = @($all | ForEach-Object { [int]$_.ProcessId })
-    # A venv launcher and its child are one worker: count only processes whose parent is not Swift.
-    @($all | Where-Object {
-        $_.CommandLine.Contains('live-dispatch') -and -not ($ids -contains [int]$_.ParentProcessId)
+    $dispatchers = @($all | Where-Object {
+        $_.CommandLine -match '(^|\\s)live-dispatch(\\s|$)'
+    })
+    $dispatcherIds = @($dispatchers | ForEach-Object { [int]$_.ProcessId })
+
+    # A successful cycle is not proof of a currently running worker. The
+    # heartbeat PID must still belong to a live-dispatch process.
+    if ($HealthPid -le 0 -or -not ($dispatcherIds -contains $HealthPid)) { return 0 }
+
+    # Only collapse venv launcher -> base interpreter pairs, never the
+    # supervisor -> dispatcher relationship. Two independent trees still fail.
+    return @($dispatchers | Where-Object {
+        -not ($dispatcherIds -contains [int]$_.ParentProcessId)
     }).Count
 }
 
@@ -266,7 +280,7 @@ try {
         }
     } while ((Get-Date) -lt $deadline)
     if (-not $verified) { throw 'The live worker did not complete a cycle within 240 seconds.' }
-    $dispatchers = Get-LiveDispatcherCount
+    $dispatchers = Get-LiveDispatcherCount -HealthPid ([int]$health.pid)
     if ($dispatchers -ne 1) { throw ('REFUSED: expected exactly one live dispatcher, found ' + $dispatchers + '.') }
     $task = Get-ScheduledTask -TaskName $liveTask
     if ($task.State -ne 'Running') { throw ('REFUSED: live task state is ' + $task.State + ', not Running.') }
