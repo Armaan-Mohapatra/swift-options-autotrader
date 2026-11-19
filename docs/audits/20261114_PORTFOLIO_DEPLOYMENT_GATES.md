@@ -1,0 +1,8 @@
+# Deployment gates: staged monitoring, paper and reviewed operation
+1. Preserve current Windows installation and all journals, account binding, encrypted credentials and Telegram session. Do not modify Phoenix/Kalshi or use paid CI.
+2. Use an isolated checkout and exact installed-source identity. Validate manifest, native PowerShell 5.1 parsing, Python imports, full regression suite without shims, and read-only launcher behavior.
+3. Validate background read-only monitoring and paper simulation against synthetic brokers. Exercise disconnect, process restart, stop, lock contention, stale signals, missed or revised follow-ups, duplicate orders, cancellation/fill races, fee uncertainty and unknown outcomes. No real submissions during testing.
+4. Verify actual broker account identity and documented read-only response shapes. Keep private account identifiers and secrets local. Do not infer permissions from schema presence or a synthetic response. Broker-required approvals and independent transaction authorization must remain respected.
+5. Use supervised, individually authorized order review if the owner later chooses actual trading; no claim of unattended live readiness. Verify exact order lifecycle and reconciliation before relying on live results.
+6. Rollback code only after stopping the process and independently confirming process exit. Preserve current transaction journal and ledger; never restore stale financial state, delete active locks or assume a stop-file proves shutdown.
+Gate results: isolated synthetic replay PASS (with archived runtime/shims); exact runtime, native Windows, live provider behavior and unattended real-money certification NOT VERIFIED. Do not deploy candidate as a live release.
