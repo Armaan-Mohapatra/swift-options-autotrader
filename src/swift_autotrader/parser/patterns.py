@@ -16,7 +16,9 @@ PREFIX = (
     rf"(?:OPTIONS?\s*[:\-]\s*(?=(?:LOTTO|SWING|SCALP|DAYTRADE)\b))?"
     rf"(?:(?:BUY|BTO|OPEN)\s+)?"
     rf"(?:(?P<lead_category>LOTTO|SWING|SCALP|DAYTRADE)(?:\s*[:\-]\s*|\s+))?"
-    rf"\$?(?P<symbol>{SYMBOL})(?:\s+(?P<category>LOTTO|SWING|SCALP|DAYTRADE))?"
+    # A category word is never a ticker (guards a header with the ticker missing).
+    rf"\$?(?P<symbol>(?!(?:LOTTO|SWING|SCALP|DAYTRADE)\b){SYMBOL})"
+    rf"(?:\s+(?P<category>LOTTO|SWING|SCALP|DAYTRADE))?"
 )
 ENTRY = re.compile(
     rf"^\s*{PREFIX}\s+{CONTRACT}\s*@\s*\$?(?P<premium>{AMOUNT})\s*$",

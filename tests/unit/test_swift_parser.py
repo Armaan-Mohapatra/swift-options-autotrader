@@ -49,6 +49,16 @@ def test_option_header_does_not_make_other_messages_entries(text):
     assert parse_message(text).intent is not SignalIntent.ENTRY
 
 
+@pytest.mark.parametrize("text", [
+    "OPTION - SWING 500C 12/20 @ 1",            # ticker missing after the header
+    "OPTION - SWING SWING 500C 12/20 @ 1",
+    "SWING 500C 12/20 @ 1",
+    "LOTTO 500C 12/20 @ 1",
+])
+def test_category_word_is_never_taken_as_the_ticker(text):
+    assert parse_message(text).intent is not SignalIntent.ENTRY
+
+
 @pytest.mark.parametrize("bad", [None, 12, [], {}])
 def test_non_string_is_error(bad):
     with pytest.raises(TypeError):
