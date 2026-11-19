@@ -983,6 +983,18 @@ def test_order_history_beyond_ten_pages_is_read_to_exhaustion(scenario):
     assert fake.place_count == 1
 
 
+def test_overnight_close_clears_on_the_next_new_york_date(scenario):
+    """Denied on the sale's day, per call and never latched; allowed once the NY date rolls."""
+    broker, fake, clock = scenario
+    fake.position = 0
+    fake.history = [_overnight_sell_filled_today(fake)]
+    with pytest.raises(LiveSafetyError, match='overnight close'):
+        broker.submit_order(entry())
+    clock.advance(24 * 60)
+    assert broker.submit_order(entry()).state is BrokerOrderState.ACCEPTED
+    assert fake.place_count == 1
+
+
 def test_order_history_that_cannot_be_exhausted_fails_closed(scenario):
     """More pages than the coverage cap is unverifiable: deny entries and risk refresh."""
     broker, fake, _ = scenario
