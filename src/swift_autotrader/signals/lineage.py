@@ -323,6 +323,23 @@ class SignalMatcher:
                 if not _match_date(alert.expiry, expiration):
                     continue
             candidates.append(str(signal["signal_id"]))
+        if alert.reason == "BARE_SOLD_OWNERSHIP_REQUIRED":
+            # Bare SOLD carries no contract details. A unique Swift signal alone
+            # does NOT prove a bot-owned holding: require a positive net filled
+            # balance in our own durable order journal. Manual broker inventory,
+            # pending buys with zero fills and previously closed signals never
+            # qualify. The execution engine separately reconciles broker state.
+            owned = []
+            for signal_id in candidates:
+                net = con.execute(
+                    "SELECT COALESCE(SUM(CASE WHEN side='BUY_TO_OPEN' "
+                    "THEN filled_quantity WHEN side='SELL_TO_CLOSE' "
+                    "THEN -filled_quantity ELSE 0 END), 0) "
+                    "FROM order_intents WHERE signal_id=?", (signal_id,),
+                ).fetchone()[0]
+                if net > 0:
+                    owned.append(signal_id)
+            candidates = owned
         if direct is not None:
             if direct not in candidates:
                 return None, "REPLY_CONTRACT_MISMATCH"
@@ -330,6 +347,8 @@ class SignalMatcher:
         if not alert.underlying:
             return None, "MISSING_CONTRACT_OR_LINEAGE"
         if len(candidates) != 1:
+            if not candidates and alert.reason == "BARE_SOLD_OWNERSHIP_REQUIRED":
+                return None, "NO_MATCHING_BOT_OWNED_POSITION"
             return None, "NO_MATCHING_SIGNAL" if not candidates else "AMBIGUOUS_MATCH"
         return candidates[0], None
 
