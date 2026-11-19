@@ -1,0 +1,124 @@
+{
+  "manifest_version": "1.1.0",
+  "project": "swift-options-autotrader",
+  "timestamp_utc": "2026-11-16T05:40:00Z",
+  "base_commit": "5303a89ab707dd51e81331b54db3e70450bc3a6b",
+  "target_branch": "fix/production-deployment-compatibility-20261116",
+  "test_suite": {
+    "baseline_passed": 710,
+    "previous_passed": 720,
+    "current_passed": 729,
+    "warnings": 1,
+    "failures": 0,
+    "duration_seconds": 11.45
+  },
+  "remediated_issues": [
+    "1. Managed credential validation (validate_private_path & WindowsDPAPITokenStorage) accepts LIVE manifest when Settings is live while preserving fail-closed rejection for paper settings.",
+    "2. deployment/windows/common.ps1 Assert-SwiftManifest accepts LIVE manifests and Set-SwiftEnvironment configures LIVE environment with Set-SwiftLiveEnvironment helper.",
+    "3. deployment/windows/service.ps1 and manage.ps1 support RegisterLiveTask and UnregisterLiveTask actions for SwiftAutoTrader-Live-Local.",
+    "4. scripts/pin_account.py implemented and packaged along with pin_agentic_account DPAPI helper and swift-autotrader pin-account CLI.",
+    "5. Windows installation procedure corrected to use setup.ps1 from checkout to managed install directory rather than invalid Git operations inside managed root.",
+    "6. live-dispatch --once accurately classified as an active execution cycle, clearly distinguished from read-only mcp-diagnostics --connect.",
+    "7. Windows scheduled live service updated to launch multi-worker supervisor (dashboard, telegram, live-dispatch) concurrently rather than live-dispatch alone.",
+    "8. Windows setup.ps1 and manage.ps1 updated to initialize and migrate isolated production journal (data/live.sqlite3) alongside paper journal.",
+    "9. Dashboard and analytics updated to recognize and safely report LIVE mode status without secret leakage.",
+    "10. Comprehensive integrated service acceptance rehearsal suite (tests/integration/test_complete_service_integration.py) covering dual DB isolation, live dispatch cycle, dashboard reporting, supervisor multi-worker lifecycle, crash recovery, circuit breaker, clean shutdown, and PowerShell deployment invariants."
+  ],
+  "files": {
+    "deployment/windows/common.ps1": {
+      "bytes": 13718,
+      "sha256": "0e299cb844c1260347ed6a4583df07e7332e9d2aef995444dfbdd78dfa26bb3a",
+      "git_blob": "98f5076ffc93849a835860c91ab6207565308914"
+    },
+    "deployment/windows/manage.ps1": {
+      "bytes": 9168,
+      "sha256": "25c48251a024b8a4a755c86f422d3dced8c94a39e02bdda9651d36d7c18bf05d",
+      "git_blob": "67c891072dd7bdcf9da12b4c7648954691b73700"
+    },
+    "deployment/windows/service.ps1": {
+      "bytes": 3354,
+      "sha256": "d8d481107522d17113e771e41a41b12fe1eb7ff73ec1343c61514db41ff381a1",
+      "git_blob": "1e2a5ea6d91bf8f2a02d8ddf92b9da0ec1221ae1"
+    },
+    "deployment/windows/setup.ps1": {
+      "bytes": 13918,
+      "sha256": "f1c84060bd1d52e00142c11926493850fd2fd0c5760b1bc8ae87c92a8a295f69",
+      "git_blob": "174643052fec3aeb9c16b5aaacff47a6aa11fe33"
+    },
+    "scripts/build_windows_package.py": {
+      "bytes": 9584,
+      "sha256": "c073cc82eba420670b5c253bb4ee7795f3129d6c969891a718ad6f22e3f38a58",
+      "git_blob": "24a60036808537abdf81f832a5d997723e0b0d78"
+    },
+    "scripts/pin_account.py": {
+      "bytes": 1163,
+      "sha256": "4044fe7af902b0278127a4fb8f83d504e8f913347eb1b0d75c57e756f35619eb",
+      "git_blob": "e0b006cbce69941007c6b86d9c6384409f7bd065"
+    },
+    "src/swift_autotrader/analytics/metrics.py": {
+      "bytes": 16867,
+      "sha256": "695bd7d5912163c91a346c129056e9860fb4b1684342728e6143ef0d24a8c348",
+      "git_blob": "419b000d03cc93323945ae91c92bbd248af7a09c"
+    },
+    "src/swift_autotrader/app.py": {
+      "bytes": 15585,
+      "sha256": "2d593bcc7d76148276604b4b5ba997a481e5d21f2840ba0ce7b4ecfc41d44f53",
+      "git_blob": "5070edb824d5af6d0969639e84efc6983919fdb3"
+    },
+    "src/swift_autotrader/broker/mcp_local_auth.py": {
+      "bytes": 11498,
+      "sha256": "6d8254a77a5f9740a103d8196fc6c916572b7c5d8c63fca1379ff736725e024a",
+      "git_blob": "3556dd7c12c523f26312d224c1ffb34d4dbaff34"
+    },
+    "src/swift_autotrader/config.py": {
+      "bytes": 13208,
+      "sha256": "945125d6a55dd3d426ac07669c5e3f3fcd035df2d0831c03479833392d9f32f8",
+      "git_blob": "24e729e08ea6c754501dc766502ce1f4308bf5ec"
+    },
+    "src/swift_autotrader/dashboard/app.py": {
+      "bytes": 8889,
+      "sha256": "25b2368e4843f2739dbe3a014f85ff5e478750a705244dc36c8b1857db0ad9db",
+      "git_blob": "6efc4cff5dbd6c48812a6363148791d3145f451e"
+    },
+    "src/swift_autotrader/live_service.py": {
+      "bytes": 10993,
+      "sha256": "21912cab4dfcc15266ee441159bfdf5916366f0b6ff151305efd25afdbeff34c",
+      "git_blob": "e20bd289c175a0d0096809ca943be6173889d200"
+    },
+    "src/swift_autotrader/paper_service.py": {
+      "bytes": 3722,
+      "sha256": "8ebbed5291d8bc11dc24b1225f05d6bea7f4de784189e06f7f22f2554d05cb18",
+      "git_blob": "6a23b4c729d6a22283e5d1845944ce214808d097"
+    },
+    "src/swift_autotrader/supervisor.py": {
+      "bytes": 11520,
+      "sha256": "37a3f1c055f3dc823b5a242ba293f3e374e9e1e0d2934326f253e01ca825ff3b",
+      "git_blob": "031a6343c4730841d36f810f4731c1d85757dece"
+    },
+    "src/swift_autotrader/windows_runtime.py": {
+      "bytes": 21760,
+      "sha256": "2ba99f0abe2b61401b8238e39b4d8a4f45d8fdf62ecbc0653b05d9d85fd90d82",
+      "git_blob": "8b667ed324fd7de356661862cb3d55d3fd1d8a78"
+    },
+    "tests/integration/test_complete_service_integration.py": {
+      "bytes": 17730,
+      "sha256": "19a8ee029e611ff101fb0af6370f239bdcf96c8571c4e9abb84cb2f6d8e31390",
+      "git_blob": "42971f4e90471b314604f3b8985b1f3c6bd8d0ec"
+    },
+    "tests/unit/test_managed_credential_paths.py": {
+      "bytes": 6153,
+      "sha256": "fcad15b207f66b4f324e66392d665dfb7b0bb40dbcd3e2dc132c37d83ea891f0",
+      "git_blob": "a50bacb36b1f85f8f3dda86368e56344c0fb75fc"
+    },
+    "tests/unit/test_pin_account.py": {
+      "bytes": 4526,
+      "sha256": "39777b2e80ef9ac3881e5726c4127f7a662845cfccfa327fc81bb569fe7d959c",
+      "git_blob": "f368be4b4ae607682fe5c532ec599367ca86f978"
+    },
+    "tests/unit/test_windows_runtime.py": {
+      "bytes": 13093,
+      "sha256": "a9938cc1ef59b3f5103bc59ed8240613927591ce6f1a8164e0dc597f4322c462",
+      "git_blob": "3d4d0799c4b8a53a8458bbfc5bbdeba54b1f210c"
+    }
+  }
+}

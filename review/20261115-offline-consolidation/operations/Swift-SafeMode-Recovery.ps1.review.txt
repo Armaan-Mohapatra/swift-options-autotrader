@@ -1,0 +1,164 @@
+#requires -Version 5.1
+# Safe-mode maintenance only: no live release promotion, real order calls or authorization changes.
+[CmdletBinding()]
+param([switch]$RepairAndStart)
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version Latest
+$root='E:\SwiftAutoTraderCertification\read-only-pilot\installed'
+$release='0c090e034ba7a761a1eb1a0cd08e06c91ddf8098'
+$rxHome=Join-Path $env:LOCALAPPDATA 'SwiftReceiveOnly-20261114'
+$paperHome=Join-Path $env:LOCALAPPDATA 'SwiftPaperPilot-20261114'
+$rxName='SwiftAutoTrader-ReceiveOnly-Local';$paperName='SwiftAutoTrader-PaperPilot-Local'
+$rxFile=Join-Path $rxHome 'Run-ReceiveOnly.ps1'
+$paperFile=Join-Path $paperHome 'Run-PaperPilot.ps1'
+$python=Join-Path $root "releases\$release\.venv\Scripts\python.exe"
+$pinOld='0e31fd7ca4ef3073b72085f8aaac702aa39dee3df78f3d7dca2b8440bb7fb3b1';$pinNew='a5573bd259b58c63c1f3ed7836eeee9271cd9ce4b0832f1886b47caff0bb248c'
+$patchBase64='I3JlcXVpcmVzIC1WZXJzaW9uIDUuMQojIFJlZ2lzdGVyZWQgb25seSBhZnRlciBleHBsaWNpdCBvcGVyYXRvciBjb25maXJtYXRpb24uIE5ldmVyIGVuYWJsZXMgYSBwYXBlciBkaXNwYXRjaGVyIG9yIGJyb2tlcmFnZSB3cml0ZXMuCiRFcnJvckFjdGlvblByZWZlcmVuY2U9J1N0b3AnClNldC1TdHJpY3RNb2RlIC1WZXJzaW9uIExhdGVzdAokcm9vdD0nRTpcU3dpZnRBdXRvVHJhZGVyQ2VydGlmaWNhdGlvblxyZWFkLW9ubHktcGlsb3RcaW5zdGFsbGVkJwokcmVsZWFzZT0nMGMwOTBlMDM0YmE3YTc2MWExZWIxYTBjZDA4ZTA2YzkxZGRmODA5OCcKJHB5dGhvbj1Kb2luLVBhdGggJHJvb3QgInJlbGVhc2VzXCRyZWxlYXNlXC52ZW52XFNjcmlwdHNccHl0aG9uLmV4ZSIKaWYoVGVzdC1QYXRoIC1MaXRlcmFsUGF0aCAoSm9pbi1QYXRoICRQU1NjcmlwdFJvb3QgJ21vbml0b3IuZGlzYWJsZWQnKSl7ZXhpdCAwfQokcGhhc2U9J3J1bnRpbWVfdmVyaWZpY2F0aW9uJwp0cnkgewogICAgJHY9JiAkcHl0aG9uIC1JIC1CIChKb2luLVBhdGggJFBTU2NyaXB0Um9vdCAndmVyaWZ5LnB5JykgLS1ydW50aW1lLW9ubHkKICAgIGlmKCRMQVNURVhJVENPREUgLW5lIDApe3Rocm93ICdMb2NhbCBzYWZldHkgY2hlY2tzIGJsb2NrZWQgbW9uaXRvci4nfQogICAgJGNoZWNrPSR2IHwgQ29udmVydEZyb20tSnNvbgogICAgaWYoJGNoZWNrLmxvY2sgLW5lICdBVkFJTEFCTEVfQVRfQ0hFQ0snKXt0aHJvdyAnU2VydmljZSBsb2NrIHVuYXZhaWxhYmxlLid9CiAgICAkcGhhc2U9J2luc3RhbGxlZF9tYW5pZmVzdCcKICAgIC4gKEpvaW4tUGF0aCAkcm9vdCAnc2NyaXB0c1xjb21tb24ucHMxJykKICAgIEFzc2VydC1Td2lmdE1hbmlmZXN0ICRyb290CiAgICBpZigoR2V0LVN3aWZ0QWN0aXZlUmVsZWFzZSAkcm9vdCkgLW5lICRyZWxlYXNlKXt0aHJvdyAnQWN0aXZlIHJlbGVhc2UgbWlzbWF0Y2guJ30KICAgICMgUGVybWl0IE9OTFkgdGhlIGluZGVwZW5kZW50bHkgdmVyaWZpZWQgaXNvbGF0ZWQgcGFwZXIgcGlsb3QuIEV2ZXJ5IG90aGVyIGVuYWJsZWQKICAgICMgU3dpZnQgc2NoZWR1bGVkIHNlcnZpY2UgcmVtYWlucyBhIGNvbmZsaWN0LCBpbmNsdWRpbmcgZGlmZmVyZW50bHkgbmFtZWQgY29tcGFuaW9ucy4KICAgICRwaGFzZT0nc2NoZWR1bGVkX3Rhc2tfY29leGlzdGVuY2UnCiAgICAkb3RoZXI9QChHZXQtU2NoZWR1bGVkVGFzayB8IFdoZXJlLU9iamVjdCB7JF8uVGFza05hbWUgLW1hdGNoICdTd2lmdEF1dG9UcmFkZXJ8U3dpZnQuKkNvbXBhbmlvbicgLWFuZCAoJF8uVGFza05hbWUgLW5lICdTd2lmdEF1dG9UcmFkZXItUmVjZWl2ZU9ubHktTG9jYWwnIC1vciAkXy5UYXNrUGF0aCAtbmUgJ1wnKSAtYW5kICRfLlN0YXRlIC1uZSAnRGlzYWJsZWQnfSkKICAgICRwYXBlcj1AKCRvdGhlciB8IFdoZXJlLU9iamVjdCB7JF8uVGFza05hbWUgLWVxICdTd2lmdEF1dG9UcmFkZXItUGFwZXJQaWxvdC1Mb2NhbCcgLWFuZCAkXy5UYXNrUGF0aCAtZXEgJ1wnfSkKICAgIGlmKCRvdGhlci5Db3VudCAtbmUgJHBhcGVyLkNvdW50IC1vciAkcGFwZXIuQ291bnQgLWd0IDEpe3Rocm93ICdBbm90aGVyIFN3aWZ0IHNjaGVkdWxlZCB0YXNrIGlzIGVuYWJsZWQuJ30KICAgIGlmKCRwYXBlci5Db3VudCAtZXEgMSl7CiAgICAgICAgJHBoYXNlPSdwYXBlcl90YXNrX2lkZW50aXR5JwogICAgICAgICRwYXBlckRpcj1Kb2luLVBhdGggJGVudjpMT0NBTEFQUERBVEEgJ1N3aWZ0UGFwZXJQaWxvdC0yMDI2MTExNCcKICAgICAgICAkcGFwZXJMYXVuY2g9Sm9pbi1QYXRoICRwYXBlckRpciAnUnVuLVBhcGVyUGlsb3QucHMxJwogICAgICAgICRwYT1AKCRwYXBlclswXS5BY3Rpb25zKQogICAgICAgICRleHBlY3RlZEFyZ3M9Jy1Ob1Byb2ZpbGUgLU5vbkludGVyYWN0aXZlIC1FeGVjdXRpb25Qb2xpY3kgQnlwYXNzIC1GaWxlICInKyRwYXBlckxhdW5jaCsnIicKICAgICAgICBpZigkcGEuQ291bnQgLW5lIDEgLW9yICRwYVswXS5FeGVjdXRlIC1pbmUgKEpvaW4tUGF0aCAkUFNIT01FICdwb3dlcnNoZWxsLmV4ZScpIC1vciAkcGFbMF0uQXJndW1lbnRzIC1pbmUgJGV4cGVjdGVkQXJncyl7dGhyb3cgJ1BhcGVyIHRhc2sgYWN0aW9uIGRpZmZlcnMuJ30KICAgICAgICAkaWRlbnRpdHk9W1N5c3RlbS5TZWN1cml0eS5QcmluY2lwYWwuV2luZG93c0lkZW50aXR5XTo6R2V0Q3VycmVudCgpCiAgICAgICAgJG93bmVySWQ9W3N0cmluZ10kcGFwZXJbMF0uUHJpbmNpcGFsLlVzZXJJZAogICAgICAgIGlmKCRvd25lcklkIC1tYXRjaCAnXlMtMS0nKXskb3duZXJTaWQ9JG93bmVySWR9ZWxzZXskb3duZXJTaWQ9KFtTeXN0ZW0uU2VjdXJpdHkuUHJpbmNpcGFsLk5UQWNjb3VudF06Om5ldygkb3duZXJJZCkpLlRyYW5zbGF0ZShbU3lzdGVtLlNlY3VyaXR5LlByaW5jaXBhbC5TZWN1cml0eUlkZW50aWZpZXJdKS5WYWx1ZX0KICAgICAgICBpZigkb3duZXJTaWQgLW5lICRpZGVudGl0eS5Vc2VyLlZhbHVlIC1vciBbc3RyaW5nXSRwYXBlclswXS5QcmluY2lwYWwuTG9nb25UeXBlIC1ub3RpbiBAKCdJbnRlcmFjdGl2ZScsJ0ludGVyYWN0aXZlVG9rZW4nKSAtb3IgW3N0cmluZ10kcGFwZXJbMF0uU2V0dGluZ3MuTXVsdGlwbGVJbnN0YW5jZXMgLW5lICdJZ25vcmVOZXcnKXt0aHJvdyAnUGFwZXIgdGFzayBvd25lcnNoaXAgb3IgZHVwbGljYXRlIHBvbGljeSBkaWZmZXJzLid9CiAgICAgICAgJHBoYXNlPSdwYXBlcl9wYWNrYWdlX2ludGVncml0eScKICAgICAgICAkcGFwZXJNYW5pZmVzdD1Kb2luLVBhdGggJHBhcGVyRGlyICdQQUNLQUdFX1NIQTI1Ni5qc29uJwogICAgICAgICRwYXBlclZlcmlmaWVyPUpvaW4tUGF0aCAkcGFwZXJEaXIgJ3ZlcmlmeV9wYWNrYWdlLnB5JwogICAgICAgIGZvcmVhY2goJHAgaW4gQCgkcGFwZXJEaXIsJHBhcGVyTWFuaWZlc3QsJHBhcGVyVmVyaWZpZXIsJHBhcGVyTGF1bmNoKSl7CiAgICAgICAgICAgIGlmKChHZXQtSXRlbSAtTGl0ZXJhbFBhdGggJHAgLUZvcmNlKS5BdHRyaWJ1dGVzIC1iYW5kIFtJTy5GaWxlQXR0cmlidXRlc106OlJlcGFyc2VQb2ludCl7dGhyb3cgJ1JlZGlyZWN0ZWQgcGFwZXIgcGFja2FnZSBwYXRoLid9CiAgICAgICAgfQogICAgICAgIGlmKChHZXQtRmlsZUhhc2ggLUxpdGVyYWxQYXRoICRwYXBlck1hbmlmZXN0IC1BbGdvcml0aG0gU0hBMjU2KS5IYXNoIC1pbmUgJzJjYjA3YmQwNDMxNzk2ZTc5ODM1NTEyZjljMmJjNzAxY2IwNzAyODFhNGZiNDg1Mzg0ZjViMmEyMTExMDU1N2InIC1vciAoR2V0LUZpbGVIYXNoIC1MaXRlcmFsUGF0aCAkcGFwZXJWZXJpZmllciAtQWxnb3JpdGhtIFNIQTI1NikuSGFzaCAtaW5lICcwYmQwMTgxNWQ2NjUwM2M5M2ZlMGQyODE4Y2EwYjgzMTliZjUyNzczYTQ5ZDBkZDZmYmY1ZDY0NjYwNmI3NWMzJyl7dGhyb3cgJ1BhcGVyIHBhY2thZ2UgaWRlbnRpdHkgZGlmZmVycy4nfQogICAgICAgICRwY2hlY2s9JiAkcHl0aG9uIC1JIC1CICRwYXBlclZlcmlmaWVyCiAgICAgICAgaWYoJExBU1RFWElUQ09ERSAtbmUgMCl7dGhyb3cgJ1BhcGVyIHBhY2thZ2UgdmVyaWZpY2F0aW9uIGZhaWxlZC4nfQogICAgICAgICRwcmVzdWx0PSRwY2hlY2sgfCBDb252ZXJ0RnJvbS1Kc29uCiAgICAgICAgaWYoJHByZXN1bHQuc3RhdHVzIC1uZSAnUEFDS0FHRV9WRVJJRklFRCcgLW9yICRwcmVzdWx0LmZpbGVzIC1uZSA2Nil7dGhyb3cgJ1BhcGVyIHBhY2thZ2UgZXZpZGVuY2UgaW5jb21wbGV0ZS4nfQogICAgfQogICAgJHBoYXNlPSdyZWNlaXZlcl9lbnZpcm9ubWVudCcKICAgIFNldC1Td2lmdEVudmlyb25tZW50IC1JbnN0YWxsUm9vdCAkcm9vdAogICAgJGVudjpQQVBFUl9PTkxZPSd0cnVlJzsgJGVudjpMSVZFX0VOQUJMRUQ9J2ZhbHNlJzsgJGVudjpBTExPV19CUk9LRVJfV1JJVEVTPSdmYWxzZSc7ICRlbnY6QlJPS0VSX0JBQ0tFTkQ9J3BhcGVyJwogICAgJGVudjpQQVBFUl9ESVNQQVRDSF9FTkFCTEVEPSdmYWxzZSc7ICRlbnY6UEFQRVJfTUFSS0VUX0RBVEFfU09VUkNFPScnCiAgICAkZW52Ok1BWF9QUkVNSVVNX1BFUl9TSUdOQUxfVVNEPScwJzsgJGVudjpQQVBFUl9NQVhfVE9UQUxfRVhQT1NVUkVfVVNEPScwJwogICAgUmVtb3ZlLUl0ZW0gRW52OlBZVEhPTlBBVEgsRW52OlBZVEhPTkhPTUUgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUKICAgIGlmKCRlbnY6VEVMRUdSQU1fRU5BQkxFRCAtbmUgJ3RydWUnIC1vciAkZW52OkRCX1BBVEggLW5lIChKb2luLVBhdGggJHJvb3QgJ2RhdGFcc3dpZnQuc3FsaXRlMycpKXt0aHJvdyAnVW5leHBlY3RlZCByZWNlaXZlciBjb25maWd1cmF0aW9uLid9CiAgICAkcGhhc2U9J25vdGlmaWNhdGlvbl9jcmVkZW50aWFscycKICAgICRlbmM9R2V0LUNvbnRlbnQgLUxpdGVyYWxQYXRoIChKb2luLVBhdGggJFBTU2NyaXB0Um9vdCAnbm90aWZpY2F0aW9uLmRwYXBpLmpzb24nKSAtUmF3IHwgQ29udmVydEZyb20tSnNvbgogICAgJHNlY3VyZT1Db252ZXJ0VG8tU2VjdXJlU3RyaW5nIC1TdHJpbmcgJGVuYy50b2tlbgogICAgJGVudjpURUxFR1JBTV9TVEFUVVNfQk9UX1RPS0VOPVtTeXN0ZW0uTmV0Lk5ldHdvcmtDcmVkZW50aWFsXTo6bmV3KCcnLCRzZWN1cmUpLlBhc3N3b3JkCiAgICAkZW52OlRFTEVHUkFNX1NUQVRVU19DSEFUX0lEPVtzdHJpbmddJGVuYy5jaGF0X2lkCiAgICBpZigkZW52OlRFTEVHUkFNX1NUQVRVU19DSEFUX0lEIC1ub3RtYXRjaCAnXlsxLTldWzAtOV17MCwxOX0kJyAtb3IgJGVudjpURUxFR1JBTV9TVEFUVVNfQ0hBVF9JRCAtZXEgJGVudjpTV0lGVF9URUxFR1JBTV9DSEFOTkVMX0lEKXt0aHJvdyAnSW52YWxpZCBwcml2YXRlIG5vdGlmaWNhdGlvbiBkZXN0aW5hdGlvbi4nfQogICAgJGVudjpFTkFCTEVfVEVMRUdSQU1fU1RBVFVTX05PVElGSUNBVElPTlM9J3RydWUnCiAgICBpZihUZXN0LVBhdGggLUxpdGVyYWxQYXRoIChKb2luLVBhdGggJFBTU2NyaXB0Um9vdCAnbW9uaXRvci5kaXNhYmxlZCcpKXtleGl0IDB9CiAgICAjIFJlY2hlY2sgb3BlcmF0b3Igc3RvcCBtYXJrZXJzOyBleGlzdGluZyBzdXBlcnZpc29yIG5ldmVyIGdldHMgbGF1bmNoZWQgYWdhaW5zdCBhIGtub3duIHN0b3AgcmVxdWVzdC4KICAgIGZvcmVhY2goJG1hcmtlciBpbiBAKCdzdG9wLnJlcXVlc3QnLCdTV0lGVF9SRVZJRVdFRF9TVE9QJykpe2lmKFRlc3QtUGF0aCAtTGl0ZXJhbFBhdGggKEpvaW4tUGF0aCAkcm9vdCAic3RhdGVcJG1hcmtlciIpKXt0aHJvdyAnU3RvcCBtYXJrZXIgcHJlc2VudC4nfX0KICAgICRwaGFzZT0ncmVjZWl2ZXJfd29ya2VyJwogICAgUHVzaC1Mb2NhdGlvbiAkSE9NRQogICAgdHJ5IHsgJiAkcHl0aG9uIC1JIC1CIC1tIHN3aWZ0X2F1dG90cmFkZXIud2luZG93c19ydW50aW1lIHNlcnZpY2UgLS1yb290ICRyb290OyAkcmM9JExBU1RFWElUQ09ERSB9CiAgICBmaW5hbGx5IHsgUG9wLUxvY2F0aW9uIH0KICAgIGV4aXQgJHJjCn0gY2F0Y2ggewogICAgIyBEbyBub3QgcHJpbnQgcmF3IGV4Y2VwdGlvbiBtZXNzYWdlcywgd2hpY2ggbWF5IGluY2x1ZGUgY3JlZGVudGlhbHMuCiAgICBXcml0ZS1Ib3N0ICgnUkVDRUlWRV9PTkxZX01PTklUT1JfQkxPQ0tFRDsgcGhhc2U9JyskcGhhc2UpCiAgICB0cnl7CiAgICAgICAgW29yZGVyZWRdQHtzdGF0dXM9J0JMT0NLRUQnO3BoYXNlPSRwaGFzZTtlcnJvcl90eXBlPSRfLkV4Y2VwdGlvbi5HZXRUeXBlKCkuTmFtZTthc19vZl91dGM9W0RhdGVUaW1lT2Zmc2V0XTo6VXRjTm93LlRvU3RyaW5nKCdvJyk7bGl2ZV9jZXJ0aWZpZWQ9JGZhbHNlfSB8IENvbnZlcnRUby1Kc29uIC1Db21wcmVzcyB8IFNldC1Db250ZW50IC1MaXRlcmFsUGF0aCAoSm9pbi1QYXRoICRQU1NjcmlwdFJvb3QgJ1NUQVJUVVAtRVJST1IuanNvbicpIC1FbmNvZGluZyBVVEY4CiAgICB9Y2F0Y2h7fQogICAgZXhpdCAyCn0gZmluYWxseSB7CiAgICBSZW1vdmUtSXRlbSBFbnY6VEVMRUdSQU1fQVBJX0hBU0gsRW52OlRFTEVHUkFNX1NUQVRVU19CT1RfVE9LRU4sRW52OlRFTEVHUkFNX1NUQVRVU19DSEFUX0lEIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCn0K'
+$report=[ordered]@{status='BLOCKED';mode='RECEIVE_ONLY_AND_PAPER_ONLY';production_release_modified=$false;receiver_launcher_modified=$false;real_order_submission=$false;live_certified=$false;approval_settings_changed=$false;steps=[ordered]@{}}
+$phase='observation';$failureCode='UNEXPECTED_LOCAL_ERROR';$backup=$null
+function Require([bool]$Condition,[string]$Code){if(!$Condition){throw ('SWIFT_CHECK:'+$Code)}}
+function SafePath([string]$Path){
+    Require (Test-Path -LiteralPath $Path) 'REQUIRED_PATH_MISSING'
+    $p=[IO.Path]::GetFullPath($Path)
+    while($p){
+        $item=Get-Item -LiteralPath $p -Force
+        Require (!(($item.Attributes -band [IO.FileAttributes]::ReparsePoint))) 'REDIRECTED_PATH'
+        $up=[IO.Path]::GetDirectoryName($p)
+        if(!$up -or $p -eq $up){break};$p=$up
+    }
+}
+function Hash([string]$p){ SafePath $p; return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
+function J([string]$p){SafePath $p;return (Get-Content -LiteralPath $p -Raw | ConvertFrom-Json)}
+function CurrentTask([string]$Name){$t=@(Get-ScheduledTask -TaskName $Name -ErrorAction Stop);Require ($t.Count -eq 1 -and $t[0].TaskPath -eq '\') 'TASK_IDENTITY_UNVERIFIED';return $t[0]}
+function TaskObservation([string]$Name){
+    try{$t=CurrentTask $Name;$i=Get-ScheduledTaskInfo -TaskName $Name -TaskPath '\';return [ordered]@{state=[string]$t.State;last_result=$i.LastTaskResult;last_run=[string]$i.LastRunTime}}
+    catch{return [ordered]@{state='UNAVAILABLE'}}
+}
+function CheckTask([string]$Name,[string]$Launcher){
+    $t=CurrentTask $Name;$a=@($t.Actions);$expected='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$Launcher+'"'
+    Require ($a.Count -eq 1 -and $a[0].Execute -ieq (Join-Path $PSHOME 'powershell.exe') -and $a[0].Arguments -ieq $expected) 'TASK_ACTION_DIFFERS_FROM_VERIFIED_INSTALL'
+    $owner=[System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $uid=[string]$t.Principal.UserId
+    if($uid -match '^S-1-'){$sid=$uid}else{$sid=([System.Security.Principal.NTAccount]::new($uid)).Translate([System.Security.Principal.SecurityIdentifier]).Value}
+    Require ($sid -eq $owner.User.Value -and [string]$t.Principal.LogonType -in @('Interactive','InteractiveToken')) 'TASK_PRINCIPAL_DIFFERS'
+    Require ([string]$t.Settings.MultipleInstances -eq 'IgnoreNew') 'TASK_DUPLICATE_POLICY_DIFFERS'
+    Require ([string]$t.State -ne 'Disabled') 'TASK_DISABLED_OPERATOR_REVIEW_REQUIRED'
+}
+function NoOtherTasks {
+    $others=@(Get-ScheduledTask | Where-Object {$_.TaskName -match 'SwiftAutoTrader|Swift.*Companion' -and $_.State -ne 'Disabled' -and ($_.TaskPath -ne '\' -or $_.TaskName -notin @($rxName,$paperName))})
+    Require ($others.Count -eq 0) 'OTHER_SWIFT_TASK_ENABLED'
+}
+function StopMarkers {
+    $control=@((Join-Path $rxHome 'monitor.disabled'),(Join-Path $paperHome 'state\PAPER-STOP'),(Join-Path $root 'state\SWIFT_REVIEWED_STOP'),(Join-Path $root 'state\stop.request'),(Join-Path $root 'state\control\EMERGENCY_STOP.json'))
+    foreach($p in $control){Require (!(Test-Path -LiteralPath $p)) 'STOP_MARKER_PRESENT_NOT_CLEARED'}
+}
+function AssertIdle {
+    Require ((CurrentTask $rxName).State -eq 'Ready' -and (CurrentTask $paperName).State -eq 'Ready') 'TASKS_NOT_BOTH_IDLE_NO_TERMINATION_PERFORMED'
+    # Detect existing Swift Python/PowerShell workers. No raw command lines leave this machine.
+    $workers=@(Get-CimInstance Win32_Process | Where-Object {$_.ProcessId -ne $PID -and $_.CommandLine -and $_.Name -match '^(pythonw?|powershell|pwsh|py)\.exe$' -and $_.CommandLine -match '(?i)swift_autotrader|swift_reviewed|swift_portfolio_companion|Swift-Field-Check\.py|SwiftPaperPilot-20261114|SwiftReceiveOnly-20261114'})
+    Require ($workers.Count -eq 0) 'OTHER_OR_RESIDUAL_SWIFT_PROCESS_PRESENT'
+}
+function RxHealth([DateTimeOffset]$Since){
+    try{
+        $h=J (Join-Path $root 'state\health.json');$t=[DateTimeOffset]::Parse([string]$h.as_of_utc);$age=([DateTimeOffset]::UtcNow-$t).TotalSeconds
+        if($t -lt $Since -or $age -lt 0 -or $age -gt 45 -or $h.status -ne 'RUNNING' -or $h.mode -ne 'PAPER_ONLY' -or $h.live_enabled -isnot [bool] -or $h.live_enabled -or $h.broker_writes_enabled -isnot [bool] -or $h.broker_writes_enabled -or $h.paper_dispatch_worker_enabled -isnot [bool] -or $h.paper_dispatch_worker_enabled -or $h.workers.telegram -isnot [bool] -or !$h.workers.telegram){return $false}
+        if((CurrentTask $rxName).State -ne 'Running'){return $false}
+        $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+[int]$h.pid) -ErrorAction Stop
+        return [bool]($p -and $p.CommandLine -match '(?i)-m\s+swift_autotrader\.windows_runtime\s+service\b' -and $p.CommandLine -like ('*'+$root+'*'))
+    }catch{return $false}
+}
+function PaperHealth([DateTimeOffset]$Since){
+    try{
+        $h=J (Join-Path $paperHome 'state\PAPER-STATUS.json');$t=[DateTimeOffset]::Parse([string]$h.as_of_utc);$age=([DateTimeOffset]::UtcNow-$t).TotalSeconds
+        if($t -lt $Since -or $age -lt 0 -or $age -gt 45 -or $h.status -ne 'PAPER_PILOT_RUNNING' -or $h.mode -ne 'PAPER_ONLY' -or $h.real_order_tools_called -isnot [bool] -or $h.real_order_tools_called -or $h.live_certified -isnot [bool] -or $h.live_certified -or $h.source_read_only -isnot [bool] -or !$h.source_read_only -or $h.broker_connected -isnot [bool] -or !$h.broker_connected){return $false}
+        if((CurrentTask $paperName).State -ne 'Running'){return $false}
+        $worker=@(Get-CimInstance Win32_Process | Where-Object {$_.Name -match '^python(w)?\.exe$' -and $_.CommandLine -like ('*'+(Join-Path $paperHome 'pilot.py')+'*') -and $_.CommandLine -match '(?i)\s--run(?:\s|$)'})
+        return ($worker.Count -ge 1)
+    }catch{return $false}
+}
+function WaitHealthy([string]$Role,[DateTimeOffset]$Since,[int]$Seconds){
+    $deadline=[DateTimeOffset]::UtcNow.AddSeconds($Seconds)
+    while([DateTimeOffset]::UtcNow -lt $deadline){
+        if($Role -eq 'receiver'){if(RxHealth $Since){return $true}}
+        else {if(PaperHealth $Since){return $true}}
+        Start-Sleep -Seconds 3
+    }
+    return $false
+}
+try{
+    $report.steps.receiver_before=TaskObservation $rxName;$report.steps.paper_before=TaskObservation $paperName
+    $phase='existing_release'; SafePath $root;SafePath $python
+    Require ((Get-Content -LiteralPath (Join-Path $root 'active-release.txt') -Raw).Trim() -eq $release) 'ACTIVE_RELEASE_DIFFERS'
+    $m=J (Join-Path $root 'deployment.json')
+    Require ($m.product -eq 'swift-options-autotrader' -and $m.mode -eq 'PAPER_ONLY' -and $m.live_enabled -is [bool] -and !$m.live_enabled -and $m.broker_writes_enabled -is [bool] -and !$m.broker_writes_enabled) 'DEPLOYMENT_NOT_PAPER_ONLY'
+    $phase='task_identity';CheckTask $rxName $rxFile;CheckTask $paperName $paperFile;NoOtherTasks;StopMarkers
+    $phase='receiver_files';$rxHash=Hash $rxFile
+    Require ($rxHash -in @($pinOld,$pinNew)) 'RECEIVER_SOURCE_NOT_KNOWN_BASELINE'
+    foreach($entry in @('verify.py|7b74c880c2932e875e11524744750c54980b36c05d307b5e94ffa7ed1048bef5','EXPECTED_RUNTIME_SHA256.json|9ee1567ab7588fe82f223620e5b58b6bacbf50905ecd71b5a67249647f8ced0f','EXPECTED_STAGED_CANDIDATE.json|5d73fb7dd7f389e45b42e4eaa54bbfd69b50c3efa49ee4088c24b48acaec82e1')){
+        $name,$digest=$entry.Split('|');Require ((Hash (Join-Path $rxHome $name)) -eq $digest) 'RECEIVER_SUPPORT_FILE_MISMATCH'
+    }
+    $report.steps.receiver_launcher=if($rxHash -eq $pinOld){'ORIGINAL_CONFLICT_RULE_CONFIRMED'}else{'PATCH_ALREADY_PRESENT'}
+    $phase='paper_files'
+    Require ((Hash (Join-Path $paperHome 'PACKAGE_SHA256.json')) -eq '2cb07bd0431796e79835512f9c2bc701cb070281a4fb485384f5b2a21110557b') 'PAPER_MANIFEST_MISMATCH'
+    Require ((Hash (Join-Path $paperHome 'verify_package.py')) -eq '0bd01815d66503c93fe0d2818ca0b8319bf52773a49d0dd6fbf5d646606b75c3') 'PAPER_VERIFIER_MISMATCH'
+    SafePath $paperFile
+    $raw=& $python -I -B (Join-Path $paperHome 'verify_package.py')
+    $rc=$LASTEXITCODE;Require ($rc -eq 0) 'PAPER_PACKAGE_VERIFICATION_FAILED'
+    $v=$raw | ConvertFrom-Json;Require ($v.status -eq 'PACKAGE_VERIFIED' -and $v.files -eq 66) 'PAPER_PACKAGE_EVIDENCE_MISMATCH'
+    $report.steps.paper_source_files=$v.files
+    $phase='local_runtime_verification';$raw=& $python -I -B (Join-Path $rxHome 'verify.py') --runtime-only
+    $rc=$LASTEXITCODE;Require ($rc -eq 0) 'RUNTIME_OR_STOPPED_COMPANION_VERIFICATION_FAILED'
+    $v=$raw | ConvertFrom-Json
+    Require ($v.runtime_files_verified -eq 55 -and $v.reviewed_stopped -eq $true) 'RUNTIME_EVIDENCE_MISMATCH'
+    $report.steps.runtime_files_verified=$v.runtime_files_verified;$report.steps.service_lock=$v.lock
+    $report.steps.receiver_health_observed=RxHealth ([DateTimeOffset]::UtcNow.AddSeconds(-45));$report.steps.paper_health_observed=PaperHealth ([DateTimeOffset]::UtcNow.AddSeconds(-45))
+    if(!$RepairAndStart){$report.status='DIAGNOSIS_COMPLETE_NO_CHANGES';return}
+    $phase='idle_and_stop_gate';Require ($v.lock -eq 'AVAILABLE_AT_CHECK') 'RECEIVER_LOCK_BUSY_OR_UNAVAILABLE';AssertIdle;StopMarkers
+    $phase='patch_receiver_launcher'
+    if($rxHash -eq $pinOld){
+        $tmp=Join-Path $rxHome ('receiver-repair-'+[Guid]::NewGuid().ToString('N')+'.tmp')
+        $backup=Join-Path $rxHome ('receiver-pre-coexistence-'+[Guid]::NewGuid().ToString('N')+'.ps1.bak')
+        try{
+            [IO.File]::WriteAllBytes($tmp,[Convert]::FromBase64String($patchBase64))
+            Require ((Hash $tmp) -eq $pinNew) 'PATCH_HASH_MISMATCH'
+            $tokens=$null;$parseErrors=$null
+            $null=[System.Management.Automation.Language.Parser]::ParseFile($tmp,[ref]$tokens,[ref]$parseErrors)
+            Require ($parseErrors.Count -eq 0) 'PATCH_POWERSHELL_PARSE_FAILED'
+            CheckTask $rxName $rxFile;CheckTask $paperName $paperFile;NoOtherTasks;StopMarkers;AssertIdle
+            Require ((Hash $rxFile) -eq $pinOld) 'RECEIVER_SOURCE_CHANGED_DURING_CHECK'
+            [IO.File]::Replace($tmp,$rxFile,$backup)
+            $report.receiver_launcher_modified=$true
+            Require ((Hash $rxFile) -eq $pinNew -and (Hash $backup) -eq $pinOld) 'POST_REPLACEMENT_HASH_MISMATCH'
+            $report.steps.receiver_backup=(Split-Path -Leaf $backup)
+        }finally{if(Test-Path -LiteralPath $tmp){Remove-Item -LiteralPath $tmp -Force}}
+    }
+    $report.steps.receiver_patch='CHECKSUM_VERIFIED_COEXISTENCE_FIX'
+    $phase='start_receiver';NoOtherTasks;StopMarkers;AssertIdle
+    $since=[DateTimeOffset]::UtcNow;Start-ScheduledTask -TaskName $rxName -TaskPath '\'
+    $report.steps.receiver_start_requested=$true
+    if(!(WaitHealthy 'receiver' $since 60)){
+        $errPath=Join-Path $rxHome 'STARTUP-ERROR.json'
+        try{$e=J $errPath;$et=[DateTimeOffset]::Parse([string]$e.as_of_utc);if($et -ge $since -and $e.phase -in @('runtime_verification','installed_manifest','scheduled_task_coexistence','paper_task_identity','paper_package_integrity','receiver_environment','notification_credentials','receiver_worker')){$report.steps.receiver_startup_phase=$e.phase}}catch{}
+        Require $false 'RECEIVER_HEARTBEAT_OR_PROCESS_NOT_VERIFIED'
+    }
+    $report.steps.receiver='FRESH_RECEIVE_ONLY_HEARTBEAT_AND_PROCESS_VERIFIED'
+    $phase='start_paper';CheckTask $paperName $paperFile;NoOtherTasks;StopMarkers
+    Require ((CurrentTask $paperName).State -eq 'Ready') 'PAPER_TASK_NOT_IDLE'
+    Require (RxHealth $since) 'RECEIVER_HEALTH_LOST_BEFORE_PAPER_START'
+    $paperSince=[DateTimeOffset]::UtcNow;Start-ScheduledTask -TaskName $paperName -TaskPath '\'
+    $report.steps.paper_start_requested=$true
+    if(!(WaitHealthy 'paper' $paperSince 90)){
+        try{$h=J (Join-Path $paperHome 'state\PAPER-STATUS.json');if([DateTimeOffset]::Parse([string]$h.as_of_utc) -ge $paperSince){$report.steps.paper_reported_status=[string]$h.status}}catch{}
+        Require $false 'PAPER_HEARTBEAT_OR_PROCESS_NOT_VERIFIED'
+    }
+    Require (RxHealth $since) 'RECEIVER_HEALTH_LOST_AFTER_PAPER_START'
+    $report.steps.paper='FRESH_PAPER_ONLY_HEARTBEAT_AND_PROCESS_VERIFIED'
+    $report.status='SAFE_MODE_SERVICES_OBSERVED_RUNNING_NOT_LIVE_CERTIFIED'
+}catch{
+    $report.steps.blocked_phase=$phase
+    $msg=$_.Exception.Message
+    if($msg -match '^SWIFT_CHECK:([A-Z0-9_]+)$'){$report.steps.blocker=$Matches[1]}else{$report.steps.blocker='UNEXPECTED_LOCAL_ERROR';$report.steps.error_type=$_.Exception.GetType().Name}
+}finally{
+    $report.steps.receiver_after=TaskObservation $rxName;$report.steps.paper_after=TaskObservation $paperName
+    $report | ConvertTo-Json -Depth 8
+}

@@ -1,0 +1,5 @@
+# Dependency evidence
+
+Exact GitHub pyproject retrieved from the PR #26 review branch, blob a14e0a5bdc3f80153302eb3e3952c806d3e3026c. Its production declaration is not a resolved dependency lock: Python >=3.11; setuptools==84.2.1 for build; tzdata>=2026.6; paper-market optional mcp==2.3.0, httpx2>=2.10.0, exchange-calendars, pywin32 on Windows; Telegram optional Telethon==1.45.0; dev pytest==9.2.0 and ruff==0.16.8. Original paper precheck also requires pandas and jsonschema. No new dependency installation was performed. Actual production dependency resolution, wheel hashes and runtime version verification are outstanding; don't silently install different dependencies or use --system-site-packages.
+
+Linux test environment observed: pytest 9.0.2, jsonschema 4.26.0, exchange-calendars 4.13.1, pandas 2.2.3, tzdata 2026.2, Python version in final runner transcript. mcp, httpx2, Telethon and pywin32 unavailable; not needed by the synthetic fixtures and not claimed tested. Earlier user-transcribed Windows pytest 9.2.0 is separate evidence. Full environment lock is not established.

@@ -1,0 +1,134 @@
+{
+  "deployment/linux/swift-autotrader.service": {
+    "sha256": "ab770de077671d5426940ec904e7193ffae8e8560a37a9e66276f131e9cda28e",
+    "size_bytes": 545
+  },
+  "deployment/macos/com.swift.autotrader.plist": {
+    "sha256": "e05fe7632b559298a0c48adc3b33e081f05da10c33805394bcf34c344018f015",
+    "size_bytes": 985
+  },
+  "deployment/windows/run-supervisor.ps1": {
+    "sha256": "ff3134891f07a649f6646fbb2867710cb0351cbce65298ba5e0f4f8eb8c4f1c0",
+    "size_bytes": 889
+  },
+  "review/20261115-mvp-release-candidate/Swift-MVP-Release-Candidate-Handoff.md": {
+    "sha256": "02c58b1d891f916a41b728c4a81f1d17fad9081ea3fd8c8b2b801b6d1aa938cd",
+    "size_bytes": 8424
+  },
+  "review/20261115-mvp-release-candidate/Swift-MVP-Release-Candidate-Test-Evidence.txt": {
+    "sha256": "154e2b41ad135952a32f8252dcd14c8059bb99ebab73bc8e4899d1457a980bb2",
+    "size_bytes": 63080
+  },
+  "src/swift_autotrader/app.py": {
+    "sha256": "09671c273a666f0a4904a4a21f442b57a6267c2d1500356e3cd7c979257b2e6e",
+    "size_bytes": 13985
+  },
+  "src/swift_autotrader/broker/base.py": {
+    "sha256": "36671eb6dcff07e594ad073f0cd7d1f1de6a61e97aeff2e678ffb6e301b03073",
+    "size_bytes": 1502
+  },
+  "src/swift_autotrader/broker/robinhood_mcp.py": {
+    "sha256": "39874d29b681d07eba6a3ddd93931a9879d725c03992d597fe7a3366372aa176",
+    "size_bytes": 39522
+  },
+  "src/swift_autotrader/config.py": {
+    "sha256": "18e96aba39e08911366e147d314df5806566462e4be4d2efe690d6ebb450183c",
+    "size_bytes": 10222
+  },
+  "src/swift_autotrader/live_dispatch.py": {
+    "sha256": "c4d63f881ffdd88b17527732dffceda654b43683447893a59c80b4ea3facacb4",
+    "size_bytes": 9960
+  },
+  "src/swift_autotrader/mvp_review.py": {
+    "sha256": "0014fa9a8cb2a910156ba2bd14f009b16fc57bf66866ac8656d326d62bb2dc86",
+    "size_bytes": 1547
+  },
+  "src/swift_autotrader/notifications/kill_switch.py": {
+    "sha256": "6481b98813a0457afe9f713a0b9c9d722d13048576cd5cdca944b7deb1269d8f",
+    "size_bytes": 13574
+  },
+  "src/swift_autotrader/orders/commands.py": {
+    "sha256": "df7a5602c307d29baec9c75ecaa8932e69f53ce22a11c917f763567a3193bf1e",
+    "size_bytes": 971
+  },
+  "src/swift_autotrader/orders/engine.py": {
+    "sha256": "74896b6dab60ba53fcb032a539600f8c91fa24a8467953ce2602b3c0bcf223d5",
+    "size_bytes": 40686
+  },
+  "src/swift_autotrader/orders/risk.py": {
+    "sha256": "bc389493e4475c157ed7928391630e5fbc8ac8af653202aadbb36764f84d0068",
+    "size_bytes": 5656
+  },
+  "src/swift_autotrader/orders/slippage.py": {
+    "sha256": "98433132998f4956239374359e66aced2bf261eea24b564574856f5e39fc158f",
+    "size_bytes": 2784
+  },
+  "src/swift_autotrader/supervisor.py": {
+    "sha256": "b519d2ff174d7af0c25ad21af78aa3c0fa940e403fff86d233b7d0aad986fef0",
+    "size_bytes": 10030
+  },
+  "src/swift_autotrader/telegram/client.py": {
+    "sha256": "6a0c3e7047b8dbf1a50638d07c844e42b62719a34321af779b7f5a4582ed63c4",
+    "size_bytes": 7683
+  },
+  "src/swift_autotrader/telegram/enrollment.py": {
+    "sha256": "82d4d5e86d54e021dd469ae1d0b95237ae5e371894202ed1004ad26cb0e25603",
+    "size_bytes": 4862
+  },
+  "src/swift_autotrader/telegram/reconnect.py": {
+    "sha256": "5c8af30186688288adf740b573d766f02727cb902d72c1746eac0d199f6ed2c1",
+    "size_bytes": 2972
+  },
+  "tests/fixtures/live_mocks.py": {
+    "sha256": "bb12dde70e2578151e46a04c500d323e7107d778941ca3617375307b3f893985",
+    "size_bytes": 20904
+  },
+  "tests/integration/test_engine_flatten.py": {
+    "sha256": "024894b91d4df37ff09f0c00f816f40a2eba70c190ca74092c7dcbaa07d40eb0",
+    "size_bytes": 15188
+  },
+  "tests/integration/test_live_dispatch.py": {
+    "sha256": "02112cb2017049a6d4143c5b126711333cadff106d2383069fdf43d7ea39f19c",
+    "size_bytes": 16840
+  },
+  "tests/integration/test_live_e2e_scenarios.py": {
+    "sha256": "b574c43a758c1223abe33e4796ce8955be40728b1bf49f419538c2a25811ce1a",
+    "size_bytes": 33056
+  },
+  "tests/unit/test_config.py": {
+    "sha256": "e4d1e3e47873df01d5ae8df8139f44dfb721990fba6e61f4377384b1e3d2755f",
+    "size_bytes": 6061
+  },
+  "tests/unit/test_kill_switch.py": {
+    "sha256": "1e28a3776f6e8c3db5c208eb15db761dd3b93130098c49a27001320bdcd09e8c",
+    "size_bytes": 12541
+  },
+  "tests/unit/test_live_risk.py": {
+    "sha256": "9470a03b545e32dc1bc86fdc33e5f38714d8df42693e985f721623294a98f5a9",
+    "size_bytes": 12256
+  },
+  "tests/unit/test_mvp_review.py": {
+    "sha256": "117c012b14a64589e4f02fa434a63bd015beb5411f614a6ca924cfae510f4009",
+    "size_bytes": 2582
+  },
+  "tests/unit/test_order_engine_live.py": {
+    "sha256": "41cd2de6b92b3c67a666e6e022d2aca8bae458ac30fcd01dd1e1b1f01e71456e",
+    "size_bytes": 15807
+  },
+  "tests/unit/test_robinhood_mcp.py": {
+    "sha256": "36feb7283b67390040995d0c3106b977e3cb58b0214f0ed857ef82fe2f860299",
+    "size_bytes": 32727
+  },
+  "tests/unit/test_slippage.py": {
+    "sha256": "a0561fa1eac30a12ae1ef04d784f287ede2caa2af7bc7d11529ff9ee2f2852a3",
+    "size_bytes": 5010
+  },
+  "tests/unit/test_supervisor.py": {
+    "sha256": "0de3b351ed9a91dbe0166d351b3b127b07a3f45565b19111e52b763dc247eab6",
+    "size_bytes": 10675
+  },
+  "tests/unit/test_telegram_enrollment.py": {
+    "sha256": "cc5a30d11486c0fb17b5c95f191eaf00aff34a95c82b9a94b4d48910c42a96e1",
+    "size_bytes": 10269
+  }
+}
