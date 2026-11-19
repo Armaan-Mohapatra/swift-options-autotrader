@@ -512,3 +512,13 @@ def test_market_data_timeout_reports_its_own_code(dispatch_rig: tuple) -> None:
     assert result.status == "MARKET_DATA_UNAVAILABLE"
     assert "MARKET_DATA_TIMEOUT" in [n.code for n in dispatcher.notifications.pending(10)]
     assert _decisions(db_path) == []
+
+
+def test_stale_unrecognized_alert_is_closed_explicitly_and_never_trades(dispatch_rig: tuple) -> None:
+    db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
+    ingest_alert(store, clock, "CSCO 87.50 12/18 @ 1.65", 1003)  # no call/put letter: review only
+    clock.advance(121.0)
+    result = asyncio.run(dispatcher.run_once())
+    assert result.entry_orders_submitted == 0
+    assert mcp.orders == {}
+    assert _decisions(db_path) == [("REVIEW_REQUIRED", "SKIPPED", "ALERT_STALE_EXPIRED")]

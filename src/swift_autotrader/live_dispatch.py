@@ -464,17 +464,17 @@ class LiveDispatcher:
             return False
         return 0 <= (now - sent).total_seconds() <= self.settings.telegram_max_live_age_seconds
 
-    def _expire_entry(self, revision_id: int, message_id: int) -> None:
-        """Close a stale pending ENTRY so it can never become actionable later."""
+    def _expire_entry(self, revision_id: int, message_id: int, intent: str = "ENTRY") -> None:
+        """Close a stale pending alert so it can never become actionable later."""
         import sqlite3
         from contextlib import closing
         with closing(sqlite3.connect(str(self.db_path), timeout=10)) as db, db:
             db.execute(
                 "INSERT OR IGNORE INTO signal_parser_decisions(revision_id,channel_id,message_id,"
                 "intent,status,reason,signal_id,processed_at_utc) "
-                "VALUES(?,?,?,'ENTRY','SKIPPED','ALERT_STALE_EXPIRED',NULL,"
+                "VALUES(?,?,?,?,'SKIPPED','ALERT_STALE_EXPIRED',NULL,"
                 "strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-                (revision_id, str(self.channel_id), message_id),
+                (revision_id, str(self.channel_id), message_id, intent),
             )
         self.notifications.record("APPLICATION", "ALERT_STALE_EXPIRED",
                                   source_key=f"live-dispatch:{revision_id}", severity="WARNING")
@@ -518,6 +518,11 @@ class LiveDispatcher:
                 # Explicit outcome: a stale entry is never later actionable, even if the
                 # market data that would have been needed returns.
                 self._expire_entry(rid, mid)
+                continue
+            if (alert.intent in (SignalIntent.REVIEW_REQUIRED, SignalIntent.IGNORE_NON_OPTION)
+                    and not self._entry_fresh(sent_at, now)):
+                # Never-actionable messages would otherwise stay pending with no decision.
+                self._expire_entry(rid, mid, alert.intent.value)
                 continue
             if alert.intent is SignalIntent.ENTRY:
                 if not eligible:
