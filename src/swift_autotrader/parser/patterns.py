@@ -12,6 +12,8 @@ RIGHT = r"(?:CALL|PUT|C|P)"
 DATE = r"(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?)"
 CONTRACT = rf"(?P<strike>{STRIKE})\s*(?P<right>{RIGHT})\s+(?P<expiry>{DATE})"
 PREFIX = (
+    # Real Swift alerts open with a "OPTION - <CATEGORY>" header line.
+    rf"(?:OPTIONS?\s*[:\-]\s*(?=(?:LOTTO|SWING|SCALP|DAYTRADE)\b))?"
     rf"(?:(?:BUY|BTO|OPEN)\s+)?"
     rf"(?:(?P<lead_category>LOTTO|SWING|SCALP|DAYTRADE)(?:\s*[:\-]\s*|\s+))?"
     rf"\$?(?P<symbol>{SYMBOL})(?:\s+(?P<category>LOTTO|SWING|SCALP|DAYTRADE))?"
