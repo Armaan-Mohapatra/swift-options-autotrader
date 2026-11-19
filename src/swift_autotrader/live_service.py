@@ -12,7 +12,8 @@ import contextlib
 import json
 import logging
 import os
-from datetime import UTC, datetime
+import sqlite3
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from time import monotonic_ns
@@ -43,6 +44,9 @@ from swift_autotrader.orders.unattended_approval import (
 )
 
 log = logging.getLogger("swift_autotrader.live_service")
+
+# Owner-visible warning window before an unattended approval runs out.
+EXPIRY_WARNING_WINDOW = timedelta(hours=24)
 
 
 def validate_live_install_root(root: Path) -> Path:
@@ -113,6 +117,7 @@ def write_live_health(
     open_positions: int = 0,
     daily_loss: Decimal = Decimal("0"),
     simulated: bool = False,
+    entries_allowed: bool = True,
 ) -> None:
     """Record cycle evidence, not a certificate of trading authorization."""
     if state == "RUNNING":
@@ -141,6 +146,8 @@ def write_live_health(
         "last_close_submissions": result.close_orders_submitted if result else 0,
         "unresolved_exit_count": result.unresolved_exit_count if result else None,
         "exit_entry_hold": bool(result.unresolved_exit_count) if result else None,
+        # Receipt only. The owner's pause is separate: check EntriesStatus, not this field.
+        "approval_allows_entries": entries_allowed,
     }
     tmp = health_file.with_suffix(f".{os.getpid()}.tmp")
     try:
@@ -148,6 +155,25 @@ def write_live_health(
         tmp.replace(health_file)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _approval_notices(center, approval: UnattendedApproval, now: datetime, notified: set[str]) -> None:
+    """Make the receipt's expiry visible through the existing local notifications, once per code."""
+    if approval.active(now):
+        if approval.expires_at - now > EXPIRY_WARNING_WINDOW or "EXPIRING" in notified:
+            return
+        code, severity = "UNATTENDED_APPROVAL_EXPIRING", "WARNING"
+    else:
+        if "EXPIRED" in notified:
+            return
+        code, severity = "UNATTENDED_APPROVAL_EXPIRED", "ERROR"
+    try:
+        center.record("APPLICATION", code, source_key="unattended-approval",
+                      severity=severity, at=now)
+    except (OSError, sqlite3.Error, ValueError):
+        log.warning("approval expiry notification unavailable")
+        return
+    notified.add("EXPIRED" if code.endswith("EXPIRED") else "EXPIRING")
 
 
 async def run_live_service(
@@ -164,8 +190,12 @@ async def run_live_service(
     clock=None,
     calendar: SessionCalendar | None = None,
     acceptance_scope: AcceptanceScope | None = None,
+    approval_override: UnattendedApproval | None = None,
 ) -> None:
-    """Run production live execution dispatcher loop with complete safety validation."""
+    """Run production live execution dispatcher loop with complete safety validation.
+
+    ``approval_override`` is a test seam only: production always loads the owner receipt.
+    """
     config.validate()
 
     # Fail closed on non-live configuration
@@ -235,6 +265,8 @@ async def run_live_service(
                 raise LocalAuthNotConfigured(
                     f"Unattended live execution is not approved: {exc}"
                 ) from exc
+    if client_override is not None:
+        unattended_approval = approval_override
     if acceptance_scope is not None and not single_entry:
         raise ConfigurationError("Acceptance scope requires single-entry mode")
 
@@ -303,6 +335,9 @@ async def run_live_service(
         write_live_health(managed_root, "STARTING", simulated=client_override is not None)
         log.info("Execution service initialized")
         last_result = None
+        notified: set[str] = set()
+        blocked_logged = False
+        entries_allowed = True
 
         try:
             while True:
@@ -319,13 +354,20 @@ async def run_live_service(
                 if any(os.path.lexists(managed_root / "state" / marker)
                        for marker in ("stop.request", "SWIFT_REVIEWED_STOP")):
                     break
-                if unattended_approval is not None and not unattended_approval.active(
-                        (clock or (lambda: datetime.now(UTC)))()):
-                    log.warning("Unattended live approval expired; stopping before new cycles")
-                    break
-                last_result = await dispatcher.run_once()
+                # Expiry blocks NEW entries only. The loop keeps running so exits, the
+                # 60-minute cancellation backstop and P/L housekeeping still execute.
+                now_utc = (clock or (lambda: datetime.now(UTC)))()
+                entries_allowed = unattended_approval is None or unattended_approval.active(now_utc)
+                if unattended_approval is not None:
+                    _approval_notices(dispatcher.notifications, unattended_approval, now_utc, notified)
+                if not entries_allowed and not blocked_logged:
+                    log.warning("Unattended live approval expired: new entries blocked; exits and "
+                                "cancellations continue until renewal or PauseEntries")
+                    blocked_logged = True
+                last_result = await dispatcher.run_once(entries_allowed=entries_allowed)
                 write_live_health(managed_root, "RUNNING", result=last_result,
-                                  simulated=client_override is not None)
+                                  simulated=client_override is not None,
+                                  entries_allowed=entries_allowed)
 
                 if single_entry:
                     import sqlite3
@@ -358,9 +400,11 @@ async def run_live_service(
                     pass
         except BaseException:
             write_live_health(managed_root, "FAILED", result=last_result,
-                              simulated=client_override is not None)
+                              simulated=client_override is not None,
+                              entries_allowed=entries_allowed)
             raise
         else:
             write_live_health(managed_root, "STOPPED", result=last_result,
-                              simulated=client_override is not None)
+                              simulated=client_override is not None,
+                              entries_allowed=entries_allowed)
             log.info("Execution service stopped")

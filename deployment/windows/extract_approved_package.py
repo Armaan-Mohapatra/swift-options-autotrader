@@ -92,6 +92,7 @@ def extract_approved_package(
                     "deployment/windows/common.ps1", "deployment/windows/manage.ps1",
                     "deployment/windows/service.ps1", "deployment/windows/secrets.ps1",
                     "deployment/windows/healthcheck.ps1",
+                    "deployment/windows/activate-live.ps1",
                     "deployment/windows/extract_approved_package.py"}
         if not required <= set(entries):
             raise RuntimeError("Release missing required installation scripts")

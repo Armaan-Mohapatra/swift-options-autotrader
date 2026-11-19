@@ -168,6 +168,37 @@ broker reconciliation, not a blind file swap: later broker writes or fills
 might have happened after the snapshot. If the journal is lost, keep live
 entries disabled and stop for manual reconciliation.
 
+## One-command activation (owner-operated)
+
+`deployment\windows\activate-live.ps1` performs every step of "Going live" below behind
+fail-closed gates. Run it yourself, in your own Windows session, as the user who enrolled
+OAuth. It is never run by an agent.
+
+```powershell
+& 'E:\SwiftAutoTrader\install-837aec03\scripts\activate-live.ps1' -InstallRoot 'E:\SwiftAutoTrader\install-837aec03' -DryRun   # review only
+& 'E:\SwiftAutoTrader\install-837aec03\scripts\activate-live.ps1' -InstallRoot 'E:\SwiftAutoTrader\install-837aec03' -ValidityDays 7
+```
+
+It checks candidate limits, journal and control-database integrity and migrations, credentials,
+the pinned account and (after paper is stopped) the read-only broker account. It then asks you to
+type the account's last four digits and `ENABLE LIVE TRADING`, takes a verified backup, stops paper,
+applies the LIVE settings and manifest, pauses entries, writes the receipt, re-validates, starts the
+live task and checks one healthy cycle and one dispatcher. Any failure restores PAPER, removes the
+receipt it wrote and restarts paper. Entries stay paused until you type `RESUME LIVE ENTRIES`.
+
+Stop new orders immediately: `manage.ps1 -InstallRoot <root> -Mode Live -Action PauseEntries`.
+
+### Receipt expiry and renewal
+
+The receipt lasts at most 7 days. Warnings appear in the local notifications
+(`UNATTENDED_APPROVAL_EXPIRING` within 24 hours, `UNATTENDED_APPROVAL_EXPIRED` after). At expiry the
+worker blocks NEW entries only; exits, the 60-minute cancellation backstop and P/L housekeeping keep
+running. A restart after expiry refuses to start. To renew, run the activation command again after
+stopping nothing by hand: it replaces the receipt, keeping the old one in its backup folder.
+
+Stale after-hours option quotes deny entries (`stale option quote`, 30-second rule) and are retried
+every cycle; nothing latches and no restart is needed when fresh quotes arrive.
+
 ## Going live (only on your explicit go)
 
 Do these yourself; no tool or agent should set them. First run `-Action PauseEntries` so the

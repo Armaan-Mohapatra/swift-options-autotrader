@@ -27,6 +27,7 @@ def prepared(tmp_path, *, extra=None):
         'deployment/windows/service.ps1': b'# synthetic',
         'deployment/windows/secrets.ps1': b'# synthetic',
         'deployment/windows/healthcheck.ps1': b'# synthetic',
+        'deployment/windows/activate-live.ps1': b'# synthetic',
         'deployment/windows/extract_approved_package.py': b'# synthetic',
     }
     files.update(extra or {})
@@ -46,7 +47,7 @@ def test_archive_verified_before_files_are_written(tmp_path):
     z,digest=prepared(tmp_path)
     target=tmp_path / 'isolated'
     assert module.extract_approved_package(
-        z,target,expected_sha256=digest,expected_commit=COMMIT) == 9
+        z,target,expected_sha256=digest,expected_commit=COMMIT) == 10
     assert (target/'deployment/windows/setup.ps1').read_bytes()==b'# synthetic only'
     assert not (target/'.env').exists()
 

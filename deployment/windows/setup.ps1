@@ -164,7 +164,7 @@ foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $source 'src') -Recurs
     New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
     Copy-Item -LiteralPath $file.FullName -Destination $target
 }
-foreach ($file in @('common.ps1','setup.ps1','manage.ps1','service.ps1','secrets.ps1','healthcheck.ps1','extract_approved_package.py')) {
+foreach ($file in @('common.ps1','setup.ps1','manage.ps1','service.ps1','secrets.ps1','healthcheck.ps1','activate-live.ps1','extract_approved_package.py')) {
     Copy-Item -LiteralPath (Join-Path $source ('deployment/windows/' + $file)) -Destination (Join-Path $root ('scripts\' + $file)) -Force
 }
 if (Test-Path -LiteralPath (Join-Path $source 'scripts\pin_account.py')) {

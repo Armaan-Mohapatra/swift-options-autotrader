@@ -21,6 +21,7 @@ from typing import Any
 
 from swift_autotrader.broker.live_broker import (
     LiveBroker,
+    LiveSafetyError,
     engine_kill_switch,
     entry_signal_gate,
 )
@@ -224,8 +225,12 @@ class LiveDispatcher:
         if buys > 1 or (rows and buys != 1):
             raise PermissionError("Supervised journal contains ambiguous ownership")
 
-    async def run_once(self) -> LiveDispatchResult:
-        """Execute one complete live cycle."""
+    async def run_once(self, *, entries_allowed: bool = True) -> LiveDispatchResult:
+        """Execute one complete live cycle.
+
+        ``entries_allowed=False`` (approval expired) still runs exits, watchdog
+        cancellations and P/L housekeeping; it only withholds new entries.
+        """
         self._verify_supervised_journal()
         now = self.clock()
         log.info("Starting live dispatch cycle at %s", now.isoformat())
@@ -252,6 +257,8 @@ class LiveDispatcher:
         # 2. Get pending Telegram updates and active positions
         matcher = SignalMatcher(self.db_path, self.channel_id)
         pending_entries, pending_followups, active = self._get_pending_and_active(now)
+        if not entries_allowed:
+            pending_entries = []
 
         target_revision_ids: list[int] | None = None
         if self.single_entry:
@@ -266,7 +273,7 @@ class LiveDispatcher:
             else:
                 entries = []
         else:
-            allow_entries = True
+            allow_entries = entries_allowed
             allowed_signal_ids = None
             entries = [p[2] for p in pending_entries]
 
@@ -378,7 +385,9 @@ class LiveDispatcher:
             try:
                 step()
             except Exception as exc:  # noqa: BLE001 - entries stay denied by the write preflight
-                log.warning("Broker housekeeping step %s failed: %s", step.__name__, type(exc).__name__)
+                # LiveSafetyError messages are fixed, non-secret reasons (e.g. "stale option quote").
+                reason = str(exc) if isinstance(exc, LiveSafetyError) else type(exc).__name__
+                log.warning("Broker housekeeping step %s failed: %s", step.__name__, reason)
 
     def _get_pending_and_active(
         self, now: datetime

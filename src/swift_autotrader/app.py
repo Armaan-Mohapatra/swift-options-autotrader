@@ -100,6 +100,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     pin_cmd = commands.add_parser("pin-account", help="Pin confirmed Robinhood MCP account locally using Windows DPAPI")
     pin_cmd.add_argument("--root", required=True, help="Managed install root directory")
     pin_cmd.add_argument("--account-number", required=True, help="Confirmed Robinhood account number")
+    activation = commands.add_parser(
+        "live-activation-check", help="Read-only LIVE activation gates; trades nothing")
+    activation.add_argument("--root", required=True)
+    activation.add_argument("--candidate", required=True)
+    activation.add_argument("--phase", choices=("pre", "post"), default="pre")
+    activation_diff = commands.add_parser(
+        "live-activation-diff", help="Show exact LIVE settings changes with values masked")
+    activation_diff.add_argument("--root", required=True)
+    activation_diff.add_argument("--candidate", required=True)
+    activation_receipt = commands.add_parser(
+        "live-activation-receipt", help="Write the owner receipt after local confirmation")
+    activation_receipt.add_argument("--root", required=True)
+    activation_receipt.add_argument("--candidate", required=True)
+    activation_receipt.add_argument("--account-last4", required=True)
+    activation_receipt.add_argument("--days", type=int, required=True)
+    activation_apply = commands.add_parser(
+        "live-activation-apply", help="Switch settings and manifest to LIVE after all gates pass")
+    activation_apply.add_argument("--root", required=True)
+    activation_apply.add_argument("--candidate", required=True)
+    account_check = commands.add_parser(
+        "live-account-check", help="Read-only broker check of the pinned account (get_accounts only)")
+    account_check.add_argument("--root", required=True)
     args = parser.parse_args(argv)
     if args.command == "mvp-startup-check":
         from swift_autotrader.mvp_review import startup_check
@@ -111,10 +133,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(review_status(frozenset(commands.choices)), sort_keys=True))
         return 0
     try:
-        if args.command in {"entries-pause", "entries-status", "entries-resume"}:
+        if args.command in {"entries-pause", "entries-status", "entries-resume",
+                            "live-activation-check", "live-activation-diff",
+                            "live-activation-receipt", "live-activation-apply",
+                            "live-account-check"}:
             # Emergency entry controls must work even when the live service's
             # environment is malformed or its broker credentials have expired.
             # This command only reads/writes the explicitly selected SQLite DB.
+            # Activation gates run BEFORE any LIVE environment exists, so they do not
+            # load one either.
             config = Settings(db_path=Path(os.environ.get(
                 "DB_PATH", "data/swift_autotrader.sqlite3")))
         else:
@@ -157,6 +184,63 @@ def main(argv: Sequence[str] | None = None) -> int:
                       "entries-resume": entry_control.resume_entries}[args.command]
             payload = {"status": "ENTRY_CONTROL", "mode": "CONTROL_ONLY",
                        "live_account_ending": "", **action(config.db_path)}
+        elif args.command == "live-activation-check":
+            from datetime import UTC, datetime
+
+            from swift_autotrader.live_activation import run_checks
+
+            report = run_checks(Path(args.root), Path(args.candidate), phase=args.phase,
+                                now=datetime.now(UTC))
+            print(json.dumps(report, sort_keys=True))
+            return 0 if report["passed"] else 2
+        elif args.command == "live-activation-diff":
+            from swift_autotrader.broker.mcp_local_auth import load_pinned_agentic_account
+            from swift_autotrader.live_activation import load_candidate, settings_diff
+
+            changes = settings_diff(Path(args.root), load_candidate(Path(args.candidate)))
+            pinned = load_pinned_agentic_account(Path(args.root))
+            payload = {"status": "DIFF", "account_ending": pinned.strip()[-4:], "changes": changes}
+        elif args.command == "live-activation-apply":
+            from swift_autotrader.live_activation import apply_live_config, load_candidate
+            from swift_autotrader.live_service import validate_live_install_root
+
+            root = validate_live_install_root(Path(args.root))
+            payload = apply_live_config(root, load_candidate(Path(args.candidate)))
+        elif args.command == "live-account-check":
+            from swift_autotrader.live_activation import readonly_account_check
+
+            try:
+                report = asyncio.run(readonly_account_check(Path(args.root)))
+            except Exception as exc:  # noqa: BLE001 - fail closed; report the class, never the text
+                report = {"passed": False, "reason": type(exc).__name__}
+            print(json.dumps(report, sort_keys=True))
+            return 0 if report["passed"] else 2
+        elif args.command == "live-activation-receipt":
+            import hmac
+            from datetime import UTC, datetime
+
+            from swift_autotrader.broker.mcp_local_auth import load_pinned_agentic_account
+            from swift_autotrader.live_activation import (
+                account_ending_matches,
+                build_receipt,
+                load_candidate,
+                write_receipt,
+            )
+            from swift_autotrader.live_service import validate_live_install_root
+
+            root = validate_live_install_root(Path(args.root))
+            candidate = load_candidate(Path(args.candidate))
+            pinned = load_pinned_agentic_account(root)
+            if not hmac.compare_digest(str(candidate.get("robinhood_mcp_account", "")).strip(),
+                                       pinned.strip()):
+                raise ConfigurationError("candidate account differs from the pinned account")
+            if not account_ending_matches(pinned, args.account_last4):
+                raise ConfigurationError("typed account ending does not match the pinned account")
+            now = datetime.now(UTC)
+            document = build_receipt(pinned, candidate, now, args.days)
+            write_receipt(root, document, candidate, now)
+            payload = {"status": "RECEIPT_WRITTEN", "expires_at": document["expires_at"],
+                       "validity_days": args.days}
         elif args.command == "live-journal-init":
             from swift_autotrader.broker.live_broker import LiveBroker
 

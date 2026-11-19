@@ -37,6 +37,7 @@ def _fixture_repo(tmp_path: Path) -> tuple[Path, str]:
         "deployment/windows/service.ps1",
         "deployment/windows/secrets.ps1",
         "deployment/windows/healthcheck.ps1",
+        "deployment/windows/activate-live.ps1",
         "deployment/windows/extract_approved_package.py",
     )
     for name in required:
