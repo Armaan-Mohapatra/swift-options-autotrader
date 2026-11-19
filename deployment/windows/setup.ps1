@@ -223,7 +223,15 @@ $python = Join-Path $release '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw 'Package environment could not be verified.'
 }
-Set-SwiftEnvironment -InstallRoot $root
+# An existing LIVE install keeps its LIVE mode through an upgrade (the same mode its
+# launcher uses); fresh and paper installs stay PAPER_ONLY.
+$installedMode = 'PAPER_ONLY'
+$installedSettings = Join-Path $root 'config\settings.json'
+if (Test-Path -LiteralPath $installedSettings -PathType Leaf) {
+    $installedCfg = Get-Content -LiteralPath $installedSettings -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($installedCfg.mode -eq 'LIVE') { $installedMode = 'LIVE' }
+}
+Set-SwiftEnvironment -InstallRoot $root -Mode $installedMode
 & $python -m swift_autotrader config-check
 if ($LASTEXITCODE -ne 0) { throw 'Fail-closed configuration validation failed.' }
 & $python -m swift_autotrader migrate

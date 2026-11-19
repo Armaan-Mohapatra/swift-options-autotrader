@@ -88,3 +88,11 @@ def test_setup_dry_run_works_under_windows_powershell_5_1(tmp_path):
     assert "empty string" not in r.stderr, r.stderr
     assert r.returncode == 0, r.stdout + r.stderr
     assert not (tmp_path / "inst").exists()
+
+
+def test_setup_upgrade_keeps_existing_live_mode():
+    setup = (WINDOWS / "setup.ps1").read_text(encoding="utf-8")
+    # A LIVE install must not be validated as PAPER_ONLY (that refused every LIVE upgrade).
+    assert "$installedMode = 'PAPER_ONLY'" in setup
+    assert "Set-SwiftEnvironment -InstallRoot $root -Mode $installedMode" in setup
+    assert "$installedCfg.mode -eq 'LIVE'" in setup
