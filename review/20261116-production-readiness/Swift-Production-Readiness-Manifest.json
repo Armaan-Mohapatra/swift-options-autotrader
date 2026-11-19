@@ -1,0 +1,77 @@
+{
+  "base_commit": "e1f48c5e78afcbb7e7857e06e84dbbae589ab17b",
+  "branch": "feat/final-production-readiness-20261116",
+  "scope": "final independent verification and production readiness review",
+  "files": {
+    "src/swift_autotrader/app.py": {
+      "bytes": 15033,
+      "sha256": "9861859c52cbceb795a14cd75f6633c55c47aaf8c7e66bc40b596b35ab9ec0b8",
+      "git_blob": "005bf3208b728526acb33dfb55006812a33b7f83"
+    },
+    "src/swift_autotrader/broker/base.py": {
+      "bytes": 1569,
+      "sha256": "6ea32188c0b03a6cdcc47d8d4225c3a486a3832466ac6ae9b08eb26a86beade7",
+      "git_blob": "1847329398f18b24100b3b686cc9693964363e1f"
+    },
+    "src/swift_autotrader/broker/review_validation.py": {
+      "bytes": 1327,
+      "sha256": "4260862a054b80d8ae249c2496d4603a412b37189d6691584b5158b162d69a5e",
+      "git_blob": "25e8beb36f099de97e40e8051d181b881fd60187"
+    },
+    "src/swift_autotrader/broker/robinhood_mcp.py": {
+      "bytes": 47084,
+      "sha256": "74fda9b47bc1f446d73c740b0ec53f4019e0c788178e54bf70453159d4a000dc",
+      "git_blob": "eaf6a7bf1ae9fd0a176db7cfdd0aa572ac179ec7"
+    },
+    "src/swift_autotrader/live_dispatch.py": {
+      "bytes": 9982,
+      "sha256": "159d8bda5d4296431e769075a495b2dad30d4c99dba05387363760db9efff4c4",
+      "git_blob": "7c7a37102a983968d05640ecee436a1825c6ae78"
+    },
+    "src/swift_autotrader/live_service.py": {
+      "bytes": 10902,
+      "sha256": "2fa49bf7f21a1f96335ec24be50702d6b2739ba94eb7873beef12552d4d95546",
+      "git_blob": "f043acb481e67d2ddf34cad7eecb595a4103c188"
+    },
+    "src/swift_autotrader/orders/engine.py": {
+      "bytes": 43259,
+      "sha256": "30998c1d5493ee492570fd1ead8af41d52b35848db2d07e8249b3c6deee5a79c",
+      "git_blob": "862068d391632bcb156ddfe16ff01ef7b2b6b669"
+    },
+    "src/swift_autotrader/orders/state_machine.py": {
+      "bytes": 1916,
+      "sha256": "5de7aeb304c7ee9eaa87002dbc7208f7fbfd028a050fedb7a52ac83823f16b44",
+      "git_blob": "5d4a58fbe03aa94f4b21ec65e40fc61943230b98"
+    },
+    "src/swift_autotrader/signals/lineage.py": {
+      "bytes": 21978,
+      "sha256": "cd63ac1934683b051353cc0ce3dbcab086b042f6dd8a19e7054235c3607604e6",
+      "git_blob": "bb0aee6bf200e849b31f0951f4b4c461e2088f62"
+    },
+    "src/swift_autotrader/supervisor.py": {
+      "bytes": 11351,
+      "sha256": "8b33d007e1b66c16b5c524b9d5139d142e1978a134ff598d7d272dc45652ac5c",
+      "git_blob": "570ff12c684e4ab830286532e161280eaf6cbc02"
+    },
+    "tests/unit/test_delayed_exits_and_risk.py": {
+      "bytes": 12492,
+      "sha256": "e497387aea2defa436537f86e7a360cd86d4609fd5d5e9795d5e9524d89952ba",
+      "git_blob": "50c654c20a0a6fbabe335ec37cbf01dc7b55c77b"
+    },
+    "tests/unit/test_live_service.py": {
+      "bytes": 5909,
+      "sha256": "1cd255ee979f742602daa7e2146b8fd28899d2f532113b208347d141c6dc33e0",
+      "git_blob": "9454fb98b2c68a96d02d5823b94c92d696ca206b"
+    },
+    "tests/unit/test_review_validation.py": {
+      "bytes": 3339,
+      "sha256": "1b30981599c5de22d7da45d081b566cda42b9f758b1d025fa92c404a63927064",
+      "git_blob": "dab9bb0629930c10b42403d071e3e12902dbabd7"
+    },
+    "tests/unit/test_robinhood_response_compatibility.py": {
+      "bytes": 14136,
+      "sha256": "1165436e3ced0d8bcbea42df4087880907977972a39db18efff99eae8d29bf32",
+      "git_blob": "b962167e1c4b37cb782226241273461a785eb355"
+    }
+  }
+}

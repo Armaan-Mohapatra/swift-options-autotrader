@@ -1,0 +1,1480 @@
+{
+  "dataset": "synthetic only; not real Swift channel or market data",
+  "metrics_caveat": "in-sample fixtures; no real-world parser accuracy inferred",
+  "sample_count": 81,
+  "intent_agreement_count": 81,
+  "expected_counts": {
+    "CLOSE_100_PERCENT": 16,
+    "ENTRY": 20,
+    "IGNORE_NON_OPTION": 14,
+    "METADATA_ONLY": 16,
+    "REVIEW_REQUIRED": 15
+  },
+  "observed_counts": {
+    "CLOSE_100_PERCENT": 16,
+    "ENTRY": 20,
+    "IGNORE_NON_OPTION": 14,
+    "METADATA_ONLY": 16,
+    "REVIEW_REQUIRED": 15
+  },
+  "cases": [
+    {
+      "fixture_id": "entry-01",
+      "synthetic_source_message_id": 1,
+      "synthetic_text": "SPY 680C 11/13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "entry-02",
+      "synthetic_source_message_id": 2,
+      "synthetic_text": "BUY SPY 680C 11/13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "entry-03",
+      "synthetic_source_message_id": 3,
+      "synthetic_text": "BTO SPY 680C 11/13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "entry-04",
+      "synthetic_source_message_id": 4,
+      "synthetic_text": "OPEN SPY 680C 11/13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "entry-05",
+      "synthetic_source_message_id": 5,
+      "synthetic_text": "SPY 680C 11/13/2026 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "2026-11-13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "entry-06",
+      "synthetic_source_message_id": 6,
+      "synthetic_text": "SPY 680CALL 11/13/26 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "2026-11-13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "entry-07",
+      "synthetic_source_message_id": 7,
+      "synthetic_text": "SPY 680 C 2026-11-13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "2026-11-13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "entry-08",
+      "synthetic_source_message_id": 8,
+      "synthetic_text": "spy 680c 11/13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "entry-09",
+      "synthetic_source_message_id": 9,
+      "synthetic_text": "SPY 680C 11/13 @ $1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "entry-10",
+      "synthetic_source_message_id": 10,
+      "synthetic_text": "SPY   680C   11/13   @   1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "lotto-01",
+      "synthetic_source_message_id": 11,
+      "synthetic_text": "SPY LOTTO 680C 11/13 @ .95",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "0.95",
+        "swift_reported_average": null,
+        "trade_category": "LOTTO",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "lotto-02",
+      "synthetic_source_message_id": 12,
+      "synthetic_text": "LOTTO SPY 680C 11/13 @ .95",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "0.95",
+        "swift_reported_average": null,
+        "trade_category": "LOTTO",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "lotto-03",
+      "synthetic_source_message_id": 13,
+      "synthetic_text": "BUY SPY LOTTO 680C 11/13 @ .95",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "0.95",
+        "swift_reported_average": null,
+        "trade_category": "LOTTO",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "lotto-04",
+      "synthetic_source_message_id": 14,
+      "synthetic_text": "SPY LOTTO 680C 11/13 @ 0.95",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "0.95",
+        "swift_reported_average": null,
+        "trade_category": "LOTTO",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "put-01",
+      "synthetic_source_message_id": 15,
+      "synthetic_text": "SPY 680P 11/13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "PUT",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "put-02",
+      "synthetic_source_message_id": 16,
+      "synthetic_text": "SPY 680PUT 11/13/2026 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "PUT",
+        "strike": "680",
+        "expiration_hint": "2026-11-13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "put-03",
+      "synthetic_source_message_id": 17,
+      "synthetic_text": "QQQ 500P 2026-11-13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "QQQ",
+        "right": "PUT",
+        "strike": "500",
+        "expiration_hint": "2026-11-13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "STANDARD",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "othercategory-01",
+      "synthetic_source_message_id": 18,
+      "synthetic_text": "SPY SWING 680C 11/13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "SWING",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "othercategory-02",
+      "synthetic_source_message_id": 19,
+      "synthetic_text": "SPY SCALP 680C 11/13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "SCALP",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "othercategory-03",
+      "synthetic_source_message_id": 20,
+      "synthetic_text": "SPY DAYTRADE 680C 11/13 @ 1.20",
+      "expected_intent": "ENTRY",
+      "observed": {
+        "intent": "ENTRY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": "1.20",
+        "swift_reported_average": null,
+        "trade_category": "DAYTRADE",
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "add-01",
+      "synthetic_source_message_id": 21,
+      "synthetic_text": "SPY ADD",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "add-02",
+      "synthetic_source_message_id": 22,
+      "synthetic_text": "SPY adding more",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "add-03",
+      "synthetic_source_message_id": 23,
+      "synthetic_text": "SPY averaging down",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "add-04",
+      "synthetic_source_message_id": 24,
+      "synthetic_text": "SPY scale in",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "add-05",
+      "synthetic_source_message_id": 25,
+      "synthetic_text": "SPY ADDED",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "add-06",
+      "synthetic_source_message_id": 26,
+      "synthetic_text": "SPY 680C 11/13 ADD",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "add-07",
+      "synthetic_source_message_id": 27,
+      "synthetic_text": "SPY adding more, new avg .95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "add-08",
+      "synthetic_source_message_id": 28,
+      "synthetic_text": "SPY add NEW AVERAGE .95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "average-01",
+      "synthetic_source_message_id": 29,
+      "synthetic_text": "SPY NEW AVG .95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "average-02",
+      "synthetic_source_message_id": 30,
+      "synthetic_text": "SPY new average 0.95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "average-03",
+      "synthetic_source_message_id": 31,
+      "synthetic_text": "SPY revised avg 0.95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "average-04",
+      "synthetic_source_message_id": 32,
+      "synthetic_text": "SPY revised average 0.95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "average-05",
+      "synthetic_source_message_id": 33,
+      "synthetic_text": "SPY avg now .95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "average-06",
+      "synthetic_source_message_id": 34,
+      "synthetic_text": "SPY 680C 11/13 NEW AVERAGE .95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "average-07",
+      "synthetic_source_message_id": 35,
+      "synthetic_text": "NEW AVG .95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "average-08",
+      "synthetic_source_message_id": 36,
+      "synthetic_text": "SPY NEW AVG: 0.95",
+      "expected_intent": "METADATA_ONLY",
+      "observed": {
+        "intent": "METADATA_ONLY",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": "0.95",
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-01",
+      "synthetic_source_message_id": 37,
+      "synthetic_text": "SPY SOLD HALF",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-02",
+      "synthetic_source_message_id": 38,
+      "synthetic_text": "SPY SOLD 1/3",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-03",
+      "synthetic_source_message_id": 39,
+      "synthetic_text": "SPY TRIM",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-04",
+      "synthetic_source_message_id": 40,
+      "synthetic_text": "SPY TRIMMED",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-05",
+      "synthetic_source_message_id": 41,
+      "synthetic_text": "SPY SCALED OUT",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-06",
+      "synthetic_source_message_id": 42,
+      "synthetic_text": "SPY RUNNERS OUT",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-07",
+      "synthetic_source_message_id": 43,
+      "synthetic_text": "SPY ALL OUT",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-08",
+      "synthetic_source_message_id": 44,
+      "synthetic_text": "SPY SOLD ALL",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-09",
+      "synthetic_source_message_id": 45,
+      "synthetic_text": "SPY SOLD 25%",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-10",
+      "synthetic_source_message_id": 46,
+      "synthetic_text": "SPY FULL EXIT",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-11",
+      "synthetic_source_message_id": 47,
+      "synthetic_text": "SPY CLOSED ALL",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-12",
+      "synthetic_source_message_id": 48,
+      "synthetic_text": "SPY 680C 11/13 SOLD HALF",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": "CALL",
+        "strike": "680",
+        "expiration_hint": "MM/DD:11/13",
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-13",
+      "synthetic_source_message_id": 49,
+      "synthetic_text": "ALL OUT",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-14",
+      "synthetic_source_message_id": 50,
+      "synthetic_text": "RUNNERS OUT",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-15",
+      "synthetic_source_message_id": 51,
+      "synthetic_text": "SPY OUT OF IT",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "close-16",
+      "synthetic_source_message_id": 52,
+      "synthetic_text": "SPY SOLD 1/2",
+      "expected_intent": "CLOSE_100_PERCENT",
+      "observed": {
+        "intent": "CLOSE_100_PERCENT",
+        "underlying": "SPY",
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": null
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-01",
+      "synthetic_source_message_id": 53,
+      "synthetic_text": "BUY 20 SHARES SPY",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "NON_OPTION_ASSET"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-02",
+      "synthetic_source_message_id": 54,
+      "synthetic_text": "BUY SPY STOCK ONLY",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "NON_OPTION_ASSET"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-03",
+      "synthetic_source_message_id": 55,
+      "synthetic_text": "long SPY shares",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "NON_OPTION_ASSET"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-04",
+      "synthetic_source_message_id": 56,
+      "synthetic_text": "BTC crypto setup",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "NON_OPTION_ASSET"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-05",
+      "synthetic_source_message_id": 57,
+      "synthetic_text": "QQQ looks strong",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "COMMENTARY"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-06",
+      "synthetic_source_message_id": 58,
+      "synthetic_text": "good morning everyone",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "COMMENTARY"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-07",
+      "synthetic_source_message_id": 59,
+      "synthetic_text": "",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "EMPTY"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-08",
+      "synthetic_source_message_id": 60,
+      "synthetic_text": "  ",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "EMPTY"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-09",
+      "synthetic_source_message_id": 61,
+      "synthetic_text": "FUTURES ES levels",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "NON_OPTION_ASSET"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-10",
+      "synthetic_source_message_id": 62,
+      "synthetic_text": "SPOT BUY ETHEREUM",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "NON_OPTION_ASSET"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-11",
+      "synthetic_source_message_id": 63,
+      "synthetic_text": "SPY looking bullish into tomorrow",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "COMMENTARY"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-12",
+      "synthetic_source_message_id": 64,
+      "synthetic_text": "SPY puts seem pricey",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "COMMENTARY"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-13",
+      "synthetic_source_message_id": 65,
+      "synthetic_text": "No signal yet, watch earnings",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "COMMENTARY"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "ignore-14",
+      "synthetic_source_message_id": 66,
+      "synthetic_text": "SPY HOLD",
+      "expected_intent": "IGNORE_NON_OPTION",
+      "observed": {
+        "intent": "IGNORE_NON_OPTION",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "COMMENTARY"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-01",
+      "synthetic_source_message_id": 67,
+      "synthetic_text": "SPY 680C 11/13 @",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "UNRECOGNIZED_OPTION_SYNTAX"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-02",
+      "synthetic_source_message_id": 68,
+      "synthetic_text": "SPY 680C 11/13 @ -1.20",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "UNRECOGNIZED_OPTION_SYNTAX"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-03",
+      "synthetic_source_message_id": 69,
+      "synthetic_text": "SPY 680C 11/32 @ 1.20",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "INVALID_ENTRY_VALUES"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-04",
+      "synthetic_source_message_id": 70,
+      "synthetic_text": "SPY 680C 11/13 @ 0",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "INVALID_ENTRY_VALUES"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-05",
+      "synthetic_source_message_id": 71,
+      "synthetic_text": "SPY 680C 11/13 @ 1.20 and QQQ 500C 11/13 @ 1.10",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "MULTIPLE_CONTRACTS"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-06",
+      "synthetic_source_message_id": 72,
+      "synthetic_text": "SPY correction: 680C to 681C",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "CORRECTION_REVIEW"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-07",
+      "synthetic_source_message_id": 73,
+      "synthetic_text": "SPY SOLD HALF and ADD",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "CONFLICTING_ACTIONS"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-08",
+      "synthetic_source_message_id": 74,
+      "synthetic_text": "SPY NEW AVG",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "MALFORMED_AVERAGE"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-09",
+      "synthetic_source_message_id": 75,
+      "synthetic_text": "SPY 680C @ 1.20",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "UNRECOGNIZED_OPTION_SYNTAX"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-10",
+      "synthetic_source_message_id": 76,
+      "synthetic_text": "SPY 680C 11/13 @ 1.20 maybe?",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "UNRECOGNIZED_OPTION_SYNTAX"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-11",
+      "synthetic_source_message_id": 77,
+      "synthetic_text": "SPY new average -0.95",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "MALFORMED_AVERAGE"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-12",
+      "synthetic_source_message_id": 78,
+      "synthetic_text": "SPY ALL OUT NEW AVG .95",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "CONFLICTING_ACTIONS"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-13",
+      "synthetic_source_message_id": 79,
+      "synthetic_text": "SPY LOTTO 680C 11/13 no price",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "UNRECOGNIZED_OPTION_SYNTAX"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-14",
+      "synthetic_source_message_id": 80,
+      "synthetic_text": "BUY SPY CALLS ASAP",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "UNRECOGNIZED_OPTION_SYNTAX"
+      },
+      "intent_match": true
+    },
+    {
+      "fixture_id": "review-15",
+      "synthetic_source_message_id": 81,
+      "synthetic_text": "SPY 680C 11/13 @ 1.20 QQQ 500P 11/13",
+      "expected_intent": "REVIEW_REQUIRED",
+      "observed": {
+        "intent": "REVIEW_REQUIRED",
+        "underlying": null,
+        "right": null,
+        "strike": null,
+        "expiration_hint": null,
+        "original_premium": null,
+        "swift_reported_average": null,
+        "trade_category": null,
+        "reason": "MULTIPLE_CONTRACTS"
+      },
+      "intent_match": true
+    }
+  ]
+}
