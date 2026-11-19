@@ -27,6 +27,15 @@ avoid loading potentially broken live settings or OAuth credentials. Check
 - `entries-resume` refuses while an emergency stop is active; reset that manually.
 - Unreadable control data counts as blocked.
 
+### Mobile kill switch (optional; owner-enrolled)
+
+Create a private Telegram bot yourself, then run `.\deployment\windows\secrets.ps1 -Action KillSwitchBotToken`
+(secure prompt; stored with user DPAPI as `secrets\kill_switch_bot_token.dpapi`) and add
+`"kill_switch_chat_id": <your private chat id>` to the LIVE settings. The LIVE launcher then enables
+`kill-switch-listener` (`/status /pause /resume /cancel /stop /flatten`; `/flatten` needs a confirmation
+token; only that chat is allowed). The chat may not be the Swift source channel. Without both pieces the
+listener does not run and the local `PauseEntries` command remains the kill switch.
+
 ## Live rehearsal (real MCP, writes forced off)
 
 Rehearsal connects with the already-enrolled token, and for each recorded ENTRY signal

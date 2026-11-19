@@ -122,7 +122,9 @@ function Set-SwiftEnvironment {
         'live_journal_path', 'telegram_enabled', 'telegram_channel_id', 'telegram_api_id',
         'paper_dispatch_enabled', 'paper_data_source', 'paper_max_premium_usd',
         'paper_max_contracts', 'paper_max_exposure_usd', 'paper_max_open_signals',
-        'paper_max_daily_net_loss_usd', 'status_notifications_enabled', 'status_chat_id'
+        'paper_max_daily_net_loss_usd', 'status_notifications_enabled', 'status_chat_id',
+        'kill_switch_chat_id', 'max_contracts_per_signal', 'max_daily_loss_usd',
+        'max_premium_per_signal_usd', 'log_level', 'robinhood_mcp_account'
     )) {
         if ($null -eq $cfg.PSObject.Properties[$name]) {
             $cfg | Add-Member -NotePropertyName $name -NotePropertyValue $null
@@ -281,6 +283,26 @@ function Set-SwiftEnvironment {
             throw 'Live execution requires a configured ROBINHOOD_MCP_ACCOUNT.'
         }
         $env:ROBINHOOD_MCP_ACCOUNT = [string]$cfg.robinhood_mcp_account
+
+        # Optional mobile kill switch: owner-enrolled bot token (DPAPI) + allowlisted private chat.
+        $killTokenFile = Join-Path $InstallRoot 'secrets\kill_switch_bot_token.dpapi'
+        if ($null -ne $cfg.kill_switch_chat_id -and (Test-Path -LiteralPath $killTokenFile -PathType Leaf)) {
+            if ([string]$cfg.kill_switch_chat_id -eq [string]$cfg.telegram_channel_id) {
+                throw 'Kill switch chat cannot be the Swift source channel.'
+            }
+            $killSecret = Get-Content -LiteralPath $killTokenFile -Raw -Encoding UTF8 | ConvertTo-SecureString
+            $killBstr = [IntPtr]::Zero
+            try {
+                $killBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($killSecret)
+                $env:KILL_SWITCH_TELEGRAM_BOT_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($killBstr)
+            } finally {
+                if ($killBstr -ne [IntPtr]::Zero) {
+                    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($killBstr)
+                }
+            }
+            $env:KILL_SWITCH_TELEGRAM_CHAT_ID = [string]$cfg.kill_switch_chat_id
+            $env:KILL_SWITCH_ENABLED = 'true'
+        }
 
         if ($null -eq $cfg.telegram_channel_id -or $null -eq $cfg.telegram_api_id) {
             throw 'Telegram channel and API ID must be configured for live execution.'

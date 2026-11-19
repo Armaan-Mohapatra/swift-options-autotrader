@@ -63,3 +63,26 @@ Live writes need all of: `settings.json` + `deployment.json` LIVE, the pinned ac
 `data\live.sqlite3` and journal, **and** the owner's expiring
 `secrets\unattended-live-approval.json` (v2, <= 7 days, caps >= configured). The receipt is not
 created by this deployment. See `docs/LIVE_OPERATIONS.md` "Going live".
+
+## 6. Windows integration defects found while preparing the live worker (fixed here)
+- `service.ps1 -Action RegisterLiveTask` threw `ValidateSetFailure`: its local `$action` overwrote the
+  validated `$Action` parameter (PowerShell names are case-insensitive). Renamed to `$taskAction`; the
+  `SwiftAutoTrader-Live-Local` task is now registered **Disabled** (it cannot start at logon until armed).
+- `secrets.ps1` wrote DPAPI blobs with a trailing CRLF that `ConvertTo-SecureString` rejects (the working
+  production blob has none): now `-NoNewline`.
+- The mobile kill-switch listener (supervisor already supports it) was never given its token/chat by the
+  Windows launcher. Added optional wiring: `secrets.ps1 -Action KillSwitchBotToken` (DPAPI) plus
+  `kill_switch_chat_id` in the LIVE settings; the chat may not be the Swift source channel. Verified in a
+  synthetic LIVE root (enabled / absent / refused).
+- The LIVE settings loader threw under StrictMode when optional keys (`max_contracts_per_signal`,
+  `max_daily_loss_usd`, ...) were absent although defaults exist; they are now in the in-memory optional list.
+- `data\live.sqlite3` (the LIVE control DB, separate from the paper DB) shipped with entries ALLOWED; it was
+  set to BLOCKED (`OPERATOR_PAUSE`) and must stay blocked until the owner resumes it.
+- Legacy tasks `SwiftAutoTrader-PaperPilot-Local` and `SwiftAutoTrader-ReceiveOnly-Local` (older install root)
+  and the unrelated `SwiftTradesBot` are still At-logon/Ready. The two Swift ones carry their own guard that
+  throws when another `SwiftAutoTrader*` task exists (both last ended with exit code 2 = blocked); they were
+  not modified. The owner should disable them to remove any doubt. `SwiftTradesBot` was not inspected further.
+- Task Scheduler startup delay (previously observed 212 s) is a system-wide logon condition. The operational
+  history log is disabled so it could not be re-measured without a reboot; no system setting was changed.
+  The service already restarts workers with bounded backoff; expect trading to resume up to ~4 minutes
+  after an interactive logon (DPAPI requires the logged-on user).

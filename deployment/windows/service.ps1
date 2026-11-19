@@ -18,7 +18,8 @@ switch ($Action) {
         $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
         if ($null -ne $existing) { throw 'Scheduled live task already exists. Review before replacing it.' }
         $runner = Join-Path $root 'scripts\service.ps1'
-        $action = New-ScheduledTaskAction -Execute (Join-Path $PSHOME 'powershell.exe') `
+        # Not $action: variable names are case-insensitive and would overwrite the validated $Action parameter.
+        $taskAction = New-ScheduledTaskAction -Execute (Join-Path $PSHOME 'powershell.exe') `
             -Argument ('-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' +
                        $runner + '" -InstallRoot "' + $root + '" -Mode Live')
         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -29,7 +30,7 @@ switch ($Action) {
             -DontStopIfGoingOnBatteries
         $principal = New-ScheduledTaskPrincipal -UserId $identity `
             -LogonType Interactive -RunLevel Limited
-        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+        Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $trigger `
             -Settings $settings -Principal $principal | Out-Null
         [ordered]@{ status = 'REGISTERED_LIVE_TASK'; task_name = $taskName; install_root = $root } | ConvertTo-Json
         return
@@ -69,6 +70,7 @@ switch ($Action) {
                 & $python -m swift_autotrader supervisor --root $root
                 exit $LASTEXITCODE
             } finally {
+                Remove-Item Env:KILL_SWITCH_TELEGRAM_BOT_TOKEN -ErrorAction SilentlyContinue
                 Remove-Item Env:TELEGRAM_API_HASH -ErrorAction SilentlyContinue
                 Remove-Item Env:TELEGRAM_STATUS_BOT_TOKEN -ErrorAction SilentlyContinue
             }

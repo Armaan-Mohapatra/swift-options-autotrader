@@ -3,7 +3,7 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('TelegramApiHash','StatusBotToken','ImportTelegramSession')]
+    [ValidateSet('TelegramApiHash','StatusBotToken','KillSwitchBotToken','ImportTelegramSession')]
     [string]$Action,
     [string]$InstallRoot = '',
     [string]$SessionFile = '',
@@ -39,15 +39,17 @@ if ($Action -eq 'ImportTelegramSession') {
         if ($LASTEXITCODE -ne 0) { throw 'Session file ACL could not be restricted.' }
     }
 } else {
-    $filename = if ($Action -eq 'TelegramApiHash') {
-        'telegram_api_hash.dpapi'
-    } else { 'status_bot_token.dpapi' }
+    $filename = switch ($Action) {
+        'TelegramApiHash' { 'telegram_api_hash.dpapi' }
+        'KillSwitchBotToken' { 'kill_switch_bot_token.dpapi' }
+        default { 'status_bot_token.dpapi' }
+    }
     $target = Join-Path $secrets $filename
     if ($PSCmdlet.ShouldProcess($target, 'Encrypt manually entered secret with user DPAPI')) {
         $value = Read-Host "Enter $Action (kept on this computer)" -AsSecureString
         try {
             ConvertFrom-SecureString -SecureString $value |
-                Set-Content -LiteralPath $target -Encoding Ascii
+                Set-Content -LiteralPath $target -Encoding Ascii -NoNewline  # a trailing CRLF breaks ConvertTo-SecureString
         } finally {
             $value.Dispose()
         }
