@@ -254,7 +254,9 @@ try {
         if (Test-Path -LiteralPath $healthFile -PathType Leaf) {
             $health = Get-Content -LiteralPath $healthFile -Raw -Encoding UTF8 | ConvertFrom-Json
             $asOf = [DateTimeOffset]::Parse([string]$health.as_of_utc).UtcDateTime
-            if ($asOf -ge $startedAt.UtcDateTime) {
+            # Both operands are UTC DateTime values; DateTime has no UtcDateTime member.
+            # A missing property can produce a null comparison and false startup verification.
+            if ($asOf -ge $startedAt) {
                 if ($health.status -eq 'FAILED') { throw 'REFUSED: the live worker reported FAILED at startup. See logs\supervisor.log.' }
                 if ($health.mode -eq 'LIVE' -and $health.status -in @('RUNNING','DEGRADED') -and $null -ne $health.last_dispatch_status) {
                     $verified = $true
