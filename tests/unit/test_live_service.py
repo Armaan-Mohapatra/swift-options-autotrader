@@ -176,13 +176,13 @@ NOW = datetime(2026, 11, 17, 15, 0, tzinfo=UTC)
 
 def _receipt(account: str, **overrides) -> dict:
     doc = {
-        "version": 2,
+        "version": 3,
         "account_sha256": hashlib.sha256(account.encode()).hexdigest(),
         "issued_at": (NOW - timedelta(hours=1)).isoformat(),
         "expires_at": (NOW + timedelta(days=2)).isoformat(),
         "max_contracts_per_signal": 1,
         "max_premium_per_signal_usd": "999",
-        "max_daily_loss_usd": "750",
+        "daily_loss_policy": "NO_DAILY_LOSS_STOP",
     }
     doc.update(overrides)
     return doc
@@ -204,7 +204,7 @@ def test_unattended_receipt_accepts_exact_binding(tmp_path, test_env):
 @pytest.mark.parametrize("change", [
     {"account_sha256": "0" * 64},
     {"version": 1},  # v1 carried an exposure cap; it is no longer accepted
-    {"version": 3},
+    {"version": 2},  # v2's daily loss promise cannot authorize v3 policy
     {"max_total_exposure_usd": "9999"},  # retired v1 field is refused, not ignored
     {"expires_at": (NOW - timedelta(seconds=1)).isoformat()},
     {"issued_at": (NOW + timedelta(minutes=5)).isoformat()},
@@ -212,7 +212,7 @@ def test_unattended_receipt_accepts_exact_binding(tmp_path, test_env):
      "expires_at": (NOW + timedelta(days=7)).isoformat()},
     {"expires_at": "2026-11-19T00:00:00"},
     {"max_premium_per_signal_usd": "500"},
-    {"max_daily_loss_usd": "100"},
+    {"daily_loss_policy": "INHERIT"},
     {"max_contracts_per_signal": 0},
     {"max_premium_per_signal_usd": 999},
     {"extra": True},
@@ -228,7 +228,7 @@ def test_unattended_receipt_rejections(tmp_path, test_env, change):
 def test_unattended_receipt_rejects_missing_duplicate_and_garbage(tmp_path, test_env):
     _, settings, _ = test_env
     acct = settings.robinhood_mcp_account
-    for doc in ('{"version": 2, "version": 2}', "not json", "[]"):
+    for doc in ('{"version": 3, "version": 3}', "not json", "[]"):
         with pytest.raises(UnattendedApprovalError):
             load_unattended_approval(_write(tmp_path / "r.json", doc), account=acct,
                                      settings=settings, now=NOW)
