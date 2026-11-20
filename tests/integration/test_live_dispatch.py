@@ -227,7 +227,7 @@ def test_live_dispatch_watchdog_cancellation(dispatch_rig: tuple) -> None:
 def test_live_dispatch_risk_ceilings_from_settings(dispatch_rig: tuple) -> None:
     """T1-F5-05: Dispatcher accurately inherits configured risk limits from Settings."""
     _, _, _, _, _, dispatcher = dispatch_rig
-    assert dispatcher.limits.daily_net_loss_usd == Decimal("500")
+    assert dispatcher.limits.daily_net_loss_usd is None  # LIVE policy; PAPER still has a cap
     # Owner contract: no trade-count or aggregate-exposure cap.
     assert dispatcher.limits.open_signal_count is None
     assert dispatcher.limits.total_exposure_usd is None
@@ -342,8 +342,8 @@ def test_t3_live_dispatch_cumulative_loss_ceiling_blocks_new_entries(dispatch_ri
     assert len(mcp.orders) == 1
 
 
-def test_t3_live_dispatch_daily_loss_limit_blocks_new_entries(dispatch_rig: tuple) -> None:
-    """T3-13: Realized losses exceeding max_daily_loss_usd halt new entry orders."""
+def test_t3_live_dispatch_daily_loss_does_not_block_new_entries(dispatch_rig: tuple) -> None:
+    """LIVE has no daily stop; losing trades alone must not block fresh entries."""
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
 
     # Ingest and fill entry with 8.00 limit
@@ -377,18 +377,16 @@ def test_t3_live_dispatch_daily_loss_limit_blocks_new_entries(dispatch_rig: tupl
     ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1003)
     res_new = asyncio.run(dispatcher.run_once())
 
-    # Must be blocked by daily loss limit
-    assert res_new.entry_orders_submitted == 0
-    assert len(mcp.orders) == 2  # Only the original buy and sell
-
+    # Daily P/L may still be recorded for reporting, but is no longer an entry veto.
     with sqlite3.connect(str(db_path)) as db:
         decisions = db.execute(
             "SELECT outcome, reason FROM paper_engine_decisions ORDER BY decided_at_utc DESC"
         ).fetchall()
-        assert decisions[0][0] == "BLOCKED"
-        assert decisions[0][1] == "DAILY_LOSS_CEILING_REACHED"
-    # The broker-side realized+unrealized latch is independently engaged and persisted.
-    assert dispatcher.live_broker.refresh_daily_risk() is True
+    assert all(reason not in ("DAILY_LOSS_CEILING_REACHED", "DAILY_PNL_UNVERIFIED")
+               for _outcome, reason in decisions)
+    assert dispatcher.live_broker.refresh_daily_risk() is False
+    # A different safety gate may refuse the attempt; daily P/L must never be its cause.
+    assert res_new.status in ("LIVE_CYCLE_COMPLETED", "MARKET_DATA_UNAVAILABLE")
 
 
 def test_t3_live_dispatch_paused_engine_skips_entries(dispatch_rig: tuple) -> None:
