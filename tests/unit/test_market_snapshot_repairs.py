@@ -178,3 +178,33 @@ def test_quote_stale_at_response_is_still_rejected():
     broker = _quote_broker(NOW - timedelta(seconds=14))  # 24 s old when it arrived
     with pytest.raises(MCPContractError, match="stale or crossed"):
         asyncio.run(RobinhoodMCPBroker.quote(broker, inst, max_age_seconds=15, clock=lambda: response))
+
+
+def test_compatible_schema_is_discovered_once_across_cycles():
+    broker = FakeBroker()
+    calls = []
+
+    async def discover():
+        calls.append(1)
+        return SimpleNamespace(status="READ_ONLY_SCHEMA_OK")
+
+    broker.discover = discover
+    provider = MCPReadOnlyOptionData(broker, calendar=OpenCalendar())
+    asyncio.run(provider.snapshot([parse_message(ENTRY_6)], [], NOW))
+    asyncio.run(provider.snapshot([parse_message(ENTRY_6)], [], NOW))
+    assert len(calls) == 1
+
+
+def test_incompatible_schema_is_not_cached():
+    broker = FakeBroker()
+    statuses = iter(["READ_ONLY_SCHEMA_INCOMPLETE", "READ_ONLY_SCHEMA_OK"])
+
+    async def discover():
+        return SimpleNamespace(status=next(statuses))
+
+    broker.discover = discover
+    provider = MCPReadOnlyOptionData(broker, calendar=OpenCalendar())
+    with pytest.raises(MarketEvidenceUnavailable, match="incompatible"):
+        asyncio.run(provider.snapshot([parse_message(ENTRY_6)], [], NOW))
+    snap = asyncio.run(provider.snapshot([parse_message(ENTRY_6)], [], NOW))
+    assert CONTRACT in snap.quotes

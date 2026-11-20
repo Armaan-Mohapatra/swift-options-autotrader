@@ -7,6 +7,7 @@ exchange-calendar session. No undocumented fallback or fake depth is allowed.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -83,9 +84,22 @@ class MCPReadOnlyOptionData:
         self.calendar = calendar
         # Same clock as the dispatcher; quote age is judged at response time.
         self.clock = clock or (lambda: datetime.now(UTC))
+        self._schema_ok_at: float | None = None
         if not 1 <= contracts_per_signal <= 100:
             raise ValueError("Unapproved paper review quantity")
         self.contracts_per_signal = contracts_per_signal
+
+    async def _require_schema(self) -> None:
+        """Tool discovery takes 5-11 s at the open; re-check the schema every 15 minutes.
+
+        Only a compatible result is cached, so a failure is re-checked on the next cycle.
+        """
+        if self._schema_ok_at is not None and time.monotonic() - self._schema_ok_at < 900:
+            return
+        status = await self.broker.discover()
+        if status.status != "READ_ONLY_SCHEMA_OK":
+            raise MarketEvidenceUnavailable("Official MCP read-only tools incompatible")
+        self._schema_ok_at = time.monotonic()
 
     async def _listed_contracts(self, alert: ParsedAlert, now: datetime) -> list[OptionContract]:
         if not alert.has_contract or alert.expiry is None:
@@ -128,9 +142,7 @@ class MCPReadOnlyOptionData:
         # hundreds of paid-alert candidates or hammer option-chain APIs.
         if len(entries) > 12 or len(active) > 12:
             raise MarketEvidenceUnavailable("Too many contracts for bounded PAPER review")
-        status = await self.broker.discover()
-        if status.status != "READ_ONLY_SCHEMA_OK":
-            raise MarketEvidenceUnavailable("Official MCP read-only tools incompatible")
+        await self._require_schema()
         account = await self.broker.external_account()
         available = await self.broker.buying_power(account)
         market_open = self.calendar.is_regular_session_open(now)
