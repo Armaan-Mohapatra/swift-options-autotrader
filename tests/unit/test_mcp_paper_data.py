@@ -230,6 +230,9 @@ def test_tiered_tick_uses_original_entry_limit_not_current_bid():
     # An existing holding being sold at the bid must use the bid's tier.
     held = run(broker, [], [CALL])
     assert held.instruments[CALL].premium_tick == Decimal("0.01")
+    # A simultaneous duplicate entry must not invalidate the owned exit tick.
+    simultaneous = run(broker, [parse_message("SPY 680C 11/13 @ 3.15")], [CALL])
+    assert simultaneous.instruments[CALL].premium_tick == Decimal("0.01")
 
 
 def test_tiered_option_tick_cutoff_is_inclusive_on_lower_tier():
