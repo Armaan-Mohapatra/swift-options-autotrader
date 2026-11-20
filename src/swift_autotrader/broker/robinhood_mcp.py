@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid5
 
@@ -509,7 +509,8 @@ class RobinhoodMCPBroker:
         return matches[0]
 
     async def quote(self, instrument: MCPInstrument, *, max_age_seconds: int = 30,
-                    now: datetime | None = None) -> MCPQuote:
+                    now: datetime | None = None,
+                    response_clock: Callable[[], datetime] | None = None) -> MCPQuote:
         data = await self._call("get_option_quotes", {"instrument_ids": [instrument.option_id]})
         rows = _rows(data, "quotes", "results")
         # Official quote tool returns results[].quote plus an optional close;
@@ -521,7 +522,11 @@ class RobinhoodMCPBroker:
         bid = _money(matches[0].get("bid_price"), "bid")
         ask = _money(matches[0].get("ask_price"), "ask")
         observed = _timestamp(matches[0].get("updated_at"))
-        current = now or datetime.now(UTC)
+        # In LIVE dispatch, read the injected clock AFTER the awaited MCP call.
+        # A quote updated during the round-trip must not be compared with the
+        # older snapshot-start timestamp. Synthetic/PAPER callers can still
+        # inject 'now' to remain deterministic.
+        current = response_clock() if response_clock is not None else (now or datetime.now(UTC))
         if current.utcoffset() is None:
             raise ValueError("Current time must be timezone-aware")
         age = (current.astimezone(UTC) - observed).total_seconds()
