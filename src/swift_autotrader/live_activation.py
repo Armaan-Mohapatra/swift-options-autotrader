@@ -30,18 +30,15 @@ from swift_autotrader.orders.unattended_approval import (
     UnattendedApprovalError,
     load_unattended_approval,
 )
-from swift_autotrader.risk_limits import (
-    DAILY_NET_LOSS_LIMIT_USD,
-    PREMIUM_CEILING_USD,
-)
+from swift_autotrader.risk_limits import PREMIUM_CEILING_USD
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "database" / "migrations"
 CANDIDATE_REQUIRED = frozenset({
     "mode", "live_enabled", "broker_writes_enabled", "max_contracts_per_signal",
-    "max_premium_per_signal_usd", "max_daily_loss_usd", "live_journal_path",
+    "max_premium_per_signal_usd", "live_journal_path",
     "robinhood_mcp_account", "telegram_enabled", "telegram_channel_id", "telegram_api_id",
 })
-CANDIDATE_OPTIONAL = frozenset({"log_level", "kill_switch_chat_id"})
+CANDIDATE_OPTIONAL = frozenset({"log_level", "kill_switch_chat_id", "max_daily_loss_usd"})
 CANDIDATE_KEYS = CANDIDATE_REQUIRED | CANDIDATE_OPTIONAL
 MAX_RECEIPT_DAYS = 7
 _LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -134,13 +131,7 @@ def check_candidate(candidate: Mapping[str, Any], *, root: Path) -> list[Gate]:
         f"premium ceiling within (0, {PREMIUM_CEILING_USD}]" if premium is not None and 0 < premium <= PREMIUM_CEILING_USD
         else f"max_premium_per_signal_usd must be a positive amount not above {PREMIUM_CEILING_USD}",
     ))
-    loss = _decimal(candidate.get("max_daily_loss_usd"))
-    gates.append(_gate(
-        "candidate_daily_loss_cap",
-        loss is not None and 0 < loss <= DAILY_NET_LOSS_LIMIT_USD,
-        f"daily loss breaker within (0, {DAILY_NET_LOSS_LIMIT_USD}]" if loss is not None and 0 < loss <= DAILY_NET_LOSS_LIMIT_USD
-        else f"max_daily_loss_usd must be a positive amount not above {DAILY_NET_LOSS_LIMIT_USD}",
-    ))
+    # v3 LIVE does not have a daily-loss stop. Legacy candidate field is ignored.
     journal_raw = candidate.get("live_journal_path")
     journal_ok = False
     if isinstance(journal_raw, str) and Path(journal_raw).is_absolute():
@@ -343,7 +334,7 @@ def candidate_settings(root: Path, candidate: Mapping[str, Any]) -> Settings:
         db_path=Path(root) / "data" / "live.sqlite3",
         max_contracts_per_signal=int(candidate["max_contracts_per_signal"]),
         max_premium_per_signal_usd=Decimal(str(candidate["max_premium_per_signal_usd"])),
-        max_daily_loss_usd=Decimal(str(candidate["max_daily_loss_usd"])),
+        # Legacy paper-only daily-loss setting is intentionally not used in LIVE.
         live_journal_path=Path(str(candidate["live_journal_path"])),
         robinhood_mcp_account=str(candidate["robinhood_mcp_account"]),
         telegram_channel_id=int(candidate["telegram_channel_id"]),
@@ -369,19 +360,19 @@ def check_receipt(root: Path, candidate: Mapping[str, Any], now: datetime) -> Ga
 
 
 def build_receipt(account: str, candidate: Mapping[str, Any], now: datetime, days: int) -> dict[str, Any]:
-    """Version-2 receipt capped at exactly the reviewed configured ceilings."""
+    """Version-3 receipt: owner explicitly acknowledges no daily-loss stop."""
     if type(days) is not int or not 1 <= days <= MAX_RECEIPT_DAYS:
         raise ValueError(f"receipt validity must be 1 to {MAX_RECEIPT_DAYS} days")
     if now.utcoffset() is None:
         raise ValueError("an offset-aware clock is required")
     return {
-        "version": 2,
+        "version": 3,
         "account_sha256": sha256_text(account),
         "issued_at": now.isoformat(),
         "expires_at": (now + timedelta(days=days)).isoformat(),
         "max_contracts_per_signal": int(candidate["max_contracts_per_signal"]),
         "max_premium_per_signal_usd": str(Decimal(str(candidate["max_premium_per_signal_usd"]))),
-        "max_daily_loss_usd": str(Decimal(str(candidate["max_daily_loss_usd"]))),
+        "daily_loss_policy": "NO_DAILY_LOSS_STOP",
     }
 
 
