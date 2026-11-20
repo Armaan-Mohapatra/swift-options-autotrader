@@ -142,3 +142,39 @@ def test_constant_tick_is_unchanged_and_has_no_schedule():
 ])
 def test_each_failure_class_maps_to_an_explicit_code(exc, code):
     assert _market_failure_code(exc) == code
+
+
+def _quote_broker(updated_at: datetime):
+    stamp = updated_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    class QuoteOnly(RobinhoodMCPBroker):
+        def __init__(self):
+            RobinhoodMCPBroker.__init__(self, None)
+
+        async def _call(self, name, arguments):
+            assert name == "get_option_quotes"
+            return {"results": [{"quote": {
+                "instrument_id": "opt-1", "bid_price": "6.00", "ask_price": "6.30",
+                "bid_size": 3, "ask_size": 4, "updated_at": stamp}}]}
+
+    return QuoteOnly()
+
+
+def test_quote_observed_after_snapshot_start_is_fresh_at_response():
+    from datetime import timedelta
+    start = NOW
+    response = NOW + timedelta(seconds=10)
+    inst = MCPInstrument("opt-1", CONTRACT, True, "chain-1", minimum_tick=Decimal("0.05"), multiplier=100)
+    broker = _quote_broker(start + timedelta(seconds=2))  # quoted after the snapshot started
+    quote = asyncio.run(RobinhoodMCPBroker.quote(broker, inst, max_age_seconds=15, clock=lambda: response))
+    assert quote.observed_at_utc == start + timedelta(seconds=2)
+
+
+def test_quote_stale_at_response_is_still_rejected():
+    from swift_autotrader.broker.robinhood_mcp import MCPContractError
+    from datetime import timedelta
+    response = NOW + timedelta(seconds=10)
+    inst = MCPInstrument("opt-1", CONTRACT, True, "chain-1", minimum_tick=Decimal("0.05"), multiplier=100)
+    broker = _quote_broker(NOW - timedelta(seconds=14))  # 24 s old when it arrived
+    with pytest.raises(MCPContractError, match="stale or crossed"):
+        asyncio.run(RobinhoodMCPBroker.quote(broker, inst, max_age_seconds=15, clock=lambda: response))

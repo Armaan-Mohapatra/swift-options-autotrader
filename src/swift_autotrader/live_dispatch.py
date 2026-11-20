@@ -274,6 +274,9 @@ class LiveDispatcher:
         # logged only; the write-boundary preflight independently denies entries without it.
         housekeeping_failures = await asyncio.to_thread(self._broker_housekeeping)
         self._record_daily_pnl_status(housekeeping_failures)
+        # Surface engine refusals, paper-engine alerts and Telegram connection state
+        # in the live notification store every cycle (scan() is idempotent).
+        self.notifications.scan(at=now)
 
         # Check durable acceptance state in database
         import sqlite3
@@ -321,6 +324,9 @@ class LiveDispatcher:
                 # Exception text is not stored: it can carry broker detail.
                 log.warning("Market snapshot unavailable (%s)", type(exc).__name__)
                 self.notifications.record("APPLICATION", code, source_key="live-dispatch")
+                if active:  # open positions cannot be priced, so exits are waiting
+                    self.notifications.record("APPLICATION", "EXIT_BLOCKED_MARKET_DATA",
+                                              source_key="live-dispatch", severity="CRITICAL")
                 realized_loss = await asyncio.to_thread(
                     self.engine.cumulative_realized_daily_loss, now
                 )
@@ -339,7 +345,7 @@ class LiveDispatcher:
         decisions = []
         exit_quotes: dict[OptionContract, ExitQuote] = {}
         if snapshot:
-            for code in MARKET_FAILURE_CODES:  # recovered: clear earlier market-data alerts
+            for code in (*MARKET_FAILURE_CODES, "EXIT_BLOCKED_MARKET_DATA"):  # recovered
                 self.notifications.resolve("APPLICATION", code, source_key="live-dispatch")
             self.preflight.instruments.clear()
             self.preflight.instruments.update(snapshot.instruments)

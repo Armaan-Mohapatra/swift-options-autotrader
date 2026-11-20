@@ -522,3 +522,28 @@ def test_stale_unrecognized_alert_is_closed_explicitly_and_never_trades(dispatch
     assert result.entry_orders_submitted == 0
     assert mcp.orders == {}
     assert _decisions(db_path) == [("REVIEW_REQUIRED", "SKIPPED", "ALERT_STALE_EXPIRED")]
+
+
+def test_engine_refusal_alert_surfaces_as_notification(dispatch_rig: tuple) -> None:
+    db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
+    from contextlib import closing as _closing
+
+    with _closing(sqlite3.connect(str(db_path))) as db, db:
+        db.execute(
+            "INSERT INTO paper_engine_alerts(signal_id,logical_order_id,code,recorded_at_utc,resolved) "
+            "VALUES(NULL,NULL,'SUBMISSION_REFUSED_PRE_PLACEMENT',?,0)", (clock.now().isoformat(),))
+    asyncio.run(dispatcher.run_once())
+    assert "SUBMISSION_REFUSED_PRE_PLACEMENT" in [n.code for n in dispatcher.notifications.pending(20)]
+
+
+def test_open_position_with_market_data_outage_raises_exit_blocked(dispatch_rig: tuple) -> None:
+    db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
+    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    asyncio.run(dispatcher.run_once())
+    order_id = list(mcp.orders.keys())[0]
+    mcp.fill_order(order_id, filled_quantity=1, fill_price=Decimal("1.20"))
+    clock.advance(10.0)
+    feed.down = True
+    result = asyncio.run(dispatcher.run_once())
+    assert result.status == "MARKET_DATA_UNAVAILABLE"
+    assert "EXIT_BLOCKED_MARKET_DATA" in [n.code for n in dispatcher.notifications.pending(20)]
