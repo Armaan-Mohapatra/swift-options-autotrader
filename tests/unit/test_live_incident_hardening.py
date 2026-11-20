@@ -103,8 +103,7 @@ def test_delayed_close_is_not_expired(tmp_path):
     path = tmp_path / "live.sqlite3"
     _db(path)
     body = "SPY 680C 11/20 SOLD HALF"
-    if parse_message(body).intent is not SignalIntent.CLOSE_100_PERCENT:
-        pytest.skip("Adjust fixture to exact closing grammar in parser")
+    assert parse_message(body).intent is SignalIntent.CLOSE_100_PERCENT
     _insert(path, 4, body, (NOW - timedelta(days=2)).isoformat())
     assert _expire(path) == 0
     assert _decision(path, 4) is None
