@@ -1,9 +1,8 @@
-"""Single source of truth for the operator-approved PAPER risk limits.
+"""Source of truth for PAPER-only daily risk and shared per-trade limits.
 
-These are HARD MAXIMUMS. Every configuration path (``config.Settings``,
-``orders.risk.RiskCeilings``, the Windows deployment settings and the engine
-daily circuit breaker) validates against these constants, so a value above them
-fails closed instead of being silently accepted. A configured value may be lower
+The PAPER daily-loss maximum is not applied in LIVE: the owner separately
+authorized unlimited LIVE daily loss. Per-trade contract and premium maxima
+continue to apply in both modes. A configured value may be lower
 than the maximum; zero dollar ceilings still deny every new entry.
 
 Changing a limit means editing this module (and the matching deployment/doc
@@ -14,7 +13,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-# Realized net loss for the trading day at which new entries stop (USD).
+# PAPER-only realized net loss at which PAPER new entries stop (USD).
 DAILY_NET_LOSS_LIMIT_USD = Decimal("750")
 # One long contract per alert. No scale-in, no averaging down; ADD is ignored.
 MAX_CONTRACTS_PER_ALERT = 1
