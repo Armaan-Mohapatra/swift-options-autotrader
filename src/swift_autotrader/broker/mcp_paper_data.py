@@ -7,7 +7,7 @@ exchange-calendar session. No undocumented fallback or fake depth is allowed.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Protocol
 from zoneinfo import ZoneInfo
@@ -66,7 +66,8 @@ class MCPReadOnlyOptionData:
     """
 
     def __init__(self, broker: RobinhoodMCPBroker, *, calendar: SessionCalendar,
-                 contracts_per_signal: int = 1):
+                 contracts_per_signal: int = 1,
+                 response_clock: Callable[[], datetime] | None = None):
         if not isinstance(broker, RobinhoodMCPBroker):
             raise TypeError("Official Robinhood read-only MCP adapter required")
         self.broker = broker
@@ -74,6 +75,7 @@ class MCPReadOnlyOptionData:
         if not 1 <= contracts_per_signal <= 100:
             raise ValueError("Unapproved paper review quantity")
         self.contracts_per_signal = contracts_per_signal
+        self.response_clock = response_clock
 
     async def _listed_contracts(self, alert: ParsedAlert, now: datetime) -> list[OptionContract]:
         if not alert.has_contract or alert.expiry is None:
@@ -138,7 +140,15 @@ class MCPReadOnlyOptionData:
                 (instrument.minimum_tick is None and instrument.tick_schedule is None) or
                 instrument.multiplier != 100):
                 raise MarketEvidenceUnavailable("Tick, tradability or 100 multiplier unverified")
-            quote = await self.broker.quote(instrument, now=now, max_age_seconds=15)
+            if self.response_clock is None:
+                # Historical PAPER tests retain their deterministic as-of clock.
+                quote = await self.broker.quote(instrument, now=now, max_age_seconds=15)
+            else:
+                # LIVE requires age validation at quote response time, never at
+                # snapshot start. The dispatcher rechecks the whole snapshot.
+                quote = await self.broker.quote(
+                    instrument, max_age_seconds=30, response_clock=self.response_clock,
+                )
             if quote.bid_size is None or quote.ask_size is None:
                 raise MarketEvidenceUnavailable("Option bid/ask displayed depth unavailable")
             # Exits use the live bid tick; new entries use the ORIGINAL alert
