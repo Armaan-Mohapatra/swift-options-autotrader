@@ -4,7 +4,7 @@ Coordinates the end-to-end pipeline:
 1. Ingests Telegram signals from the local SQLite store.
 2. Resolves option contracts, expirations, and live quotes from Robinhood.
 3. Keeps the exact original alert premium as the entry limit (no price chasing).
-4. Checks all risk and safety gates (buying power, $999 premium, $750 net-loss latch).
+4. Checks LIVE preflight (buying power, premium, kill switch); no daily-loss stop.
 5. Submits buy-to-open and sell-to-close orders through Robinhood Agentic MCP.
 6. Reconciles broker order states, fills, and cancellations.
 """
@@ -106,7 +106,7 @@ class LiveDispatcher:
             premium_per_signal_usd=settings.max_premium_per_signal_usd,
             total_exposure_usd=settings.max_total_exposure_usd,
             entry_max_age_seconds=settings.telegram_max_live_age_seconds,
-            daily_net_loss_usd=settings.max_daily_loss_usd,
+            daily_net_loss_usd=None,  # explicit owner-selected LIVE no-stop policy
         )
 
         # ONE canonical live broker. It shares the service's authenticated MCP client (single
@@ -120,7 +120,7 @@ class LiveDispatcher:
             account_number=self.account.account_number, writes_enabled=True,
             kill_switch=engine_kill_switch(self.db_path),
             signal_gate=entry_signal_gate(self.db_path),
-            clock=self.clock, loop=borrowed, loss_limit=settings.max_daily_loss_usd,
+            clock=self.clock, loop=borrowed, loss_limit=None,
         )
 
         # Preflight store
@@ -248,9 +248,8 @@ class LiveDispatcher:
             process_closes=False,
         )
 
-        # Broker-side housekeeping: 60-minute expiry backstop and broker-sourced
-        # realized-plus-unrealized P&L (latches the daily stop). Failure to read P&L is
-        # logged only; the write-boundary preflight independently denies entries without it.
+        # Broker-side housekeeping: order expiry, reconciliation and cancellations.
+        # LIVE never queries account-wide daily P/L as an entry prerequisite.
         await asyncio.to_thread(self._broker_housekeeping)
 
         # Check durable acceptance state in database
@@ -406,7 +405,7 @@ class LiveDispatcher:
         )
 
     def _broker_housekeeping(self) -> None:
-        for step in (self.live_broker.review_expired_entries, self.live_broker.refresh_daily_risk):
+        for step in (self.live_broker.review_expired_entries,):
             try:
                 step()
             except Exception as exc:  # noqa: BLE001 - entries remain denied by broker preflight
