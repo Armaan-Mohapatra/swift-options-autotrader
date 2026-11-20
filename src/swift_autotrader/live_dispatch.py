@@ -414,24 +414,20 @@ class LiveDispatcher:
         )
 
     def _broker_housekeeping(self) -> None:
-        for step in (self.live_broker.review_expired_entries,):
-            try:
-                step()
-            except Exception as exc:  # noqa: BLE001 - entries remain denied by broker preflight
-                reason = str(exc) if isinstance(exc, LiveSafetyError) else type(exc).__name__
-                log.warning("Broker housekeeping step %s failed: %s", step.__name__, reason)
-                if step.__name__ == "refresh_daily_risk":
-                    self.notifications.record(
-                        "APPLICATION", "DAILY_PNL_UNVERIFIED",
-                        source_key="live-dispatch", severity="CRITICAL",
-                        at=self.clock(),
-                    )
-            else:
-                if step.__name__ == "refresh_daily_risk":
-                    self.notifications.resolve(
-                        "APPLICATION", "DAILY_PNL_UNVERIFIED",
-                        source_key="live-dispatch",
-                    )
+        try:
+            self.live_broker.review_expired_entries()
+        except Exception as exc:  # noqa: BLE001 - no broker writes are retried blindly
+            reason = str(exc) if isinstance(exc, LiveSafetyError) else type(exc).__name__
+            log.warning("Broker expiry housekeeping failed: %s", reason)
+        # Historical P&L alarms are obsolete under the newly approved policy.
+        # Resolve them, but retain their audit history and show the no-stop status.
+        self.notifications.resolve(
+            "APPLICATION", "DAILY_PNL_UNVERIFIED", source_key="live-dispatch",
+        )
+        self.notifications.record(
+            "APPLICATION", "LIVE_DAILY_STOP_DISABLED", source_key="live-dispatch",
+            severity="WARNING", at=self.clock(),
+        )
 
     def _scan_notifications(self, now: datetime) -> None:
         """Surface engine and Telegram failures without suppressing exit processing."""
