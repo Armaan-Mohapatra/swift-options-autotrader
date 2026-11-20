@@ -134,18 +134,17 @@ class MCPReadOnlyOptionData:
         quotes: dict[OptionContract, VerifiedQuote] = {}
         for contract in candidates:
             instrument = await self.broker.resolve_instrument(contract)
-            if (not instrument.tradable or instrument.minimum_tick is None or
-                instrument.multiplier != 100 or
-                not instrument.minimum_tick.is_finite() or instrument.minimum_tick <= 0):
+            if (not instrument.tradable or
+                (instrument.minimum_tick is None and instrument.tick_schedule is None) or
+                instrument.multiplier != 100):
                 raise MarketEvidenceUnavailable("Tick, tradability or 100 multiplier unverified")
             quote = await self.broker.quote(instrument, now=now, max_age_seconds=15)
             if quote.bid_size is None or quote.ask_size is None:
                 raise MarketEvidenceUnavailable("Option bid/ask displayed depth unavailable")
-            instruments[contract] = Preflight(
-                instrument_verified=True, options_permission=account.eligible,
-                market_session_open=market_open, available_buying_power_usd=available,
-                premium_tick=instrument.minimum_tick, contract=contract,
-            )
+            # Exits use the live bid tick; new entries use the ORIGINAL alert
+            # premium. A variable tick schedule must never be guessed.
+            limit_for_tick = quote.bid
+            matched_entry = False
             # Match the exact contract including expiration YEAR. A same-strike
             # alert on a different expiration must never be reviewed as this leg.
             for alert in entries:
@@ -157,6 +156,10 @@ class MCPReadOnlyOptionData:
                     continue
                 if alert.premium is None:
                     raise MarketEvidenceUnavailable("Swift limit missing")
+                if matched_entry and limit_for_tick != alert.premium:
+                    raise MarketEvidenceUnavailable("Conflicting entry prices for same contract")
+                limit_for_tick = alert.premium
+                matched_entry = True
                 test_intent = OrderIntent(
                     "paper-review", "paper-review", contract,
                     OrderSide.BUY_TO_OPEN, self.contracts_per_signal, alert.premium,
@@ -164,6 +167,14 @@ class MCPReadOnlyOptionData:
                 review = await self.broker.review_order(account, instrument, test_intent)
                 if not review.unblocked:
                     raise MarketEvidenceUnavailable("Broker read-only review blocked")
+            tick = instrument.tick_for_price(limit_for_tick)
+            if tick is None or not tick.is_finite() or tick <= 0:
+                raise MarketEvidenceUnavailable("Option tick at order price unverified")
+            instruments[contract] = Preflight(
+                instrument_verified=True, options_permission=account.eligible,
+                market_session_open=market_open, available_buying_power_usd=available,
+                premium_tick=tick, contract=contract,
+            )
             # Distinct market observations can share a rounded timestamp.
             # Include immutable quote payload so the broker detects real changes
             # instead of aliasing different prices to the same journal event.
