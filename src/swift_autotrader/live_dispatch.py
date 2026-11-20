@@ -233,6 +233,12 @@ class LiveDispatcher:
         """
         self._verify_supervised_journal()
         now = self.clock()
+        expired = self._expire_stale_entry_revisions(now)
+        if expired:
+            self.notifications.record(
+                "APPLICATION", "ALERT_STALE_EXPIRED", source_key="live-dispatch",
+                severity="WARNING", at=now,
+            )
         log.info("Starting live dispatch cycle at %s", now.isoformat())
 
         # 1. Watchdog: Cancel due unfilled orders off-thread
@@ -283,12 +289,26 @@ class LiveDispatcher:
             try:
                 snapshot = await asyncio.wait_for(
                     self.provider.snapshot(entries, active, now),
-                    timeout=15.0,
+                    timeout=30.0,
                 )
-                snapshot.validate(now, max_age_seconds=30)
+                # Validate at response time, not the beginning of the network round-trip.
+                snapshot.validate(self.clock(), max_age_seconds=30)
             except Exception as exc:
-                log.warning("Market snapshot unavailable: %s", exc)
-                self.notifications.record("APPLICATION", "MARKET_DATA_UNAVAILABLE", source_key="live-dispatch")
+                failure_code = (
+                    "MARKET_DATA_TIMEOUT" if isinstance(exc, TimeoutError)
+                    else "MARKET_DATA_UNAVAILABLE"
+                )
+                log.warning("Market snapshot unavailable (%s)", type(exc).__name__)
+                self.notifications.record(
+                    "APPLICATION", failure_code, source_key="live-dispatch",
+                    severity="ERROR", at=self.clock(),
+                )
+                if active:
+                    self.notifications.record(
+                        "APPLICATION", "EXIT_BLOCKED_MARKET_DATA",
+                        source_key="live-dispatch", severity="CRITICAL", at=self.clock(),
+                    )
+                self._scan_notifications(self.clock())
                 realized_loss = await asyncio.to_thread(
                     self.engine.cumulative_realized_daily_loss, now
                 )
@@ -302,6 +322,10 @@ class LiveDispatcher:
                     open_positions_count=len(active),
                     unresolved_exit_count=await asyncio.to_thread(self.engine.unresolved_exit_count),
                 )
+            else:
+                for code in ("MARKET_DATA_UNAVAILABLE", "MARKET_DATA_TIMEOUT",
+                             "EXIT_BLOCKED_MARKET_DATA"):
+                    self.notifications.resolve("APPLICATION", code, source_key="live-dispatch")
 
         # 4. Process parser decisions for verified contracts
         decisions = []
@@ -369,6 +393,7 @@ class LiveDispatcher:
             self.engine.cumulative_realized_daily_loss, now
         )
 
+        self._scan_notifications(self.clock())
         return LiveDispatchResult(
             status="LIVE_CYCLE_COMPLETED",
             parsed_events=len(decisions),
@@ -384,10 +409,84 @@ class LiveDispatcher:
         for step in (self.live_broker.review_expired_entries, self.live_broker.refresh_daily_risk):
             try:
                 step()
-            except Exception as exc:  # noqa: BLE001 - entries stay denied by the write preflight
-                # LiveSafetyError messages are fixed, non-secret reasons (e.g. "stale option quote").
+            except Exception as exc:  # noqa: BLE001 - entries remain denied by broker preflight
                 reason = str(exc) if isinstance(exc, LiveSafetyError) else type(exc).__name__
                 log.warning("Broker housekeeping step %s failed: %s", step.__name__, reason)
+                if step.__name__ == "refresh_daily_risk":
+                    self.notifications.record(
+                        "APPLICATION", "DAILY_PNL_UNVERIFIED",
+                        source_key="live-dispatch", severity="CRITICAL",
+                        at=self.clock(),
+                    )
+            else:
+                if step.__name__ == "refresh_daily_risk":
+                    self.notifications.resolve(
+                        "APPLICATION", "DAILY_PNL_UNVERIFIED",
+                        source_key="live-dispatch",
+                    )
+
+    def _scan_notifications(self, now: datetime) -> None:
+        """Surface engine and Telegram failures without suppressing exit processing."""
+        try:
+            self.notifications.scan(at=now)
+        except Exception as exc:  # noqa: BLE001 - risk gates still independently fail closed
+            log.error("Notification scan failed: %s", type(exc).__name__)
+
+    def _expire_stale_entry_revisions(self, now: datetime) -> int:
+        """Persist terminal outcomes for expired unparsed entries, even with no market data.
+
+        This is deliberately independent of contract resolution. It can only DENY
+        entries and never constructs orders. It does not expire delayed exit messages.
+        """
+        import sqlite3
+        from contextlib import closing
+
+        if now.utcoffset() is None:
+            raise ValueError("Live dispatcher clock must be timezone-aware")
+        max_age = min(120, self.settings.telegram_max_live_age_seconds)
+        closed = 0
+        with closing(sqlite3.connect(str(self.db_path), timeout=10)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT r.revision_id,r.message_id,r.telegram_sent_at_utc,e.body "
+                "FROM telegram_message_revisions r "
+                "JOIN raw_events e ON e.event_id=r.raw_event_id "
+                "LEFT JOIN signal_parser_decisions p ON p.revision_id=r.revision_id "
+                "WHERE r.channel_id=? AND p.revision_id IS NULL "
+                "ORDER BY r.revision_id LIMIT 500",
+                (str(self.channel_id),),
+            ).fetchall()
+            for revision_id, message_id, timestamp, body in rows:
+                alert = parse_message(body)
+                if alert.intent not in (
+                    SignalIntent.ENTRY, SignalIntent.REVIEW_REQUIRED,
+                    SignalIntent.IGNORE_NON_OPTION,
+                ):
+                    continue  # Never discard an exit merely because it is old.
+                try:
+                    sent = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+                    if sent.utcoffset() is None:
+                        raise ValueError("naive timestamp")
+                    age = (now - sent).total_seconds()
+                    reason = (
+                        "ALERT_STALE_EXPIRED" if age > max_age
+                        else "ALERT_TIMESTAMP_UNVERIFIED" if age < -30 else None
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    reason = "ALERT_TIMESTAMP_UNVERIFIED"
+                if reason is None:
+                    continue
+                cur = db.execute(
+                    "INSERT OR IGNORE INTO signal_parser_decisions "
+                    "(revision_id,channel_id,message_id,intent,status,reason,"
+                    "signal_id,processed_at_utc) VALUES(?,?,?,?,?,?,NULL,?)",
+                    (
+                        revision_id, str(self.channel_id), message_id,
+                        alert.intent.value, "SKIPPED", reason, now.isoformat(),
+                    ),
+                )
+                closed += cur.rowcount
+        return closed
 
     def _get_pending_and_active(
         self, now: datetime
