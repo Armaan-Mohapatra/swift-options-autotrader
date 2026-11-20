@@ -816,7 +816,9 @@ class PaperOrderEngine:
             contract, price, quantity, self.limits,
             preflight, outstanding_usd=outstanding,
             active_signals=count,
-            realized_net_pnl_today_usd=self._realized_net_pnl_today(now),
+            realized_net_pnl_today_usd=(
+                Decimal(0) if self.live_mode else self._realized_net_pnl_today(now)
+            ),
         )
         if reason:
             self._block(sid, reason, now)
