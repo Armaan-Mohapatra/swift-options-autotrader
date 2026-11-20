@@ -256,12 +256,13 @@ class LiveBroker:
                  loop: _LoopThread | None = None,
                  rehearsal: bool = False,
                  submission_guard: Callable[[OrderIntent], bool] | None = None,
-                 loss_limit: Decimal = DAILY_NET_LOSS_LIMIT_USD) -> None:
+                 loss_limit: Decimal | None = None) -> None:
         if not account_number or not isinstance(account_number, str):
             raise ValueError('pin a specific dedicated MCP account number')
         if not 1 <= timeout_seconds <= 60:
             raise ValueError('invalid MCP timeout')
-        if (not isinstance(loss_limit, Decimal) or not loss_limit.is_finite()
+        if loss_limit is not None and (
+                not isinstance(loss_limit, Decimal) or not loss_limit.is_finite()
                 or not 0 < loss_limit <= DAILY_NET_LOSS_LIMIT_USD):
             raise ValueError('daily net loss limit outside the approved range')
         self.loss_limit = loss_limit
@@ -744,7 +745,8 @@ class LiveBroker:
             if intent.quantity != MAX_CONTRACTS_PER_ALERT:
                 raise LiveSafetyError('entries must be exactly one long contract')
             available = await self._portfolio()
-            self._check_loss_latch(await self._daily_pnl(account), persist=not rehearsal)
+            if self.loss_limit is not None:
+                self._check_loss_latch(await self._daily_pnl(account), persist=not rehearsal)
             total = intent.limit_price * Decimal(instrument.multiplier)
             if total > PREMIUM_CEILING_USD:
                 raise LiveSafetyError(f'entry exceeds ${PREMIUM_CEILING_USD} maximum premium')
@@ -1047,7 +1049,8 @@ class LiveBroker:
                 if self.submission_guard is not None and not self.submission_guard(intent):
                     raise LiveSafetyError('submission guard refused this entry')
                 buying_power = await self._portfolio()
-                self._check_loss_latch(await self._daily_pnl(account))
+                if self.loss_limit is not None:
+                    self._check_loss_latch(await self._daily_pnl(account))
                 if buying_power < intent.limit_price * Decimal(instrument.multiplier):
                     raise LiveSafetyError('insufficient buying power at send')
             self._check_write(entry=intent.side is OrderSide.BUY_TO_OPEN)
@@ -1133,6 +1136,8 @@ class LiveBroker:
         return self.run(self._refresh_daily_risk())
 
     async def _refresh_daily_risk(self) -> bool:
+        if self.loss_limit is None:
+            return False  # LIVE policy removes the daily P/L entry stopper.
         pnl = await self._daily_pnl(await self._account())
         try:
             self._check_loss_latch(pnl)
