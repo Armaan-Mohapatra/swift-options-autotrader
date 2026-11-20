@@ -50,10 +50,9 @@ INTEGRATION ASSUMPTIONS (MUST BE VERIFIED AGAINST THE LIVE MCP SCHEMAS):
    only for original eligible entries; absent/ADD/metadata signals are DENIED.
    Call ``review_expired_entries()`` periodically (e.g. once a minute). It
    cancels remaining entry quantities at >=60 minutes, never liquidates fills.
-10. Daily loss stop is latched for the America/New_York date on first
-    observed breach, including after restarts; Windows requires IANA tzdata.
-    Schedule ``refresh_daily_risk()`` regularly to detect intraday breaches;
-    infrequent monitoring can miss a loss that subsequently recovers.
+10. LIVE sets loss_limit=None: there is NO daily-loss stop. The legacy
+    daily-loss latch is available only for explicit test/PAPER-like callers;
+    it is not an entry requirement for LIVE.
 11. DB path must be on a durable local volume shared by every broker worker.
     Back up the journal; an unavailable/lost journal is a hard stop. Do not use
     multiple machines writing separate journal copies. Live writes start OFF.
