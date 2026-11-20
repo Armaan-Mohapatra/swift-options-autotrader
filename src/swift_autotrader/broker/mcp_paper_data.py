@@ -177,6 +177,11 @@ class MCPReadOnlyOptionData:
                 review = await self.broker.review_order(account, instrument, test_intent)
                 if not review.unblocked:
                     raise MarketEvidenceUnavailable("Broker read-only review blocked")
+            # A held Swift contract must retain its EXIT tick even if a second
+            # entry alert references it. The engine separately refuses scaling
+            # into an already-owned identical contract.
+            if contract in active:
+                limit_for_tick = quote.bid
             tick = instrument.tick_for_price(limit_for_tick)
             if tick is None or not tick.is_finite() or tick <= 0:
                 raise MarketEvidenceUnavailable("Option tick at order price unverified")
