@@ -458,11 +458,10 @@ class LiveDispatcher:
             ).fetchall()
             for revision_id, message_id, timestamp, body in rows:
                 alert = parse_message(body)
-                if alert.intent not in (
-                    SignalIntent.ENTRY, SignalIntent.REVIEW_REQUIRED,
-                    SignalIntent.IGNORE_NON_OPTION,
-                ):
-                    continue  # Never discard an exit merely because it is old.
+                if alert.intent not in (SignalIntent.ENTRY, SignalIntent.IGNORE_NON_OPTION):
+                    # REVIEW_REQUIRED may be an ambiguous exit. Keep it available
+                    # for human review rather than discarding a possible close.
+                    continue
                 try:
                     sent = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
                     if sent.utcoffset() is None:
