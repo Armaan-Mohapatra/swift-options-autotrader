@@ -161,12 +161,14 @@ class Settings:
                 raise ConfigurationError("Paper-only mode is mandatory unless explicitly configured for live")
             if self.broker_backend != "paper":
                 raise ConfigurationError("Only the paper broker backend is permitted in paper mode")
-        # Hard maximum in every mode (risk_limits): a value above it fails closed.
-        if not self.max_daily_loss_usd.is_finite() or self.max_daily_loss_usd <= 0:
-            raise ConfigurationError("MAX_DAILY_LOSS_USD must be positive and finite")
-        if self.max_daily_loss_usd > DAILY_NET_LOSS_LIMIT_USD:
-            raise ConfigurationError(
-                f"MAX_DAILY_LOSS_USD cannot exceed {DAILY_NET_LOSS_LIMIT_USD}")
+        # Only PAPER retains the historical daily-loss circuit breaker.
+        # LIVE has no daily-loss cap; v3 owner authorization is mandatory instead.
+        if not self.is_live:
+            if not self.max_daily_loss_usd.is_finite() or self.max_daily_loss_usd <= 0:
+                raise ConfigurationError("MAX_DAILY_LOSS_USD must be positive and finite")
+            if self.max_daily_loss_usd > DAILY_NET_LOSS_LIMIT_USD:
+                raise ConfigurationError(
+                    f"MAX_DAILY_LOSS_USD cannot exceed {DAILY_NET_LOSS_LIMIT_USD}")
         if not 1 <= self.max_contracts_per_signal <= MAX_CONTRACTS_PER_ALERT:
             raise ConfigurationError(
                 f"MAX_CONTRACTS_PER_SIGNAL must be between 1 and {MAX_CONTRACTS_PER_ALERT}")
@@ -286,7 +288,7 @@ class Settings:
             "max_premium_per_signal_usd": str(self.max_premium_per_signal_usd),
             "max_total_exposure_usd": (
                 None if self.max_total_exposure_usd is None else str(self.max_total_exposure_usd)),
-            "max_daily_loss_usd": str(self.max_daily_loss_usd),
+            "daily_loss_policy": "NO_DAILY_LOSS_STOP" if self.is_live else str(self.max_daily_loss_usd),
             "entry_price_policy": "EXACT_ALERT_LIMIT",
             "kill_switch_enabled": self.kill_switch_enabled,
             "entry_timeout_seconds": self.entry_timeout_seconds,
