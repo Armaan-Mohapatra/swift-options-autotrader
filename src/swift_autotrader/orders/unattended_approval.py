@@ -20,7 +20,7 @@ RECEIPT_NAME = "unattended-live-approval.json"
 _FIELDS = frozenset({
     "version", "account_sha256", "issued_at", "expires_at",
     "max_contracts_per_signal", "max_premium_per_signal_usd",
-    "max_daily_loss_usd",
+    "daily_loss_policy",
 })
 
 
@@ -35,7 +35,7 @@ class UnattendedApproval:
     expires_at: datetime
     max_contracts_per_signal: int
     max_premium_per_signal_usd: Decimal
-    max_daily_loss_usd: Decimal
+    daily_loss_policy: str
 
     def active(self, now: datetime) -> bool:
         return now.utcoffset() is not None and self.issued_at <= now < self.expires_at
@@ -93,9 +93,12 @@ def load_unattended_approval(
         raise UnattendedApprovalError("Approval receipt is not valid JSON") from exc
     if not isinstance(obj, dict) or set(obj) != _FIELDS:
         raise UnattendedApprovalError("Approval receipt fields are invalid")
-    # v2: no aggregate-exposure ceiling exists any more (buying power alone bounds it).
-    if type(obj["version"]) is not int or obj["version"] != 2:
-        raise UnattendedApprovalError("Unsupported approval receipt version")
+    # v3 explicitly acknowledges that unattended LIVE has NO daily-loss stop.
+    # v2 was issued for a $750 daily stop and must NEVER silently authorize v3.
+    if type(obj["version"]) is not int or obj["version"] != 3:
+        raise UnattendedApprovalError("New v3 approval required for no-daily-stop policy")
+    if obj["daily_loss_policy"] != "NO_DAILY_LOSS_STOP":
+        raise UnattendedApprovalError("Daily loss policy not explicitly acknowledged")
     if type(obj["account_sha256"]) is not str or not hmac.compare_digest(
         obj["account_sha256"], hashlib.sha256(account.encode("utf-8")).hexdigest()
     ):
@@ -106,7 +109,7 @@ def load_unattended_approval(
     approval = UnattendedApproval(
         obj["account_sha256"], _when(obj["issued_at"]), _when(obj["expires_at"]),
         contracts, _money(obj["max_premium_per_signal_usd"]),
-        _money(obj["max_daily_loss_usd"]),
+        "NO_DAILY_LOSS_STOP",
     )
     if approval.expires_at - approval.issued_at > MAX_APPROVAL_WINDOW:
         raise UnattendedApprovalError("Approval window exceeds 7 days; renew it")
@@ -118,8 +121,6 @@ def load_unattended_approval(
              approval.max_contracts_per_signal),
             ("MAX_PREMIUM_PER_SIGNAL_USD", settings.max_premium_per_signal_usd,
              approval.max_premium_per_signal_usd),
-            ("MAX_DAILY_LOSS_USD", settings.max_daily_loss_usd,
-             approval.max_daily_loss_usd),
         ) if configured > approved
     ]
     if exceeded:
