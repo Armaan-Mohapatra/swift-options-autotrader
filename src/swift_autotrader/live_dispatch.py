@@ -262,6 +262,15 @@ class LiveDispatcher:
         # 2. Get pending Telegram updates and active positions
         matcher = SignalMatcher(self.db_path, self.channel_id)
         pending_entries, pending_followups, active = self._get_pending_and_active(now)
+        # A paused engine or expired approval previously hid new Telegram entries
+        # from operational acceptance checks. Record metadata-only evidence of a
+        # fresh, eligible, parsed ENTRY without dispatching a broker order.
+        if pending_entries and (not entries_allowed or self.engine.health()["paused"]):
+            for revision_id, _message_id, _alert in pending_entries:
+                self.notifications.record(
+                    "APPLICATION", "TELEGRAM_ENTRY_OBSERVED_PAUSED",
+                    source_key=f"revision:{revision_id}", severity="INFO", at=now,
+                )
         if not entries_allowed:
             pending_entries = []
 
