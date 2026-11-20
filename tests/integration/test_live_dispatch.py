@@ -400,6 +400,8 @@ def test_t3_live_dispatch_paused_engine_skips_entries(dispatch_rig: tuple) -> No
     result = asyncio.run(dispatcher.run_once())
     assert result.entry_orders_submitted == 0
     assert len(mcp.orders) == 0
+    codes = [note.code for note in dispatcher.notifications.pending(20)]
+    assert "TELEGRAM_ENTRY_OBSERVED_PAUSED" in codes
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "NaN"])
