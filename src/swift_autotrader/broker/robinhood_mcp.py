@@ -195,6 +195,19 @@ class MCPInstrument:
     minimum_tick: Decimal | None = None
     multiplier: int | None = None
     underlying_type: str = "equity"
+    # (below_cutoff_tick, above_cutoff_tick, cutoff_price), all vendor verified.
+    tick_schedule: tuple[Decimal, Decimal, Decimal] | None = None
+
+    def tick_for_price(self, price: Decimal) -> Decimal | None:
+        """Select the vendor-published increment at the actual limit price."""
+        if not price.is_finite() or price < 0:
+            raise MCPContractError("Invalid option limit for tick validation")
+        if self.tick_schedule is None:
+            return self.minimum_tick
+        below, above, cutoff = self.tick_schedule
+        if below <= 0 or above <= 0 or cutoff <= 0:
+            raise MCPContractError("Invalid option tick schedule")
+        return below if price <= cutoff else above
 
 
 @dataclass(frozen=True, slots=True)
@@ -454,20 +467,23 @@ class RobinhoodMCPBroker:
                 # Without the order premium here, only a constant schedule can
                 # safely be collapsed to a single minimum tick.
                 tiers = item.get("min_ticks")
+                schedule = None
                 if tiers is not None:
                     if not isinstance(tiers, Mapping):
                         raise MCPContractError("Malformed option tick schedule")
                     above = _money(tiers.get("above_tick"), "above_tick")
                     below = _money(tiers.get("below_tick"), "below_tick")
-                    _money(tiers.get("cutoff_price"), "cutoff_price")
-                    if above <= 0 or below <= 0:
+                    cutoff = _money(tiers.get("cutoff_price"), "cutoff_price")
+                    if above <= 0 or below <= 0 or cutoff <= 0:
                         raise MCPContractError("Nonpositive option tick")
                     if above == below:
                         if tick is not None and tick != above:
                             raise MCPContractError("Conflicting option ticks")
                         tick = above
                     else:
-                        # An order-price-dependent tick cannot be checked here.
+                        # Preserve both vendor tiers. The exact entry (or exit)
+                        # price is known later in the market snapshot.
+                        schedule = (below, above, cutoff)
                         tick = None
                 if tick is not None and tick <= 0:
                     raise MCPContractError("Nonpositive option tick")
@@ -485,7 +501,9 @@ class RobinhoodMCPBroker:
                         raise MCPContractError("Conflicting option multipliers")
                     multiplier = int(primary)
                 matches.append(MCPInstrument(_identifier(option_id), contract, tradable,
-                                             chain_id, tick, multiplier, underlying_type=underlying_type))
+                                             chain_id, tick, multiplier,
+                                             underlying_type=underlying_type,
+                                             tick_schedule=schedule))
         if len(matches) != 1 or not matches[0].tradable:
             raise MCPContractError("Exact, unique, tradable option instrument not verified")
         return matches[0]
