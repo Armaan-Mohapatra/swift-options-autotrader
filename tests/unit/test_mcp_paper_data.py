@@ -210,3 +210,36 @@ def test_same_option_identical_quote_content_is_idempotent():
     a = run(broker, [parse_message('SPY 680C 11/13 @ 1.20')])
     b = run(broker, [parse_message('SPY 680C 11/13 @ 1.20')])
     assert a.quotes[CALL].quote_id == b.quotes[CALL].quote_id
+
+
+def test_tiered_tick_uses_original_entry_limit_not_current_bid():
+    """A 3.15 alert is on the above-cutoff tier even with a 1.10 bid."""
+    class TieredBroker(FakeReadBroker):
+        async def resolve_instrument(self, contract):
+            base = await super().resolve_instrument(contract)
+            return MCPInstrument(
+                base.option_id, base.contract, base.tradable, base.chain_id,
+                minimum_tick=None, multiplier=base.multiplier,
+                tick_schedule=(Decimal("0.01"), Decimal("0.05"), Decimal("3.00")),
+            )
+
+    broker = TieredBroker()
+    snap = run(broker, [parse_message("SPY 680C 11/13 @ 3.15")])
+    assert snap.instruments[CALL].premium_tick == Decimal("0.05")
+    assert broker.reviewed == [(CALL, Decimal("3.15"))]
+    # An existing holding being sold at the bid must use the bid's tier.
+    held = run(broker, [], [CALL])
+    assert held.instruments[CALL].premium_tick == Decimal("0.01")
+    # A simultaneous duplicate entry must not invalidate the owned exit tick.
+    simultaneous = run(broker, [parse_message("SPY 680C 11/13 @ 3.15")], [CALL])
+    assert simultaneous.instruments[CALL].premium_tick == Decimal("0.01")
+
+
+def test_tiered_option_tick_cutoff_is_inclusive_on_lower_tier():
+    instrument = MCPInstrument(
+        "synthetic-id", CALL, True, "synthetic-chain",
+        minimum_tick=None, multiplier=100,
+        tick_schedule=(Decimal("0.01"), Decimal("0.05"), Decimal("3.00")),
+    )
+    assert instrument.tick_for_price(Decimal("3.00")) == Decimal("0.01")
+    assert instrument.tick_for_price(Decimal("3.01")) == Decimal("0.05")
