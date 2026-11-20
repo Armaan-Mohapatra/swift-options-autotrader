@@ -122,3 +122,103 @@ def test_outside_channel_not_modified(tmp_path):
         )
     assert _expire(path) == 0
     assert _decision(path, 5) is None
+
+
+def test_quote_observed_during_snapshot_passes_at_response_time():
+    """Quote timestamp after snapshot start is valid when observed before response."""
+    import asyncio
+    from decimal import Decimal
+    from datetime import date
+
+    from swift_autotrader.broker.robinhood_mcp import (
+        MCPInstrument, RobinhoodMCPBroker,
+    )
+    from swift_autotrader.signals.identity import OptionContract, OptionRight
+
+    contract = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+    instrument = MCPInstrument("synthetic-id", contract, True, "synthetic-chain",
+                               Decimal("0.01"), 100)
+    observed = NOW + timedelta(seconds=1)
+
+    class QuoteBroker(RobinhoodMCPBroker):
+        async def _call(self, tool, arguments):
+            assert tool == "get_option_quotes"
+            return {"results": [{"quote": {
+                "instrument_id": instrument.option_id, "bid_price": "1.10",
+                "ask_price": "1.12", "updated_at": observed.isoformat(),
+                "bid_size": 2, "ask_size": 2,
+            }}]}
+
+    broker = QuoteBroker(None)
+    quote = asyncio.run(broker.quote(
+        instrument, now=NOW, response_clock=lambda: NOW + timedelta(seconds=2),
+        max_age_seconds=30,
+    ))
+    assert quote.observed_at_utc == observed
+
+
+def test_quote_stale_at_response_is_denied_even_if_fresh_at_start():
+    import asyncio
+    from datetime import date
+    from decimal import Decimal
+
+    from swift_autotrader.broker.robinhood_mcp import (
+        MCPContractError, MCPInstrument, RobinhoodMCPBroker,
+    )
+    from swift_autotrader.signals.identity import OptionContract, OptionRight
+
+    contract = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+    instrument = MCPInstrument("synthetic-id", contract, True, "synthetic-chain",
+                               Decimal("0.01"), 100)
+
+    class QuoteBroker(RobinhoodMCPBroker):
+        async def _call(self, _tool, _args):
+            return {"results": [{"quote": {
+                "instrument_id": instrument.option_id, "bid_price": "1.10",
+                "ask_price": "1.12", "updated_at": NOW.isoformat(),
+            }}]}
+
+    with pytest.raises(MCPContractError, match="stale"):
+        asyncio.run(QuoteBroker(None).quote(
+            instrument, now=NOW,
+            response_clock=lambda: NOW + timedelta(seconds=31),
+            max_age_seconds=30,
+        ))
+
+
+def test_daily_pnl_read_failure_generates_critical_notification():
+    from swift_autotrader.broker.live_broker import LiveSafetyError
+
+    events: list[tuple[str, str]] = []
+
+    class RiskBroker:
+        def review_expired_entries(self):
+            return None
+
+        def refresh_daily_risk(self):
+            raise LiveSafetyError("stale option quote")
+
+    class Notifications:
+        def record(self, category, code, **_kwargs):
+            events.append((category, code))
+
+        def resolve(self, category, code, **_kwargs):
+            events.append((category, "resolved:" + code))
+
+    dispatcher = SimpleNamespace(
+        live_broker=RiskBroker(), notifications=Notifications(), clock=lambda: NOW,
+    )
+    LiveDispatcher._broker_housekeeping(dispatcher)
+    assert ("APPLICATION", "DAILY_PNL_UNVERIFIED") in events
+
+
+def test_notification_scan_runs_without_broker_calls():
+    calls: list[datetime] = []
+
+    class Notifications:
+        def scan(self, *, at):
+            calls.append(at)
+
+    dispatcher = SimpleNamespace(notifications=Notifications())
+    LiveDispatcher._scan_notifications(dispatcher, NOW)
+    assert calls == [NOW]
