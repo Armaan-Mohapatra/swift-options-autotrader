@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # Swift AutoTrader: project guide for Claude Code
 
 Binding rules live in `AGENTS.md` and `docs/UNIFICATION_ACCEPTANCE_PLAN.md`. This file is the
