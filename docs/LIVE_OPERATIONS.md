@@ -39,7 +39,7 @@ listener does not run and the local `PauseEntries` command remains the kill swit
 ## Live rehearsal (real MCP, writes forced off)
 
 Rehearsal connects with the already-enrolled token, and for each recorded ENTRY signal
-runs the entry preflight: account check, buying power, daily P/L, quote and 10% ask check,
+runs the entry preflight: account check, buying power, quote and 10% ask check,
 `review_option_order` and the write-tool schema check. It logs what would have been sent.
 It never calls `place_option_order` or `cancel_option_order`, and it writes nothing to the
 journal (not even a loss latch).
@@ -59,9 +59,9 @@ live-ready opportunities. Missing source lineage is also denied. To assess the
 actual end-to-end path, run rehearsal against a genuinely fresh authorized alert;
 this remains broker-write-disabled.
 
-A denial that mentions a position, realized P/L or order field may signal a
+A denial that mentions a position or order field may signal a
 response-shape mismatch to fix before going live. It may also be a legitimate
-insufficient-buying-power, loss-limit, kill-switch or market-state denial.
+insufficient-buying-power, kill-switch or market-state denial.
 
 ## Deploy this branch to the installed Swift copy (stays PAPER)
 
@@ -134,15 +134,18 @@ You do the browser sign-in and approval yourself; nothing here handles a passwor
 8. Rehearse as above and read `logs\live_rehearsal.jsonl` until every `WOULD_SEND` and every
    `DENIED` makes sense.
 
-## Acceptance-timed cancellation and continuous risk polling
+## Acceptance-timed cancellation and LIVE daily-loss policy
 
 The live broker now tolerates Robinhood orders that omit `executions` when
 `processed_quantity=0`; a positive fill quantity without executions still
 fails closed. Its timeout helper checks the reconciled broker acceptance time,
-not only the earlier local reservation time. The live dispatcher polls realized
-and unrealized P/L on each cycle, even with no new signals, and blocks new
-entries whenever the risk snapshot cannot be trusted. Exits and cancellations
-remain available. All these behaviors require local integration validation.
+not only the earlier local reservation time. LIVE has no daily-loss circuit
+breaker: account-wide daily P/L and overnight attribution are not entry gates.
+Buying power, the $999 premium maximum, one contract, exact alert limit,
+120-second alert freshness, kill switch, idempotent broker reconciliation,
+exits, and 60-minute cancellation remain enforced. PAPER retains its separate
+$750 daily-loss limit. P/L may be reported as telemetry but is not a LIVE
+authorization prerequisite.
 
 ## Live dashboard evidence boundary
 
@@ -150,7 +153,7 @@ The local dashboard never claims to show authoritative Robinhood P/L. When
 `LIVE` is configured, it labels the mode as `LIVE CONFIGURED · BROKER P/L
 UNVERIFIED` and suppresses simulated P/L cards. The local journal and source
 metadata can help troubleshooting, but they do not replace read-only broker
-positions, confirmed executions, buying power, or the daily-loss guard.
+positions, confirmed executions, buying power, or order reconciliation.
 
 ## Backup and recovery boundary
 
@@ -181,8 +184,8 @@ OAuth. It is never run by an agent.
 
 It checks candidate limits, journal and control-database integrity and migrations, credentials,
 the pinned account and (after paper is stopped) the read-only broker account. It then asks you to
-type the account's last four digits and `ENABLE LIVE TRADING`, takes a verified backup, stops paper,
-applies the LIVE settings and manifest, pauses entries, writes the receipt, re-validates, starts the
+type the account's last four digits and `ENABLE LIVE TRADING WITH NO DAILY LOSS STOP`, takes a verified backup, stops paper,
+applies the LIVE settings and manifest, pauses entries, writes a v3 receipt, re-validates, starts the
 live task and checks one healthy cycle and one dispatcher. Any failure restores PAPER, removes the
 receipt it wrote and restarts paper. Entries stay paused until you type `RESUME LIVE ENTRIES`.
 
@@ -192,9 +195,10 @@ Stop new orders immediately: `manage.ps1 -InstallRoot <root> -Mode Live -Action 
 
 The receipt lasts at most 7 days. Warnings appear in the local notifications
 (`UNATTENDED_APPROVAL_EXPIRING` within 24 hours, `UNATTENDED_APPROVAL_EXPIRED` after). At expiry the
-worker blocks NEW entries only; exits, the 60-minute cancellation backstop and P/L housekeeping keep
+worker blocks NEW entries only; exits and the 60-minute cancellation backstop keep
 running. A restart after expiry refuses to start. To renew, run the activation command again after
-stopping nothing by hand: it replaces the receipt, keeping the old one in its backup folder.
+stopping nothing by hand. A v2 receipt does not authorize the no-daily-stop policy;
+the owner must explicitly issue a new v3 receipt acknowledging `NO_DAILY_LOSS_STOP`.
 
 Stale after-hours option quotes deny entries (`stale option quote`, 30-second rule) and are retried
 every cycle; nothing latches and no restart is needed when fresh quotes arrive.
@@ -206,17 +210,17 @@ service starts blocked.
 
 1. In `config\settings.json` set `"mode": "LIVE"`, `"live_enabled": true`,
    `"broker_writes_enabled": true`, with `robinhood_mcp_account`, `live_journal_path`,
-   `max_premium_per_signal_usd` (<= 999), `max_daily_loss_usd` (<= 750) and
+   `max_premium_per_signal_usd` (<= 999) and
    `max_contracts_per_signal` (1) present. The LIVE loader then forces
    `DB_PATH=<install>\data\live.sqlite3`, a control database separate from the paper one.
 2. In `deployment.json` set `"mode": "LIVE"`, `"live_enabled": true`,
    `"broker_writes_enabled": true`. The supervisor refuses to start if the two files
    disagree about live mode.
-3. Write the owner's expiring unrestricted-execution receipt
-   `<install>\secrets\unattended-live-approval.json` (version 2: `account_sha256` of the pinned
-   account, `issued_at`, `expires_at` at most 7 days later, and `max_contracts_per_signal`,
-   `max_premium_per_signal_usd`, `max_daily_loss_usd` caps that the configured values may not
-   exceed). Without a valid receipt `live-dispatch` refuses to start; it stops when it expires.
+3. The owner-operated local workflow writes the v3 receipt only after explicit confirmation.
+   It binds the pinned account, one-contract maximum, premium ceiling and an expiry of at most
+   7 days, and explicitly records `daily_loss_policy: NO_DAILY_LOSS_STOP`. A v2 receipt is
+   refused and is never silently migrated. Without a valid v3 receipt `live-dispatch` refuses
+   to start; it stops when the receipt expires.
 4. Stop `SwiftAutoTrader-Paper-Local`, enable and start `SwiftAutoTrader-Live-Local`
    (`manage.ps1 -Action RegisterLiveTask` if it is not registered). The paper and live tasks
    refuse to run together.

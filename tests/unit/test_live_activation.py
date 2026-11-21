@@ -341,6 +341,7 @@ def test_apply_only_from_paper_then_post_checks_pass(install):
     assert settings["mode"] == "LIVE" and manifest["mode"] == "LIVE"
     assert manifest["live_enabled"] is True and manifest["broker_writes_enabled"] is True
     assert settings["max_premium_per_signal_usd"] == 999
+    assert "max_daily_loss_usd" not in settings
     report = activation.run_checks(root, path, phase="post", now=NOW)
     assert report["passed"], report
     with pytest.raises(ValueError, match="PAPER_ONLY"):
