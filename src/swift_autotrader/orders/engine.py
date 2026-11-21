@@ -11,7 +11,7 @@ import os
 import sqlite3
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -127,7 +127,11 @@ class PaperOrderEngine:
             raise TypeError("paper engine accepts ONLY the concrete PaperBroker when live_mode=False")
         self.broker = broker
         self.preflight = preflight
-        self.limits = limits or RiskCeilings()
+        selected_limits = limits or RiskCeilings()
+        # LIVE owner policy retires daily P&L enforcement in every engine path,
+        # even if a caller accidentally passes PAPER's default ceiling.
+        self.limits = (replace(selected_limits, daily_net_loss_usd=None)
+                       if live_mode else selected_limits)
         self.exit_policy = exit_policy or ExitPolicy()
         self.clock = clock or (lambda: datetime.now(UTC))
         with self._db() as db:
@@ -812,11 +816,16 @@ class PaperOrderEngine:
 
         quantity = self.limits.contracts_per_signal
         outstanding, count = self._outstanding_risk()
+        risk_ceilings = (replace(self.limits, daily_net_loss_usd=None)
+                         if self.live_mode and self.limits.daily_net_loss_usd is not None
+                         else self.limits)
         reason = rejection_reason(
-            contract, price, quantity, self.limits,
+            contract, price, quantity, risk_ceilings,
             preflight, outstanding_usd=outstanding,
             active_signals=count,
-            realized_net_pnl_today_usd=self._realized_net_pnl_today(now),
+            realized_net_pnl_today_usd=(
+                None if self.live_mode else self._realized_net_pnl_today(now)
+            ),
         )
         if reason:
             self._block(sid, reason, now)

@@ -50,7 +50,7 @@ def test_review_order_underlying_type_mapping():
     broker = RobinhoodMCPBroker(fake_mcp)
 
     # 1. Equity contract (e.g. SPY)
-    contract_equity = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+    contract_equity = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
     inst_equity = MCPInstrument("opt-1", contract_equity, True, "chain-1", underlying_type="equity")
     intent_equity = OrderIntent("log-1", "idemp-1", contract_equity, OrderSide.BUY_TO_OPEN, 1, Decimal("1.25"))
 
@@ -60,7 +60,7 @@ def test_review_order_underlying_type_mapping():
     assert fake_mcp.calls[-1][1]["chain_symbol"] == "SPY"
 
     # 2. Index contract (e.g. SPX)
-    contract_index = OptionContract("SPX", OptionRight.CALL, Decimal("6000"), date(2026, 11, 20))
+    contract_index = OptionContract("SPX", OptionRight.CALL, Decimal("6000"), date(2026, 12, 18))
     inst_index = MCPInstrument("opt-2", contract_index, True, "chain-2", underlying_type="index")
     intent_index = OrderIntent("log-2", "idemp-2", contract_index, OrderSide.BUY_TO_OPEN, 1, Decimal("5.00"))
 

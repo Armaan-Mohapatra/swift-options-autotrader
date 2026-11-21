@@ -27,7 +27,7 @@ from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP
 from tests.unit.test_supervised_lifecycle import OpenMarketCalendar, managed_live_env  # noqa: F401
 
 NOW = datetime(2026, 11, 16, 15, 0, tzinfo=UTC)
-CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
 
 
 class HookedMCP(StatefulFakeMCP):
@@ -58,7 +58,7 @@ def _setup(settings, live_db, *, expires_in=90, hooks=None, review_override=None
     store.ingest(
         TelegramMessage(
             channel_id=settings.telegram_channel_id, message_id=1001,
-            sent_at_utc=NOW, received_at_utc=NOW, body="BTO SPY 680C 11/20 @ 1.20",
+            sent_at_utc=NOW, received_at_utc=NOW, body="BTO SPY 680C 12/18 @ 1.20",
             kind=EventKind.NEW, origin=EventOrigin.LIVE,
         ),
         session_started_at_utc=NOW - timedelta(minutes=5),

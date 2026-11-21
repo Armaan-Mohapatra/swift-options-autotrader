@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-# Realized net loss for the trading day at which new entries stop (USD).
+# PAPER-only realized net loss for the trading day at which new entries stop (USD).
 DAILY_NET_LOSS_LIMIT_USD = Decimal("750")
 # One long contract per alert. No scale-in, no averaging down; ADD is ignored.
 MAX_CONTRACTS_PER_ALERT = 1

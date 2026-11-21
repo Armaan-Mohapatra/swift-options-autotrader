@@ -30,19 +30,18 @@ from swift_autotrader.orders.unattended_approval import (
     UnattendedApprovalError,
     load_unattended_approval,
 )
-from swift_autotrader.risk_limits import (
-    DAILY_NET_LOSS_LIMIT_USD,
-    PREMIUM_CEILING_USD,
-)
+from swift_autotrader.risk_limits import PREMIUM_CEILING_USD
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "database" / "migrations"
 CANDIDATE_REQUIRED = frozenset({
     "mode", "live_enabled", "broker_writes_enabled", "max_contracts_per_signal",
-    "max_premium_per_signal_usd", "max_daily_loss_usd", "live_journal_path",
+    "max_premium_per_signal_usd", "live_journal_path",
     "robinhood_mcp_account", "telegram_enabled", "telegram_channel_id", "telegram_api_id",
 })
-CANDIDATE_OPTIONAL = frozenset({"log_level", "kill_switch_chat_id"})
+CANDIDATE_OPTIONAL = frozenset({"log_level", "kill_switch_chat_id", "max_daily_loss_usd"})
 CANDIDATE_KEYS = CANDIDATE_REQUIRED | CANDIDATE_OPTIONAL
+_RETIRED_LIVE_KEYS = frozenset({"max_daily_loss_usd"})
+_EFFECTIVE_CANDIDATE_KEYS = CANDIDATE_KEYS - _RETIRED_LIVE_KEYS
 MAX_RECEIPT_DAYS = 7
 _LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
@@ -134,13 +133,6 @@ def check_candidate(candidate: Mapping[str, Any], *, root: Path) -> list[Gate]:
         f"premium ceiling within (0, {PREMIUM_CEILING_USD}]" if premium is not None and 0 < premium <= PREMIUM_CEILING_USD
         else f"max_premium_per_signal_usd must be a positive amount not above {PREMIUM_CEILING_USD}",
     ))
-    loss = _decimal(candidate.get("max_daily_loss_usd"))
-    gates.append(_gate(
-        "candidate_daily_loss_cap",
-        loss is not None and 0 < loss <= DAILY_NET_LOSS_LIMIT_USD,
-        f"daily loss breaker within (0, {DAILY_NET_LOSS_LIMIT_USD}]" if loss is not None and 0 < loss <= DAILY_NET_LOSS_LIMIT_USD
-        else f"max_daily_loss_usd must be a positive amount not above {DAILY_NET_LOSS_LIMIT_USD}",
-    ))
     journal_raw = candidate.get("live_journal_path")
     journal_ok = False
     if isinstance(journal_raw, str) and Path(journal_raw).is_absolute():
@@ -209,7 +201,7 @@ def check_settings_file(root: Path, candidate: Mapping[str, Any], *, live: bool)
                      "settings.json is still PAPER_ONLY" if current.get("mode") == "PAPER_ONLY"
                      else "settings.json is not PAPER_ONLY before activation")
     mismatched = sorted(
-        key for key in CANDIDATE_KEYS
+        key for key in _EFFECTIVE_CANDIDATE_KEYS
         if key in candidate and current.get(key) != candidate.get(key)
     )
     return _gate("settings_file", not mismatched and current.get("mode") == "LIVE",
@@ -225,7 +217,7 @@ def settings_diff(root: Path, candidate: Mapping[str, Any]) -> list[str]:
         current = {}
     masked = {"robinhood_mcp_account", "telegram_channel_id", "kill_switch_chat_id"}
     lines: list[str] = []
-    for key in sorted(CANDIDATE_KEYS):
+    for key in sorted(_EFFECTIVE_CANDIDATE_KEYS):
         if key not in candidate:
             continue
         new = candidate[key]
@@ -343,7 +335,7 @@ def candidate_settings(root: Path, candidate: Mapping[str, Any]) -> Settings:
         db_path=Path(root) / "data" / "live.sqlite3",
         max_contracts_per_signal=int(candidate["max_contracts_per_signal"]),
         max_premium_per_signal_usd=Decimal(str(candidate["max_premium_per_signal_usd"])),
-        max_daily_loss_usd=Decimal(str(candidate["max_daily_loss_usd"])),
+        max_daily_loss_usd=None,
         live_journal_path=Path(str(candidate["live_journal_path"])),
         robinhood_mcp_account=str(candidate["robinhood_mcp_account"]),
         telegram_channel_id=int(candidate["telegram_channel_id"]),
@@ -369,19 +361,19 @@ def check_receipt(root: Path, candidate: Mapping[str, Any], now: datetime) -> Ga
 
 
 def build_receipt(account: str, candidate: Mapping[str, Any], now: datetime, days: int) -> dict[str, Any]:
-    """Version-2 receipt capped at exactly the reviewed configured ceilings."""
+    """Version-3 receipt requires explicit owner acknowledgment of no daily stop."""
     if type(days) is not int or not 1 <= days <= MAX_RECEIPT_DAYS:
         raise ValueError(f"receipt validity must be 1 to {MAX_RECEIPT_DAYS} days")
     if now.utcoffset() is None:
         raise ValueError("an offset-aware clock is required")
     return {
-        "version": 2,
+        "version": 3,
+        "daily_loss_policy": "NO_DAILY_LOSS_STOP",
         "account_sha256": sha256_text(account),
         "issued_at": now.isoformat(),
         "expires_at": (now + timedelta(days=days)).isoformat(),
         "max_contracts_per_signal": int(candidate["max_contracts_per_signal"]),
         "max_premium_per_signal_usd": str(Decimal(str(candidate["max_premium_per_signal_usd"]))),
-        "max_daily_loss_usd": str(Decimal(str(candidate["max_daily_loss_usd"]))),
     }
 
 
@@ -428,9 +420,12 @@ def apply_live_config(root: Path, candidate: Mapping[str, Any]) -> dict[str, str
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     if settings.get("mode") != "PAPER_ONLY" or manifest.get("mode") != "PAPER_ONLY":
         raise ValueError("LIVE config can only be applied from a PAPER_ONLY installation")
-    for key in CANDIDATE_KEYS:
+    for key in _EFFECTIVE_CANDIDATE_KEYS:
         if key in candidate:
             settings[key] = candidate[key]
+    # Retire the historical LIVE dollar cap from persisted settings; PAPER has
+    # its own separately named configuration and remains unchanged.
+    settings.pop("max_daily_loss_usd", None)
     for document in (settings, manifest):
         document.update(mode="LIVE", live_enabled=True, broker_writes_enabled=True)
     _atomic_write_json(paths["settings"], settings)

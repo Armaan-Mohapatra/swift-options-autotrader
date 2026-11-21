@@ -6,7 +6,7 @@ Covers:
 - Tier 2: Boundary & Corner Cases (Zero events idempotence, stale snapshot rejection,
   disabled live writes permission error, slippage excursion block, concurrent cycle serialization,
   non-entry message handling).
-- Tier 3: Cross-Feature Interactions (Cumulative daily loss gate, engine pause flag enforcement).
+- Tier 3: Cross-Feature Interactions (P&L telemetry independence, engine pause enforcement).
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from swift_autotrader.telegram.events import EventKind, EventOrigin, TelegramMes
 from tests.fixtures.live_mocks import FakeClock, StatefulFakeMCP
 
 CHANNEL_ID = -1001234567890
-CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
 
 
 class MockQuoteFeed:
@@ -162,7 +162,7 @@ def ingest_alert(store: TelegramStore, clock: FakeClock, text: str, msg_id: int,
 def test_live_dispatch_entry_order_happy_path(dispatch_rig: tuple) -> None:
     """T1-F5-01: Swift entry alert -> live market snapshot -> order placed via MCP."""
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
 
     result = asyncio.run(dispatcher.run_once())
     assert result.status == "LIVE_CYCLE_COMPLETED"
@@ -182,7 +182,7 @@ def test_live_dispatch_exit_order_happy_path(dispatch_rig: tuple) -> None:
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
 
     # Ingest and fill entry
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
     asyncio.run(dispatcher.run_once())
     order_id = list(mcp.orders.keys())[0]
     mcp.fill_order(order_id, filled_quantity=1, fill_price=Decimal("1.20"))
@@ -201,7 +201,7 @@ def test_live_dispatch_feed_offline_recovery(dispatch_rig: tuple) -> None:
     """T1-F5-03: Quote feed failure records MARKET_DATA_UNAVAILABLE notification without crash."""
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
     feed.down = True
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
 
     result = asyncio.run(dispatcher.run_once())
     assert result.status == "MARKET_DATA_UNAVAILABLE"
@@ -216,7 +216,7 @@ def test_live_dispatch_feed_offline_recovery(dispatch_rig: tuple) -> None:
 def test_live_dispatch_watchdog_cancellation(dispatch_rig: tuple) -> None:
     """T1-F5-04: Watchdog cancels stale unfilled orders exceeding entry_timeout_seconds."""
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
     asyncio.run(dispatcher.run_once())
 
     # Advance clock past 3600 seconds
@@ -228,7 +228,7 @@ def test_live_dispatch_watchdog_cancellation(dispatch_rig: tuple) -> None:
 def test_live_dispatch_risk_ceilings_from_settings(dispatch_rig: tuple) -> None:
     """T1-F5-05: Dispatcher accurately inherits configured risk limits from Settings."""
     _, _, _, _, _, dispatcher = dispatch_rig
-    assert dispatcher.limits.daily_net_loss_usd == Decimal("500")
+    assert dispatcher.limits.daily_net_loss_usd is None
     # Owner contract: no trade-count or aggregate-exposure cap.
     assert dispatcher.limits.open_signal_count is None
     assert dispatcher.limits.total_exposure_usd is None
@@ -253,7 +253,7 @@ def test_live_dispatch_stale_market_snapshot_rejected(dispatch_rig: tuple) -> No
     """T2-F5-02: Market snapshots older than 30s fail validation."""
     _, clock, _, feed, store, dispatcher = dispatch_rig
     feed.stale_seconds = 45  # 45 seconds old > 30s max_age
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
 
     result = asyncio.run(dispatcher.run_once())
     assert result.status == "MARKET_DATA_UNAVAILABLE"
@@ -283,7 +283,7 @@ def test_live_dispatch_entry_keeps_exact_alert_limit(dispatch_rig: tuple, ask: s
     """T2-F5-04/06: A higher ask never raises the limit; the exact alert premium rests."""
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
     feed.ask = Decimal(ask)
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
 
     result = asyncio.run(dispatcher.run_once())
     assert result.status == "LIVE_CYCLE_COMPLETED"
@@ -311,7 +311,7 @@ def test_live_dispatch_non_entry_alert_ignored(dispatch_rig: tuple) -> None:
 # ============================================================================
 
 
-def test_t3_live_dispatch_cumulative_loss_ceiling_blocks_new_entries(dispatch_rig: tuple) -> None:
+def test_t3_live_dispatch_voluntary_open_signal_cap(dispatch_rig: tuple) -> None:
     """T3-05: An optional operator open-signal cap, when configured, suppresses later entries.
 
     The owner contract imposes no default cap (see test_no_arbitrary_open_trade_count_cap);
@@ -328,14 +328,14 @@ def test_t3_live_dispatch_cumulative_loss_ceiling_blocks_new_entries(dispatch_ri
     dispatcher.engine.limits = dispatcher.limits
 
     # Ingest first alert and submit order
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
     res1 = asyncio.run(dispatcher.run_once())
     assert res1.entry_orders_submitted == 1
     assert len(mcp.orders) == 1
 
     # Ingest second alert while first position is open
     clock.advance(5.0)
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1002)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1002)
 
     res2 = asyncio.run(dispatcher.run_once())
     # Second order must be blocked by position cap
@@ -343,12 +343,12 @@ def test_t3_live_dispatch_cumulative_loss_ceiling_blocks_new_entries(dispatch_ri
     assert len(mcp.orders) == 1
 
 
-def test_t3_live_dispatch_daily_loss_limit_blocks_new_entries(dispatch_rig: tuple) -> None:
-    """T3-13: Realized losses exceeding max_daily_loss_usd halt new entry orders."""
+def test_t3_live_dispatch_does_not_gate_entries_on_daily_loss(dispatch_rig: tuple) -> None:
+    """LIVE daily P&L is telemetry only; another active guard can still deny re-entry."""
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
 
     # Ingest and fill entry with 8.00 limit
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 8.00", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 8.00", 1001)
     feed.ask = Decimal("8.00")
     feed.bid = Decimal("7.95")
     asyncio.run(dispatcher.run_once())
@@ -375,21 +375,19 @@ def test_t3_live_dispatch_daily_loss_limit_blocks_new_entries(dispatch_rig: tupl
     clock.advance(5.0)
     feed.ask = Decimal("1.20")
     feed.bid = Decimal("1.18")
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1003)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1003)
     res_new = asyncio.run(dispatcher.run_once())
 
-    # Must be blocked by daily loss limit
-    assert res_new.entry_orders_submitted == 0
-    assert len(mcp.orders) == 2  # Only the original buy and sell
+    # After the prior contract was closed, the large loss alone cannot veto re-entry.
+    assert res_new.entry_orders_submitted == 1
+    assert len(mcp.orders) == 3
 
     with sqlite3.connect(str(db_path)) as db:
         decisions = db.execute(
             "SELECT outcome, reason FROM paper_engine_decisions ORDER BY decided_at_utc DESC"
         ).fetchall()
-        assert decisions[0][0] == "BLOCKED"
-        assert decisions[0][1] == "DAILY_LOSS_CEILING_REACHED"
-    # The broker-side realized+unrealized latch is independently engaged and persisted.
-    assert dispatcher.live_broker.refresh_daily_risk() is True
+        assert decisions[0] == ("INTENT_RECORDED", None)
+    assert dispatcher.live_broker.refresh_daily_risk() is False
 
 
 def test_t3_live_dispatch_paused_engine_skips_entries(dispatch_rig: tuple) -> None:
@@ -399,10 +397,14 @@ def test_t3_live_dispatch_paused_engine_skips_entries(dispatch_rig: tuple) -> No
     # Pause engine
     dispatcher.engine.set_paused(True, reason="OPERATOR_PAUSE")
 
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
     result = asyncio.run(dispatcher.run_once())
     assert result.entry_orders_submitted == 0
     assert len(mcp.orders) == 0
+    assert any(
+        n.code == "TELEGRAM_ENTRY_OBSERVED_PAUSED"
+        for n in dispatcher.notifications.pending(20)
+    )
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "NaN"])
@@ -433,7 +435,7 @@ def test_broker_preflight_refusal_is_terminal_and_never_wedges_later_cycles(disp
     """
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
     mcp.set_quote("opt-spy-680c", "1.60", "1.65")  # broker ask > 110% of the 1.20 alert
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
 
     first = asyncio.run(dispatcher.run_once())
     assert first.status == "LIVE_CYCLE_COMPLETED"
@@ -468,7 +470,7 @@ def _decisions(db_path: Path) -> list[tuple]:
 def test_fresh_entry_stays_pending_during_outage_then_recovers(dispatch_rig: tuple) -> None:
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
     feed.down = True
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
 
     result = asyncio.run(dispatcher.run_once())
     assert result.status == "MARKET_DATA_UNAVAILABLE"
@@ -485,7 +487,7 @@ def test_fresh_entry_stays_pending_during_outage_then_recovers(dispatch_rig: tup
 def test_entry_pending_past_alert_age_expires_and_never_trades(dispatch_rig: tuple) -> None:
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
     feed.down = True
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
     asyncio.run(dispatcher.run_once())
 
     clock.advance(121.0)
@@ -504,10 +506,10 @@ def test_market_data_timeout_reports_its_own_code(dispatch_rig: tuple) -> None:
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
 
     async def timed_out(*_args, **_kwargs):
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     feed.snapshot = timed_out
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
     result = asyncio.run(dispatcher.run_once())
     assert result.status == "MARKET_DATA_UNAVAILABLE"
     assert "MARKET_DATA_TIMEOUT" in [n.code for n in dispatcher.notifications.pending(10)]
@@ -538,7 +540,7 @@ def test_engine_refusal_alert_surfaces_as_notification(dispatch_rig: tuple) -> N
 
 def test_open_position_with_market_data_outage_raises_exit_blocked(dispatch_rig: tuple) -> None:
     db_path, clock, mcp, feed, store, dispatcher = dispatch_rig
-    ingest_alert(store, clock, "SPY 680C 11/20 @ 1.20", 1001)
+    ingest_alert(store, clock, "SPY 680C 12/18 @ 1.20", 1001)
     asyncio.run(dispatcher.run_once())
     order_id = list(mcp.orders.keys())[0]
     mcp.fill_order(order_id, filled_quantity=1, fill_price=Decimal("1.20"))

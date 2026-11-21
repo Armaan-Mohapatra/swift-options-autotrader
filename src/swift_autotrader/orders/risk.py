@@ -51,7 +51,7 @@ class RiskCeilings:
     entry_max_age_seconds: int = 120
     # Realized-loss circuit breaker. Unlike the dollar ceilings above this is a
     # restriction, not a buying allowance, so its default is the approved limit.
-    daily_net_loss_usd: Decimal = DAILY_NET_LOSS_LIMIT_USD
+    daily_net_loss_usd: Decimal | None = DAILY_NET_LOSS_LIMIT_USD
 
     @classmethod
     def from_environment(cls, values: Mapping[str, str] | None = None) -> RiskCeilings:
@@ -99,9 +99,9 @@ class RiskCeilings:
         if any(not x.is_finite() or x < 0 for x in dollars):
             raise ValueError("invalid dollar ceilings")
         # The loss circuit breaker is a restriction, so it is bounded everywhere.
-        if not self.daily_net_loss_usd.is_finite() or not (
+        if self.daily_net_loss_usd is not None and (not self.daily_net_loss_usd.is_finite() or not (
             0 < self.daily_net_loss_usd <= DAILY_NET_LOSS_LIMIT_USD
-        ):
+        )):
             raise ValueError("daily net loss ceiling outside approved range")
 
 
@@ -132,7 +132,7 @@ class PaperPreflight:
 def rejection_reason(
     contract: OptionContract, limit: Decimal, quantity: int, ceilings: RiskCeilings,
     preflight: Preflight, *, outstanding_usd: Decimal, active_signals: int,
-    realized_net_pnl_today_usd: Decimal = Decimal(0),
+    realized_net_pnl_today_usd: Decimal | None = Decimal(0),
 ) -> str | None:
     """Check supplied candidate limit and evidence without submitting any order.
 
@@ -144,12 +144,13 @@ def rejection_reason(
     if (not isinstance(outstanding_usd, Decimal) or not outstanding_usd.is_finite()
             or outstanding_usd < 0 or type(active_signals) is not int or active_signals < 0):
         return "INVALID_RISK_EVIDENCE"
-    # Circuit breaker first: once today's net loss reaches the ceiling no further entry
-    # is allowed, whatever else would pass. Unknown or non-finite P&L blocks entries.
-    if not isinstance(realized_net_pnl_today_usd, Decimal) or not realized_net_pnl_today_usd.is_finite():
-        return "DAILY_PNL_UNVERIFIED"
-    if realized_net_pnl_today_usd <= -ceilings.daily_net_loss_usd:
-        return "DAILY_LOSS_CEILING_REACHED"
+    # PAPER retains its daily circuit breaker. LIVE explicitly sets this to None.
+    if ceilings.daily_net_loss_usd is not None:
+        if (not isinstance(realized_net_pnl_today_usd, Decimal)
+                or not realized_net_pnl_today_usd.is_finite()):
+            return "DAILY_PNL_UNVERIFIED"
+        if realized_net_pnl_today_usd <= -ceilings.daily_net_loss_usd:
+            return "DAILY_LOSS_CEILING_REACHED"
     if not preflight.instrument_verified or preflight.contract != contract:
         return "INSTRUMENT_NOT_VERIFIED"
     if not preflight.options_permission:

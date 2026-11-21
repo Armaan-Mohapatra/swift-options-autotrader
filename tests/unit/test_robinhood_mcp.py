@@ -34,7 +34,7 @@ def wait(coro):
     return asyncio.run(coro)
 
 
-CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
 ACCOUNT = MCPAccount("synthetic-account", True, "option_level_2")
 INSTRUMENT = MCPInstrument("synthetic-option-id", CONTRACT, True, "synthetic-chain")
 
@@ -91,7 +91,7 @@ def setup():
     }]}
     fake.responses["get_option_instruments"] = {"instruments": [{
         "id": "synthetic-option-id", "chain_id": "synthetic-chain",
-        "chain_symbol": "SPY", "expiration_date": "2026-11-20",
+        "chain_symbol": "SPY", "expiration_date": "2026-12-18",
         "strike_price": "680.0000", "type": "call", "state": "active",
         "tradability": "tradable",
     }]}
@@ -384,7 +384,7 @@ def test_observed_robinhood_contract_and_nested_quote_shape():
     }
     fake.responses["get_option_instruments"] = {"instruments": [{
         "id": "synthetic-option-id", "chain_id": "synthetic-chain",
-        "chain_symbol": "SPY", "expiration_date": "2026-11-20",
+        "chain_symbol": "SPY", "expiration_date": "2026-12-18",
         "strike_price": "680.0000", "type": "call", "state": "active",
         "tradability": "tradable", "trade_value_multiplier": "100.0000",
         "min_ticks": {"above_tick": "0.01", "below_tick": "0.01", "cutoff_price": "0.00"},

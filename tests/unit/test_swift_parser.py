@@ -29,9 +29,9 @@ def test_synthetic_alert_classification(case):
 
 
 @pytest.mark.parametrize("text,category", [
-    ("OPTION - SWING\n\nSPY 600.00C 11/20 @ 1.50", "SWING"),
+    ("OPTION - SWING\n\nSPY 600.00C 12/18 @ 1.50", "SWING"),
     ("OPTION - LOTTO\n\nQQQ 5C 1/16 @ .45", "LOTTO"),
-    ("\U0001F319 OPTION - SCALP \U0001F319\n\nSPY 600P 11/20 @ 2.10", "SCALP"),
+    ("\U0001F319 OPTION - SCALP \U0001F319\n\nSPY 600P 12/18 @ 2.10", "SCALP"),
 ])
 def test_real_option_header_entry_is_an_entry(text, category):
     parsed = parse_message(text)
@@ -40,10 +40,10 @@ def test_real_option_header_entry_is_an_entry(text, category):
 
 
 @pytest.mark.parametrize("text", [
-    "STOCK - SWING\n\nSPY 600.00C 11/20 @ 1.50",              # not an option alert
-    "OPTION - WATCHLIST\n\nSPY 600.00C 11/20 @ 1.50",         # unknown category
-    "OPTION - SWING\n\nADDING MORE SPY 600.00C 11/20 @ 1.50",  # ADD must never enter
-    "OPTION - SWING\n\nSOLD HALF SPY 600.00C 11/20 @ 1.50",    # exit, not entry
+    "STOCK - SWING\n\nSPY 600.00C 12/18 @ 1.50",              # not an option alert
+    "OPTION - WATCHLIST\n\nSPY 600.00C 12/18 @ 1.50",         # unknown category
+    "OPTION - SWING\n\nADDING MORE SPY 600.00C 12/18 @ 1.50",  # ADD must never enter
+    "OPTION - SWING\n\nSOLD HALF SPY 600.00C 12/18 @ 1.50",    # exit, not entry
 ])
 def test_option_header_does_not_make_other_messages_entries(text):
     assert parse_message(text).intent is not SignalIntent.ENTRY

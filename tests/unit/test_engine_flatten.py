@@ -24,8 +24,8 @@ from swift_autotrader.orders.risk import PaperPreflight, RiskCeilings
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 from tests.fixtures.live_mocks import FakeClock
 
-SPY_CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
-QQQ_CONTRACT = OptionContract("QQQ", OptionRight.CALL, Decimal("500"), date(2026, 11, 20))
+SPY_CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
+QQQ_CONTRACT = OptionContract("QQQ", OptionRight.CALL, Decimal("500"), date(2026, 12, 18))
 
 
 @pytest.fixture

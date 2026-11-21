@@ -136,7 +136,7 @@ def test_dual_database_initialization_and_isolation(managed_live_env) -> None:
         message_id=101,
         sent_at_utc=now,
         received_at_utc=now,
-        body="BTO SPY 680C 11/20 @ 1.20",
+        body="BTO SPY 680C 12/18 @ 1.20",
         kind=EventKind.NEW,
         origin=EventOrigin.LIVE,
     )
@@ -180,7 +180,7 @@ def test_live_dispatch_operational_cycle(managed_live_env) -> None:
     """Verify LiveDispatcher processes live database signals with StatefulFakeMCP."""
     root, settings, paper_db, live_db = managed_live_env
 
-    # Ingest a live entry signal for seeded instrument SPY 680C 11/20
+    # Ingest a live entry signal for seeded instrument SPY 680C 12/18
     store = TelegramStore(live_db, settings.telegram_channel_id)
     now = datetime(2026, 11, 16, 15, 0, 0, tzinfo=UTC)
     msg = TelegramMessage(
@@ -188,7 +188,7 @@ def test_live_dispatch_operational_cycle(managed_live_env) -> None:
         message_id=202,
         sent_at_utc=now,
         received_at_utc=now,
-        body="BTO SPY 680C 11/20 @ 1.20",
+        body="BTO SPY 680C 12/18 @ 1.20",
         kind=EventKind.NEW,
         origin=EventOrigin.LIVE,
     )
@@ -242,7 +242,7 @@ def test_live_dispatch_single_entry_bounded_acceptance(managed_live_env) -> None
     # Ingest TWO separate entry alerts
     store = TelegramStore(live_db, settings.telegram_channel_id)
     now = datetime(2026, 11, 16, 15, 0, 0, tzinfo=UTC)
-    for mid, body in [(301, "BTO SPY 680C 11/20 @ 1.20"), (302, "BTO QQQ 500C 11/20 @ 2.00")]:
+    for mid, body in [(301, "BTO SPY 680C 12/18 @ 1.20"), (302, "BTO QQQ 500C 12/18 @ 2.00")]:
         msg = TelegramMessage(
             channel_id=settings.telegram_channel_id,
             message_id=mid,

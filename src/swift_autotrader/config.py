@@ -110,7 +110,7 @@ class Settings:
     telegram_reconnect_attempts: int = 5
     # Live execution and safety configuration
     robinhood_mcp_account: str = field(default="", repr=False)
-    max_daily_loss_usd: Decimal = DAILY_NET_LOSS_LIMIT_USD
+    max_daily_loss_usd: Decimal | None = DAILY_NET_LOSS_LIMIT_USD
     live_journal_path: Path | None = None
     kill_switch_enabled: bool = False
     kill_switch_telegram_bot_token: str = field(default="", repr=False)
@@ -162,11 +162,13 @@ class Settings:
             if self.broker_backend != "paper":
                 raise ConfigurationError("Only the paper broker backend is permitted in paper mode")
         # Hard maximum in every mode (risk_limits): a value above it fails closed.
-        if not self.max_daily_loss_usd.is_finite() or self.max_daily_loss_usd <= 0:
-            raise ConfigurationError("MAX_DAILY_LOSS_USD must be positive and finite")
-        if self.max_daily_loss_usd > DAILY_NET_LOSS_LIMIT_USD:
-            raise ConfigurationError(
-                f"MAX_DAILY_LOSS_USD cannot exceed {DAILY_NET_LOSS_LIMIT_USD}")
+        if not self.is_live:
+            if (self.max_daily_loss_usd is None or not self.max_daily_loss_usd.is_finite()
+                    or self.max_daily_loss_usd <= 0):
+                raise ConfigurationError("MAX_DAILY_LOSS_USD must be positive and finite")
+            if self.max_daily_loss_usd > DAILY_NET_LOSS_LIMIT_USD:
+                raise ConfigurationError(
+                    f"MAX_DAILY_LOSS_USD cannot exceed {DAILY_NET_LOSS_LIMIT_USD}")
         if not 1 <= self.max_contracts_per_signal <= MAX_CONTRACTS_PER_ALERT:
             raise ConfigurationError(
                 f"MAX_CONTRACTS_PER_SIGNAL must be between 1 and {MAX_CONTRACTS_PER_ALERT}")
@@ -227,7 +229,14 @@ class Settings:
             capacity = int(data.get("TELEGRAM_QUEUE_CAPACITY", "512"))
             max_age = int(data.get("TELEGRAM_MAX_LIVE_AGE_SECONDS", "120"))
             reconnect = int(data.get("TELEGRAM_RECONNECT_ATTEMPTS", "5"))
-            daily_loss = Decimal(data.get("MAX_DAILY_LOSS_USD", str(DAILY_NET_LOSS_LIMIT_USD)))
+            live_mode = (
+                not _bool("PAPER_ONLY", data.get("PAPER_ONLY", "true"))
+                and _bool("LIVE_ENABLED", data.get("LIVE_ENABLED", "false"))
+                and _bool("ALLOW_BROKER_WRITES", data.get("ALLOW_BROKER_WRITES", "false"))
+            )
+            daily_loss = None if live_mode else Decimal(
+                data.get("MAX_DAILY_LOSS_USD", str(DAILY_NET_LOSS_LIMIT_USD))
+            )
             slippage_pct = Decimal(data.get("SLIPPAGE_TOLERANCE_PCT", "0") or "0")
             kill_chat_id = _optional_int(data, "KILL_SWITCH_TELEGRAM_CHAT_ID")
         except (ValueError, InvalidOperation) as exc:
@@ -272,7 +281,7 @@ class Settings:
         ).validate()
 
     def public_summary(self) -> dict[str, str | int | bool]:
-        return {
+        summary: dict[str, str | int | bool] = {
             "mode": self.mode,
             "live_account_ending": self.live_account_ending or "",
             "paper_only": self.paper_only,
@@ -286,8 +295,11 @@ class Settings:
             "max_premium_per_signal_usd": str(self.max_premium_per_signal_usd),
             "max_total_exposure_usd": (
                 None if self.max_total_exposure_usd is None else str(self.max_total_exposure_usd)),
-            "max_daily_loss_usd": str(self.max_daily_loss_usd),
+            "daily_loss_policy": "NO_DAILY_LOSS_STOP" if self.is_live else "PAPER_DAILY_LIMIT",
             "entry_price_policy": "EXACT_ALERT_LIMIT",
             "kill_switch_enabled": self.kill_switch_enabled,
             "entry_timeout_seconds": self.entry_timeout_seconds,
         }
+        if not self.is_live:
+            summary["max_daily_loss_usd"] = str(self.max_daily_loss_usd)
+        return summary

@@ -36,7 +36,7 @@ def test_refused_exit_blocks_new_entries_and_survives_dispatcher_reconstruction(
             kind=EventKind.NEW, origin=EventOrigin.LIVE, reply_to_message_id=reply,
         ), session_started_at_utc=clock.now() - timedelta(minutes=5))
 
-    ingest(901, "BTO SPY 680C 11/20 @ 1.20")
+    ingest(901, "BTO SPY 680C 12/18 @ 1.20")
     first = dispatcher()
     assert asyncio.run(first.run_once()).entry_orders_submitted == 1
     fake.fill_order(next(iter(fake.orders)), filled_quantity=1, fill_price="1.20")
@@ -45,7 +45,7 @@ def test_refused_exit_blocks_new_entries_and_survives_dispatcher_reconstruction(
     fake.set_quote("opt-spy-680c", "1.80", "1.85", updated_at=clock.now())
     fake.set_quote("opt-qqq-500c", "2.00", "2.02", updated_at=clock.now())
     ingest(902, "SPY ALL OUT", reply=901)
-    ingest(903, "BTO QQQ 500C 11/20 @ 2.00")
+    ingest(903, "BTO QQQ 500C 12/18 @ 2.00")
     original = fake.call_tool
 
     async def review_refusal(name, arguments):

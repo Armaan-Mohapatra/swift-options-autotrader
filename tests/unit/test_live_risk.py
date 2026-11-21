@@ -16,8 +16,8 @@ import pytest
 from swift_autotrader.orders.risk import Preflight, RiskCeilings, rejection_reason
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 
-CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
-OTHER_CONTRACT = OptionContract("SPY", OptionRight.PUT, Decimal("670"), date(2026, 11, 20))
+CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
+OTHER_CONTRACT = OptionContract("SPY", OptionRight.PUT, Decimal("670"), date(2026, 12, 18))
 
 
 def make_ceilings(

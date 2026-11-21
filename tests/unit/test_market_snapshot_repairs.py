@@ -135,7 +135,7 @@ def test_constant_tick_is_unchanged_and_has_no_schedule():
 
 
 @pytest.mark.parametrize(("exc", "code"), [
-    (asyncio.TimeoutError(), "MARKET_DATA_TIMEOUT"),
+    (TimeoutError(), "MARKET_DATA_TIMEOUT"),
     (MCPContractError("x"), "MARKET_CONTRACT_UNVERIFIED"),
     (MCPReadError("x"), "MARKET_BROKER_READ_FAILED"),
     (MarketEvidenceUnavailable("x"), "MARKET_DATA_UNAVAILABLE"),
@@ -171,8 +171,9 @@ def test_quote_observed_after_snapshot_start_is_fresh_at_response():
 
 
 def test_quote_stale_at_response_is_still_rejected():
-    from swift_autotrader.broker.robinhood_mcp import MCPContractError
     from datetime import timedelta
+
+    from swift_autotrader.broker.robinhood_mcp import MCPContractError
     response = NOW + timedelta(seconds=10)
     inst = MCPInstrument("opt-1", CONTRACT, True, "chain-1", minimum_tick=Decimal("0.05"), multiplier=100)
     broker = _quote_broker(NOW - timedelta(seconds=14))  # 24 s old when it arrived

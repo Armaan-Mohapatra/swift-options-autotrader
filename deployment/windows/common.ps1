@@ -123,7 +123,7 @@ function Set-SwiftEnvironment {
         'paper_dispatch_enabled', 'paper_data_source', 'paper_max_premium_usd',
         'paper_max_contracts', 'paper_max_exposure_usd', 'paper_max_open_signals',
         'paper_max_daily_net_loss_usd', 'status_notifications_enabled', 'status_chat_id',
-        'kill_switch_chat_id', 'max_contracts_per_signal', 'max_daily_loss_usd',
+        'kill_switch_chat_id', 'max_contracts_per_signal',
         'max_premium_per_signal_usd', 'log_level', 'robinhood_mcp_account'
     )) {
         if ($null -eq $cfg.PSObject.Properties[$name]) {
@@ -261,7 +261,7 @@ function Set-SwiftEnvironment {
         $env:BROKER_BACKEND = 'robinhood_mcp'
         $env:DB_PATH = Join-Path $InstallRoot 'data\live.sqlite3'
         $env:MAX_CONTRACTS_PER_SIGNAL = if ($cfg.max_contracts_per_signal) { [string]$cfg.max_contracts_per_signal } else { '1' }
-        $env:MAX_DAILY_LOSS_USD = if ($cfg.max_daily_loss_usd) { [string]$cfg.max_daily_loss_usd } else { '750' }
+        Remove-Item Env:MAX_DAILY_LOSS_USD -ErrorAction SilentlyContinue
         # Entries always use the exact alert limit; a slippage allowance is rejected by the app.
         Remove-Item Env:SLIPPAGE_TOLERANCE_PCT -ErrorAction SilentlyContinue
         $env:MAX_PREMIUM_PER_SIGNAL_USD = if ($cfg.max_premium_per_signal_usd) { [string]$cfg.max_premium_per_signal_usd } else { '0' }

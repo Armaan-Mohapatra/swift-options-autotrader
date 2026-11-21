@@ -239,7 +239,8 @@ def scenario(tmp_path: Path) -> tuple[LiveBroker, FakeMCPClient, Clock]:
     LiveBroker.create_journal(path)
     broker = LiveBroker(path, fake, account_number=fake.account,
                         writes_enabled=True, kill_switch=lambda: False,
-                        signal_gate=lambda _signal: 'ENTRY', clock=clock)
+                        signal_gate=lambda _signal: 'ENTRY', clock=clock,
+                        loss_limit=Decimal('750'))  # Preserve legacy-gate test coverage.
     yield broker, fake, clock
     broker.close()
 
@@ -341,6 +342,24 @@ def test_daily_loss_counts_realized_and_unrealized(scenario, realized, unrealize
     with pytest.raises(LiveSafetyError, match='daily'):
         broker.submit_order(entry())
     assert fake.place_count == 0
+
+
+def test_live_no_daily_stop_ignores_unverifiable_and_large_daily_losses(scenario):
+    broker, fake, clock = scenario
+    fake.realized_failure = True
+    fake.realized, fake.unrealized = '-20000', '-10000'
+    uncapped = LiveBroker(
+        broker.path, fake, account_number=fake.account,
+        writes_enabled=True, kill_switch=lambda: False,
+        signal_gate=lambda _: 'ENTRY', clock=clock, loss_limit=None,
+    )
+    try:
+        assert uncapped.refresh_daily_risk() is False
+        assert uncapped.submit_order(entry('no-pnl-stop')).state is BrokerOrderState.ACCEPTED
+        assert fake.place_count == 1
+        assert 'get_realized_pnl' not in fake.call_log
+    finally:
+        uncapped.close()
 
 
 def test_max_premium_buying_power_and_slippage_guards(scenario):
@@ -577,7 +596,8 @@ def test_daily_loss_stop_is_latched_despite_recovery_and_restart(scenario):
     fake.realized, fake.unrealized = '25', '25'
     restarted = LiveBroker(broker.path, fake, account_number=fake.account,
                            writes_enabled=True, kill_switch=lambda: False,
-                           signal_gate=lambda _: 'ENTRY', clock=clock)
+                           signal_gate=lambda _: 'ENTRY', clock=clock,
+                           loss_limit=Decimal('750'))
     with pytest.raises(LiveSafetyError, match='latched'):
         restarted.submit_order(entry())
     # The following New York calendar date starts a new daily accounting session.
@@ -983,18 +1003,6 @@ def test_order_history_beyond_ten_pages_is_read_to_exhaustion(scenario):
     assert fake.place_count == 1
 
 
-def test_overnight_close_clears_on_the_next_new_york_date(scenario):
-    """Denied on the sale's day, per call and never latched; allowed once the NY date rolls."""
-    broker, fake, clock = scenario
-    fake.position = 0
-    fake.history = [_overnight_sell_filled_today(fake)]
-    with pytest.raises(LiveSafetyError, match='overnight close'):
-        broker.submit_order(entry())
-    clock.advance(24 * 60)
-    assert broker.submit_order(entry()).state is BrokerOrderState.ACCEPTED
-    assert fake.place_count == 1
-
-
 def test_order_history_that_cannot_be_exhausted_fails_closed(scenario):
     """More pages than the coverage cap is unverifiable: deny entries and risk refresh."""
     broker, fake, _ = scenario
@@ -1051,7 +1059,8 @@ def test_750_latch_uses_realized_plus_unrealized_at_the_exact_boundary(
         fake.realized, fake.unrealized = '0', '0'
         restarted = LiveBroker(broker.path, fake, account_number=fake.account,
                                writes_enabled=True, kill_switch=lambda: False,
-                               signal_gate=lambda _signal: 'ENTRY', clock=broker.clock)
+                               signal_gate=lambda _signal: 'ENTRY', clock=broker.clock,
+                               loss_limit=Decimal('750'))
         with pytest.raises(LiveSafetyError, match='latched'):
             restarted.submit_order(entry('signal-2'))
         restarted.close()

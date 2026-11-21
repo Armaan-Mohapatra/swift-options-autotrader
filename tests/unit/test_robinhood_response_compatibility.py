@@ -19,7 +19,7 @@ from swift_autotrader.broker.robinhood_mcp import (
 from swift_autotrader.orders.commands import OrderIntent, OrderSide
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 
-CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
 ACCOUNT = MCPAccount("test-live-acc", True, "option_level_2")
 INSTRUMENT = MCPInstrument("test-option-id-123", CONTRACT, True, "test-chain-id")
 

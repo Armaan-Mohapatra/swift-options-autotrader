@@ -43,8 +43,8 @@ from tests.fixtures.live_mocks import (
 from tests.integration.test_engine_flatten import seed_signal_and_entry
 
 CHANNEL_ID = -1001234567890
-SPY_CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
-QQQ_CONTRACT = OptionContract("QQQ", OptionRight.CALL, Decimal("520"), date(2026, 11, 20))
+SPY_CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
+QQQ_CONTRACT = OptionContract("QQQ", OptionRight.CALL, Decimal("520"), date(2026, 12, 18))
 
 
 class ScenarioQuoteFeed:
@@ -149,7 +149,7 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
     Exercises: F1 (Telegram Alerts), F2 (Real-time MCP Fills), F3 (Live Risk Ceilings),
                F4 (Intelligent Slippage Resolution), F5 (Live Market Dispatcher).
     Flow:
-    1. Swift alert: 'SPY 680C 11/20 @ 1.20'
+    1. Swift alert: 'SPY 680C 12/18 @ 1.20'
     2. NBBO Ask at $1.22; the entry limit stays the exact $1.20 alert premium
     3. LiveDispatcher places BUY_TO_OPEN via the canonical LiveBroker to StatefulFakeMCP
     4. MCP order filled at $1.20
@@ -201,7 +201,7 @@ def test_scenario_1_normal_ingestion_execution_scaleout(tmp_path: Path) -> None:
     )
 
     # 1. Swift alert arrives
-    ingest_scenario_message(store, clock, "SPY 680C 11/20 @ 1.20", msg_id=101)
+    ingest_scenario_message(store, clock, "SPY 680C 12/18 @ 1.20", msg_id=101)
 
     # 3. First dispatch cycle: Ingest alert and place BUY order
     result = asyncio.run(dispatcher.run_once())
@@ -274,7 +274,7 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
     Exercises: F1 (Telegram Alerts), F3 (Live Risk Ceilings),
                F4 (Intelligent Slippage Resolution), F5 (Live Market Dispatcher).
     Flow:
-    1. Rapid momentum alert arrives: 'QQQ 520C 11/20 @ 2.00'
+    1. Rapid momentum alert arrives: 'QQQ 520C 12/18 @ 2.00'
     2. Market ask spikes to $2.35 (+17.5% > 10% tolerance ceiling $2.20)
     3. LiveBroker's 10% ask guard refuses the entry in preflight (the limit is never raised).
     4. Zero orders placed on MCP; the exact-limit intent is a recorded unsent refusal.
@@ -291,7 +291,7 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
         chain_id="synthetic-qqq-chain",
         symbol="QQQ",
         strike="520.0000",
-        expiration="2026-11-20",
+        expiration="2026-12-18",
         option_type="call",
         bid="2.30",
         ask="2.35",
@@ -335,7 +335,7 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
     )
 
     # 1. Ingest Telegram message
-    ingest_scenario_message(store, clock, "QQQ 520C 11/20 @ 2.00", msg_id=201)
+    ingest_scenario_message(store, clock, "QQQ 520C 12/18 @ 2.00", msg_id=201)
 
     # 2. The gap-up never raises the limit, and a >10% ask is a REJECTION guard at LiveBroker:
     #    nothing is placed at Robinhood.
@@ -362,17 +362,17 @@ def test_scenario_2_runaway_market_gap_up_slippage_protection(tmp_path: Path) ->
     assert len(mcp.orders) == 0
 
 
-def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
-    """Scenario 3: Daily Loss Limit Circuit Breaker Tripped.
+def test_scenario_3_live_daily_loss_is_not_an_entry_gate(tmp_path: Path) -> None:
+    """LIVE permits entries after losses; independent PAPER risk math stays covered.
 
     Exercises: F1 (Telegram Alerts), F3 (Live Risk Ceilings), F5 (Live Market Dispatcher).
     Flow:
     1. Session starts with max daily loss ceiling of $500
     2. Trade 1 executes and closes with a realized loss of $520 ($8.00 entry -> $2.80 exit)
     3. Reconciled realized loss breaches ceiling ($520 > $500 max_daily_loss_usd)
-    4. New incoming entry alert arrives ('SPY 680C 11/20 @ 1.20')
-    5. LiveDispatcher.run_once() evaluates risk preflight, rejects with DAILY_LOSS_LIMIT_REACHED
-    6. Entry order suppressed; zero new broker orders submitted; capital preserved.
+    4. New incoming entry alert arrives ('SPY 680C 12/18 @ 1.20')
+    5. LiveDispatcher.run_once() does not use daily P&L as an entry prerequisite.
+    6. Entry may submit when all non-retired safety checks pass.
     7. Standalone mathematical boundary checks verify under-ceiling, exact, and breached thresholds.
     """
     db_path = tmp_path / "data" / "swift.sqlite3"
@@ -419,7 +419,7 @@ def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
     # 1. Trade 1: Entry @ $8.00
     feed.bid = Decimal("7.95")
     feed.ask = Decimal("8.00")
-    ingest_scenario_message(store, clock, "SPY 680C 11/20 @ 8.00", msg_id=301)
+    ingest_scenario_message(store, clock, "SPY 680C 12/18 @ 8.00", msg_id=301)
     res_entry = asyncio.run(dispatcher.run_once())
     assert res_entry.entry_orders_submitted == 1
     assert len(mcp.orders) == 1
@@ -446,13 +446,13 @@ def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
     clock.advance(seconds=15)
     feed.bid = Decimal("1.20")
     feed.ask = Decimal("1.22")
-    ingest_scenario_message(store, clock, "SPY 680C 11/20 @ 1.20", msg_id=303)
+    ingest_scenario_message(store, clock, "SPY 680C 12/18 @ 1.20", msg_id=303)
 
-    # 5. LiveDispatcher executes cycle; daily loss circuit breaker blocks submission
-    res_blocked = asyncio.run(dispatcher.run_once())
-    assert res_blocked.status == "LIVE_CYCLE_COMPLETED"
-    assert res_blocked.entry_orders_submitted == 0  # Blocked
-    assert len(mcp.orders) == 2  # No new orders submitted to MCP broker
+    # 5. Daily P&L does not veto the intent; an independently stale quote can refuse send.
+    res_allowed = asyncio.run(dispatcher.run_once())
+    assert res_allowed.status == "LIVE_CYCLE_COMPLETED"
+    assert res_allowed.entry_orders_submitted == 0
+    assert len(mcp.orders) == 2
 
     # 6. Verify durable decision and alert in SQLite
     import sqlite3
@@ -460,18 +460,20 @@ def test_scenario_3_daily_loss_circuit_breaker_tripped(tmp_path: Path) -> None:
         decisions = db.execute(
             "SELECT outcome, reason FROM paper_engine_decisions ORDER BY decided_at_utc DESC"
         ).fetchall()
-        assert decisions[0][0] == "BLOCKED"
-        assert decisions[0][1] == "DAILY_LOSS_CEILING_REACHED"
+        assert decisions[0] == ("INTENT_RECORDED", None)
+        assert db.execute(
+            "SELECT 1 FROM paper_engine_alerts WHERE code='DAILY_LOSS_CEILING_REACHED'"
+        ).fetchone() is None
 
         alerts = db.execute(
             "SELECT code FROM paper_engine_alerts WHERE code='DAILY_LOSS_CEILING_REACHED'"
         ).fetchall()
-        assert len(alerts) >= 1
+        assert not alerts
 
     # 7. Local notification scan
     dispatcher.notifications.scan()
     pending = dispatcher.notifications.pending(10)
-    assert any(n.code == "DAILY_LOSS_CEILING_REACHED" and n.category == "PAPER_ORDER" for n in pending)
+    assert not any(n.code == "DAILY_LOSS_CEILING_REACHED" for n in pending)
 
     # 8. Boundary unit checks preserved
     ceilings = RiskCeilings(
@@ -659,11 +661,11 @@ def test_scenario_7_concurrent_rapid_signals_have_no_trade_count_cap(tmp_path: P
     1. Owner contract: no trade-count or aggregate cap (buying power is the only bound)
     2. Multi-contract quote feed provides verified quotes for SPY, AAPL, NVDA, and QQQ
     3. Three rapid concurrent signals arrive before dispatch cycle runs:
-       - Alert 1: SPY 680C 11/20 @ 1.20
-       - Alert 2: AAPL 250C 11/20 @ 1.50
-       - Alert 3: NVDA 140C 11/20 @ 3.00
+       - Alert 1: SPY 680C 12/18 @ 1.20
+       - Alert 2: AAPL 250C 12/18 @ 1.50
+       - Alert 3: NVDA 140C 12/18 @ 3.00
     4. LiveDispatcher.run_once() submits one contract for each of the 3 alerts.
-    5. Positions fill; a 4th alert ('QQQ 500C 11/20 @ 2.00') also enters.
+    5. Positions fill; a 4th alert ('QQQ 500C 12/18 @ 2.00') also enters.
     6. Standalone checks: a VOLUNTARY operator open-signal cap is still honoured.
     """
     db_path = tmp_path / "data" / "swift.sqlite3"
@@ -675,9 +677,9 @@ def test_scenario_7_concurrent_rapid_signals_have_no_trade_count_cap(tmp_path: P
     mcp_broker = RobinhoodMCPBroker(mcp)
     account = MCPAccount("live-acc-sc7", True, "option_level_2")
 
-    aapl_contract = OptionContract("AAPL", OptionRight.CALL, Decimal("250"), date(2026, 11, 20))
-    nvda_contract = OptionContract("NVDA", OptionRight.CALL, Decimal("140"), date(2026, 11, 20))
-    qqq_contract_500 = OptionContract("QQQ", OptionRight.CALL, Decimal("500"), date(2026, 11, 20))
+    aapl_contract = OptionContract("AAPL", OptionRight.CALL, Decimal("250"), date(2026, 12, 18))
+    nvda_contract = OptionContract("NVDA", OptionRight.CALL, Decimal("140"), date(2026, 12, 18))
+    qqq_contract_500 = OptionContract("QQQ", OptionRight.CALL, Decimal("500"), date(2026, 12, 18))
 
     feed = ScenarioQuoteFeed(
         clock,
@@ -722,11 +724,11 @@ def test_scenario_7_concurrent_rapid_signals_have_no_trade_count_cap(tmp_path: P
     )
 
     # 1. Rapid concurrent burst: 3 alerts arrive in rapid succession
-    ingest_scenario_message(store, clock, "SPY 680C 11/20 @ 1.20", msg_id=701)
+    ingest_scenario_message(store, clock, "SPY 680C 12/18 @ 1.20", msg_id=701)
     clock.advance(seconds=1)
-    ingest_scenario_message(store, clock, "AAPL 250C 11/20 @ 1.50", msg_id=702)
+    ingest_scenario_message(store, clock, "AAPL 250C 12/18 @ 1.50", msg_id=702)
     clock.advance(seconds=1)
-    ingest_scenario_message(store, clock, "NVDA 140C 11/20 @ 3.00", msg_id=703)
+    ingest_scenario_message(store, clock, "NVDA 140C 12/18 @ 3.00", msg_id=703)
 
     # 2. First dispatch cycle: owner contract has NO trade-count cap, so every original
     #    ENTRY submits exactly one contract; only buying power bounds exposure.
@@ -752,7 +754,7 @@ def test_scenario_7_concurrent_rapid_signals_have_no_trade_count_cap(tmp_path: P
     asyncio.run(dispatcher.run_once())
 
     # 4. Across-cycle: a 4th alert while three positions are open still enters.
-    ingest_scenario_message(store, clock, "QQQ 500C 11/20 @ 2.00", msg_id=704)
+    ingest_scenario_message(store, clock, "QQQ 500C 12/18 @ 2.00", msg_id=704)
     clock.advance(seconds=5)
     res4 = asyncio.run(dispatcher.run_once())
     assert res4.entry_orders_submitted == 1

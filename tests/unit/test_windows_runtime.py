@@ -306,7 +306,10 @@ def test_windows_runtime_drains_output_and_bounds_worker_logs(install: Path) -> 
     child = Child("noisy", ("test",))
     supervisor._start(child)
     assert child.process is not None
-    assert child.process.wait(timeout=10) == 0
+    # The large logging and stdout payload can take substantially longer on
+    # Windows hosts with synchronous log rotation; the longer bound still
+    # fails promptly if either pipe is left undrained.
+    assert child.process.wait(timeout=120) == 0
     for thread in supervisor._threads:
         thread.join(timeout=3)
         assert not thread.is_alive()

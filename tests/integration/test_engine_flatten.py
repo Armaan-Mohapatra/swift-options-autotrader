@@ -27,8 +27,8 @@ from tests.fixtures.live_mocks import (
     StatefulFakeMCP,
 )
 
-SPY_CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
-QQQ_CONTRACT = OptionContract("QQQ", OptionRight.CALL, Decimal("500"), date(2026, 11, 20))
+SPY_CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
+QQQ_CONTRACT = OptionContract("QQQ", OptionRight.CALL, Decimal("500"), date(2026, 12, 18))
 
 
 def seed_signal_and_entry(

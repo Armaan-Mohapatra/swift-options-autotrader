@@ -114,9 +114,9 @@ def test_multiple_simultaneous_alerts_scoped_to_authorized_symbol(managed_live_e
 
     # Ingest 3 simultaneous alerts
     for mid, body in [
-        (401, "BTO SPY 680C 11/20 @ 1.20"),
-        (402, "BTO QQQ 500C 11/20 @ 2.00"),
-        (403, "BTO AAPL 250C 11/20 @ 1.50"),
+        (401, "BTO SPY 680C 12/18 @ 1.20"),
+        (402, "BTO QQQ 500C 12/18 @ 2.00"),
+        (403, "BTO AAPL 250C 12/18 @ 1.50"),
     ]:
         msg = TelegramMessage(
             channel_id=settings.telegram_channel_id,
@@ -176,8 +176,8 @@ def test_multiple_simultaneous_alerts_scoped_to_target_message_id(managed_live_e
 
     # Ingest 2 alerts
     for mid, body in [
-        (501, "BTO SPY 680C 11/20 @ 1.20"),
-        (502, "BTO AAPL 250C 11/20 @ 1.50"),
+        (501, "BTO SPY 680C 12/18 @ 1.20"),
+        (502, "BTO AAPL 250C 12/18 @ 1.50"),
     ]:
         msg = TelegramMessage(
             channel_id=settings.telegram_channel_id,
@@ -234,13 +234,13 @@ def test_previously_recorded_signals_with_no_qualifying_parser_decisions(managed
     with sqlite3.connect(live_db) as conn:
         conn.execute(
             "INSERT INTO raw_events(channel_id, telegram_message_id, edit_version, received_at_utc, sent_at_utc, body) "
-            "VALUES(?, '99', 0, ?, ?, 'BTO NVDA 140C 11/20 @ 3.00')",
+            "VALUES(?, '99', 0, ?, ?, 'BTO NVDA 140C 12/18 @ 3.00')",
             (str(settings.telegram_channel_id), now.isoformat(), now.isoformat()),
         )
         raw_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.execute(
             "INSERT INTO option_signals(signal_id, source_event_id, underlying, option_right, strike, expiration_date, original_limit, state, created_at_utc) "
-            "VALUES('sig-prior-nvda', ?, 'NVDA', 'CALL', '140.0', '2026-11-20', '3.00', 'SEEN', ?)",
+            "VALUES('sig-prior-nvda', ?, 'NVDA', 'CALL', '140.0', '2026-12-18', '3.00', 'SEEN', ?)",
             (raw_id, now.isoformat()),
         )
         conn.commit()
@@ -324,7 +324,7 @@ def test_unmatched_authorization_scope_fails_closed(managed_live_env) -> None:
         message_id=601,
         sent_at_utc=now,
         received_at_utc=now,
-        body="BTO SPY 680C 11/20 @ 1.20",
+        body="BTO SPY 680C 12/18 @ 1.20",
         kind=EventKind.NEW,
         origin=EventOrigin.LIVE,
     )
@@ -370,7 +370,7 @@ def test_durable_acceptance_state_prevents_duplicate_on_restart(managed_live_env
         message_id=701,
         sent_at_utc=now,
         received_at_utc=now,
-        body="BTO SPY 680C 11/20 @ 1.20",
+        body="BTO SPY 680C 12/18 @ 1.20",
         kind=EventKind.NEW,
         origin=EventOrigin.LIVE,
     )
@@ -407,7 +407,7 @@ def test_durable_acceptance_state_prevents_duplicate_on_restart(managed_live_env
         message_id=702,
         sent_at_utc=now,
         received_at_utc=now,
-        body="BTO QQQ 500C 11/20 @ 2.00",
+        body="BTO QQQ 500C 12/18 @ 2.00",
         kind=EventKind.NEW,
         origin=EventOrigin.LIVE,
     )
@@ -457,7 +457,7 @@ def test_provider_required_approval_blocks_placement(managed_live_env) -> None:
         message_id=801,
         sent_at_utc=now,
         received_at_utc=now,
-        body="BTO SPY 680C 11/20 @ 1.20",
+        body="BTO SPY 680C 12/18 @ 1.20",
         kind=EventKind.NEW,
         origin=EventOrigin.LIVE,
     )
@@ -519,7 +519,7 @@ def test_complete_supervised_order_lifecycle(managed_live_env, exit_origin) -> N
         message_id=901,
         sent_at_utc=now,
         received_at_utc=now,
-        body="BTO SPY 680C 11/20 @ 1.20",
+        body="BTO SPY 680C 12/18 @ 1.20",
         kind=EventKind.NEW,
         origin=EventOrigin.LIVE,
     )
@@ -620,7 +620,7 @@ def test_cancellation_and_watchdog_unfilled_order(managed_live_env) -> None:
         message_id=950,
         sent_at_utc=now,
         received_at_utc=now,
-        body="BTO SPY 680C 11/20 @ 1.20",
+        body="BTO SPY 680C 12/18 @ 1.20",
         kind=EventKind.NEW,
         origin=EventOrigin.LIVE,
     )
@@ -718,7 +718,7 @@ def test_brokerage_response_uncertainty_and_restart_reconciliation(managed_live_
         message_id=980,
         sent_at_utc=now,
         received_at_utc=now,
-        body="BTO SPY 680C 11/20 @ 1.20",
+        body="BTO SPY 680C 12/18 @ 1.20",
         kind=EventKind.NEW,
         origin=EventOrigin.LIVE,
     )
@@ -807,7 +807,7 @@ def test_exact_supervised_receipt_enforced_before_broker_submission(managed_live
     store.ingest(
         TelegramMessage(
             channel_id=settings.telegram_channel_id, message_id=1001,
-            sent_at_utc=now, received_at_utc=now, body="BTO SPY 680C 11/20 @ 1.20",
+            sent_at_utc=now, received_at_utc=now, body="BTO SPY 680C 12/18 @ 1.20",
             kind=EventKind.NEW, origin=EventOrigin.LIVE,
         ),
         session_started_at_utc=now - timedelta(minutes=5),
@@ -816,7 +816,7 @@ def test_exact_supervised_receipt_enforced_before_broker_submission(managed_live
         revision_id = conn.execute(
             "SELECT revision_id FROM telegram_message_revisions WHERE message_id=1001"
         ).fetchone()[0]
-    contract = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+    contract = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
     scope = AcceptanceScope(
         settings.robinhood_mcp_account, settings.telegram_channel_id, 1001,
         revision_id, contract, 1, Decimal("1.25"), now + timedelta(seconds=90),

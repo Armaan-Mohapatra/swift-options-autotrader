@@ -17,7 +17,7 @@ from swift_autotrader.orders.exposure_state import (
 from swift_autotrader.signals.identity import OptionContract, OptionRight
 
 NOW = datetime(2026, 11, 16, 15, 0, tzinfo=UTC)
-CONTRACT = OptionContract("SYNTH", OptionRight.CALL, Decimal("100"), date(2026, 11, 20))
+CONTRACT = OptionContract("SYNTH", OptionRight.CALL, Decimal("100"), date(2026, 12, 18))
 SCOPE = AcceptanceScope("SYNTHETIC", -1001, 12, 15, CONTRACT, 1, Decimal("1.25"), NOW + timedelta(minutes=1))
 
 
@@ -60,7 +60,7 @@ def test_invalid_scope_is_rejected(changes):
 def receipt():
     return dict(version=1, account_sha256=hashlib.sha256(b"SYNTHETIC").hexdigest(),
                 channel_id=-1001, message_id=12, revision_id=15, underlying="SYNTH",
-                right="CALL", strike="100", expiration="2026-11-20", quantity=1,
+                right="CALL", strike="100", expiration="2026-12-18", quantity=1,
                 maximum_limit="1.25", expires_at="2026-11-16T15:01:00Z")
 
 

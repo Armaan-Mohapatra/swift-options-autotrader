@@ -26,7 +26,7 @@ from swift_autotrader.signals.identity import OptionContract, OptionRight
 
 NOW = datetime(2026, 11, 13, 15, 0, tzinfo=UTC)
 CALL = OptionContract('SPY', OptionRight.CALL, Decimal('680'), date(2026, 11, 13))
-OTHER = OptionContract('SPY', OptionRight.CALL, Decimal('680'), date(2026, 11, 20))
+OTHER = OptionContract('SPY', OptionRight.CALL, Decimal('680'), date(2026, 12, 18))
 
 
 class FakeCalendar:

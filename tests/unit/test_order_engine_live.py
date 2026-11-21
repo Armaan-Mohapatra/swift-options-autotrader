@@ -28,8 +28,8 @@ from swift_autotrader.signals.identity import OptionContract, OptionRight
 from tests.fixtures.live_mocks import StatefulFakeMCP
 
 NOW = datetime(2026, 11, 16, 14, 30, tzinfo=UTC)
-CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
-OTHER = OptionContract("SPY", OptionRight.PUT, Decimal("670"), date(2026, 11, 20))
+CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
+OTHER = OptionContract("SPY", OptionRight.PUT, Decimal("670"), date(2026, 12, 18))
 
 
 class FakeClock:

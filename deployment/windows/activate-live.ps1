@@ -108,7 +108,7 @@ function Wait-TaskNotRunning {
 
 function Clear-LiveEnvironment {
     foreach ($name in @('SWIFT_INSTALL_ROOT','PAPER_ONLY','LIVE_ENABLED','ALLOW_BROKER_WRITES',
-        'BROKER_BACKEND','DB_PATH','MAX_CONTRACTS_PER_SIGNAL','MAX_DAILY_LOSS_USD',
+        'BROKER_BACKEND','DB_PATH','MAX_CONTRACTS_PER_SIGNAL',
         'MAX_PREMIUM_PER_SIGNAL_USD','LIVE_JOURNAL_PATH','ENTRY_TIMEOUT_SECONDS','LOG_LEVEL',
         'TELEGRAM_ENABLED','TELEGRAM_QUEUE_CAPACITY','TELEGRAM_MAX_LIVE_AGE_SECONDS',
         'TELEGRAM_RECONNECT_ATTEMPTS','ENABLE_TELEGRAM_STATUS_NOTIFICATIONS','ROBINHOOD_MCP_ACCOUNT',
@@ -168,7 +168,7 @@ try {
     Write-Output ('  Dedicated account ends in: ' + $diff.Json.account_ending)
     Write-Output ('  Receipt validity: ' + $ValidityDays + ' day(s), maximum 7.')
     Write-Output '  Limits: 1 long contract per eligible entry; premium at or below the candidate ceiling;'
-    Write-Output '          daily realized-plus-unrealized loss breaker at the candidate limit.'
+    Write-Output '          NO daily loss stop; losses may exceed the previous $750 daily threshold.'
     Write-Output '  After activation: entries are PAUSED until you type RESUME LIVE ENTRIES.'
     if ($DryRun) {
         Write-Output 'DRY RUN: all gates and changes were shown. Nothing was changed.'
@@ -178,8 +178,8 @@ try {
     Write-Output '== 3. Owner confirmation (typed locally)'
     $typed = (Read-Host 'Type the last four digits of the dedicated account shown above').Trim()
     if ($typed -ne [string]$diff.Json.account_ending) { throw 'REFUSED: account ending does not match. Nothing was changed.' }
-    $phrase = Read-Host 'Type exactly ENABLE LIVE TRADING to continue (anything else cancels)'
-    if ($phrase -cne 'ENABLE LIVE TRADING') { throw 'REFUSED: confirmation not given. Nothing was changed.' }
+    $phrase = Read-Host 'Type exactly ENABLE LIVE TRADING WITH NO DAILY LOSS STOP to continue (anything else cancels)'
+    if ($phrase -cne 'ENABLE LIVE TRADING WITH NO DAILY LOSS STOP') { throw 'REFUSED: confirmation not given. Nothing was changed.' }
 
     Write-Output '== 4. Verified backups (configuration, manifest, tasks, secrets, control and journal databases)'
     New-Item -ItemType Directory -Path $backupDir | Out-Null

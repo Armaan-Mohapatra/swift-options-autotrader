@@ -18,7 +18,7 @@ from swift_autotrader.signals.lineage import SignalMatcher, StaticInstrumentCata
 CHANNEL = -1001234000001
 SENT = "2026-11-16T15:30:00.000000Z"
 
-CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 11, 20))
+CONTRACT = OptionContract("SPY", OptionRight.CALL, Decimal("680"), date(2026, 12, 18))
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ def db(tmp_path: Path) -> Path:
 def catalog() -> StaticInstrumentCatalog:
     return StaticInstrumentCatalog([
         CONTRACT,
-        OptionContract("QQQ", OptionRight.CALL, Decimal("500"), date(2026, 11, 20)),
+        OptionContract("QQQ", OptionRight.CALL, Decimal("500"), date(2026, 12, 18)),
     ])
 
 
@@ -76,7 +76,7 @@ def seed_msg(
 def test_delayed_exit_with_active_open_position_is_recorded(db: Path, catalog: StaticInstrumentCatalog):
     """When an active open position exists, a delayed exit (eligible=False) must NOT be stranded."""
     # 1. Entry message processed normally
-    seed_msg(db, 1, "SPY 680C 11/20 @ 1.20", eligible=True)
+    seed_msg(db, 1, "SPY 680C 12/18 @ 1.20", eligible=True)
     matcher = SignalMatcher(db, CHANNEL, catalog=catalog)
     res1 = matcher.process_pending()
     assert len(res1) == 1
@@ -104,7 +104,7 @@ def test_delayed_exit_with_active_open_position_is_recorded(db: Path, catalog: S
 
 def test_delayed_exit_without_active_position_is_skipped(db: Path, catalog: StaticInstrumentCatalog):
     """When no position is held, a delayed exit (eligible=False) is skipped as non-actionable."""
-    seed_msg(db, 10, "SPY 680C 11/20 @ 1.20", eligible=True)
+    seed_msg(db, 10, "SPY 680C 12/18 @ 1.20", eligible=True)
     matcher = SignalMatcher(db, CHANNEL, catalog=catalog)
     matcher.process_pending()
 
@@ -118,7 +118,7 @@ def test_delayed_exit_without_active_position_is_skipped(db: Path, catalog: Stat
 
 def test_stale_entry_message_is_skipped(db: Path, catalog: StaticInstrumentCatalog):
     """Stale entry alert with eligible=False is never promoted to an order signal."""
-    seed_msg(db, 20, "SPY 680C 11/20 @ 1.20", eligible=False)
+    seed_msg(db, 20, "SPY 680C 12/18 @ 1.20", eligible=False)
     matcher = SignalMatcher(db, CHANNEL, catalog=catalog)
     res = matcher.process_pending()
     assert len(res) == 1
@@ -140,7 +140,7 @@ def test_duplicate_contract_position_blocked_by_engine(db: Path):
     with sqlite3.connect(db) as conn:
         conn.execute(
             "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,created_at_utc,state) "
-            "VALUES('sig-a', 1, 'SPY', 'CALL', '680', '2026-11-20', '1.20', '2026-11-16T15:29:00Z', 'SEEN')"
+            "VALUES('sig-a', 1, 'SPY', 'CALL', '680', '2026-12-18', '1.20', '2026-11-16T15:29:00Z', 'SEEN')"
         )
         conn.execute(
             "INSERT INTO order_intents(logical_order_id,signal_id,idempotency_key,side,requested_quantity,filled_quantity,limit_price,state) "
@@ -150,7 +150,7 @@ def test_duplicate_contract_position_blocked_by_engine(db: Path):
         # Second signal for the exact same contract
         conn.execute(
             "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,created_at_utc,state) "
-            "VALUES('sig-b', 2, 'SPY', 'CALL', '680', '2026-11-20', '1.25', '2026-11-16T15:29:30Z', 'SEEN')"
+            "VALUES('sig-b', 2, 'SPY', 'CALL', '680', '2026-12-18', '1.25', '2026-11-16T15:29:30Z', 'SEEN')"
         )
         conn.row_factory = sqlite3.Row
         signal_b = conn.execute("SELECT * FROM option_signals WHERE signal_id='sig-b'").fetchone()
@@ -175,7 +175,7 @@ def test_outstanding_risk_accounts_for_partially_filled_canceled_order(db: Path)
     with sqlite3.connect(db) as conn:
         conn.execute(
             "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,created_at_utc,state) "
-            "VALUES('sig-c', 3, 'SPY', 'CALL', '680', '2026-11-20', '2.00', '2026-11-16T15:00:00Z', 'PROCESSED')"
+            "VALUES('sig-c', 3, 'SPY', 'CALL', '680', '2026-12-18', '2.00', '2026-11-16T15:00:00Z', 'PROCESSED')"
         )
         # 3 requested, 1 filled, remainder canceled -> state is CANCELED
         conn.execute(
@@ -204,7 +204,7 @@ def test_pending_remainder_reserved_until_terminal_cancel(db, state, expected_ex
     with sqlite3.connect(db) as conn:
         conn.execute(
             "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,confirmed_avg_fill_price,created_at_utc,state) "
-            "VALUES('sig-risk', 1, 'SPY', 'CALL', '680', '2026-11-20', '2.00', '2.00', '2026-11-16T15:00:00Z', 'PARTIAL')"
+            "VALUES('sig-risk', 1, 'SPY', 'CALL', '680', '2026-12-18', '2.00', '2.00', '2026-11-16T15:00:00Z', 'PARTIAL')"
         )
         conn.execute(
             "INSERT INTO order_intents(logical_order_id,signal_id,idempotency_key,side,requested_quantity,filled_quantity,limit_price,state) "
@@ -223,7 +223,7 @@ def test_equivalent_strike_and_canceled_partial_fill_block_duplicate(db):
     with sqlite3.connect(db) as conn:
         conn.execute(
             "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,created_at_utc,state) "
-            "VALUES('sig-prior', 1, 'SPY', 'CALL', '680.00', '2026-11-20', '1.20', '2026-11-16T15:29:00Z', 'PARTIAL')"
+            "VALUES('sig-prior', 1, 'SPY', 'CALL', '680.00', '2026-12-18', '1.20', '2026-11-16T15:29:00Z', 'PARTIAL')"
         )
         conn.execute(
             "INSERT INTO order_intents(logical_order_id,signal_id,idempotency_key,side,requested_quantity,filled_quantity,limit_price,state) "
@@ -231,7 +231,7 @@ def test_equivalent_strike_and_canceled_partial_fill_block_duplicate(db):
         )
         conn.execute(
             "INSERT INTO option_signals(signal_id,source_event_id,underlying,option_right,strike,expiration_date,original_limit,created_at_utc,state) "
-            "VALUES('sig-next', 2, 'SPY', 'CALL', '680', '2026-11-20', '1.25', '2026-11-16T15:29:30Z', 'SEEN')"
+            "VALUES('sig-next', 2, 'SPY', 'CALL', '680', '2026-12-18', '1.25', '2026-11-16T15:29:30Z', 'SEEN')"
         )
         conn.row_factory = sqlite3.Row
         candidate = conn.execute("SELECT * FROM option_signals WHERE signal_id='sig-next'").fetchone()
@@ -244,7 +244,7 @@ def test_equivalent_strike_and_canceled_partial_fill_block_duplicate(db):
 def test_exit_predating_entry_is_skipped(db: Path, catalog: StaticInstrumentCatalog):
     """An exit message whose Telegram timestamp predates the entry signal is skipped."""
     # Entry at 15:30:00
-    seed_msg(db, 100, "SPY 680C 11/20 @ 1.20", sent="2026-11-16T15:30:00.000000Z")
+    seed_msg(db, 100, "SPY 680C 12/18 @ 1.20", sent="2026-11-16T15:30:00.000000Z")
     matcher = SignalMatcher(db, CHANNEL, catalog=catalog)
     res_entry = matcher.process_pending()
     assert len(res_entry) == 1

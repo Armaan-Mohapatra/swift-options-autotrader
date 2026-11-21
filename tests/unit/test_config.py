@@ -65,7 +65,7 @@ def test_live_configuration_validation_success(tmp_path: Path) -> None:
     assert settings.is_live is True
     assert settings.mode == "LIVE"
     assert settings.robinhood_mcp_account == "RH_ACC_123456"
-    assert settings.max_daily_loss_usd == Decimal("750")
+    assert settings.max_daily_loss_usd is None
     # Owner contract: no trade-count or aggregate-exposure cap is configured or implied.
     assert not hasattr(settings, "max_concurrent_positions")
     assert settings.public_summary()["entry_price_policy"] == "EXACT_ALERT_LIMIT"
@@ -133,10 +133,10 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="broker_backend='robinhood_mcp'"):
         Settings.from_env(env)
 
-    # Excessive daily loss
+    # Deprecated daily-loss setting has no effect in LIVE, regardless of amount.
     env = dict(base_env, MAX_DAILY_LOSS_USD="50000")
-    with pytest.raises(ConfigurationError, match="MAX_DAILY_LOSS_USD cannot exceed"):
-        Settings.from_env(env)
+    assert Settings.from_env(env).public_summary()["daily_loss_policy"] == "NO_DAILY_LOSS_STOP"
+    assert "max_daily_loss_usd" not in Settings.from_env(env).public_summary()
 
     # Any price-chasing allowance is refused; an explicit zero is tolerated.
     for value in ("-5", "10", "0.01", "NaN"):
@@ -154,19 +154,9 @@ def test_live_configuration_validation_failures(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="TELEGRAM_ENABLED=true"):
         Settings.from_env(env)
 
-    # Zero or negative daily loss
-    env = dict(base_env, MAX_DAILY_LOSS_USD="0")
-    with pytest.raises(ConfigurationError, match="MAX_DAILY_LOSS_USD must be positive"):
-        Settings.from_env(env)
-
-    env = dict(base_env, MAX_DAILY_LOSS_USD="-50")
-    with pytest.raises(ConfigurationError, match="MAX_DAILY_LOSS_USD must be positive"):
-        Settings.from_env(env)
-
-    # $750 is the hard ceiling; 750.01 is refused, 750 accepted.
-    with pytest.raises(ConfigurationError, match="MAX_DAILY_LOSS_USD cannot exceed"):
-        Settings.from_env(dict(base_env, MAX_DAILY_LOSS_USD="750.01"))
-    assert Settings.from_env(dict(base_env, MAX_DAILY_LOSS_USD="750")).max_daily_loss_usd == 750
+    # LIVE has no daily-loss circuit breaker; paper-only retains the legacy cap.
+    for value in ("0", "-50", "750.01"):
+        assert Settings.from_env(dict(base_env, MAX_DAILY_LOSS_USD=value)).is_live
 
     # Slippage tolerance > 25%
     env = dict(base_env, SLIPPAGE_TOLERANCE_PCT="25.5")

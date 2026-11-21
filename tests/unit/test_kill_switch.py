@@ -210,7 +210,7 @@ def test_flatten_cross_chat_spoofing_rejected(test_engine: PaperOrderEngine) -> 
 
 def test_kill_switch_cancel_command(mock_bot: TelegramKillSwitchBot, test_engine: PaperOrderEngine) -> None:
     """T1-F8-06: /cancel cancels open pending buy orders without triggering emergency halt."""
-    contract = OptionContract("SPY", OptionRight.CALL, Decimal("680"), datetime(2026, 11, 20).date())
+    contract = OptionContract("SPY", OptionRight.CALL, Decimal("680"), datetime(2026, 12, 18).date())
     now = datetime(2026, 11, 16, 14, 30, 0, tzinfo=UTC)
 
     # Insert signal and create resting entry order via engine

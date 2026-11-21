@@ -126,67 +126,67 @@ class StatefulFakeMCP:
         self.chains["SPY"] = {
             "id": "synthetic-spy-chain",
             "underlying_symbol": "SPY",
-            "expiration_dates": ["2026-11-20", "2026-11-27", "2026-12-18"],
+            "expiration_dates": ["2026-12-18", "2026-11-27", "2026-12-18"],
         }
         self.chains["QQQ"] = {
             "id": "synthetic-qqq-chain",
             "underlying_symbol": "QQQ",
-            "expiration_dates": ["2026-11-20", "2026-11-27"],
+            "expiration_dates": ["2026-12-18", "2026-11-27"],
         }
         self.chains["AAPL"] = {
             "id": "synthetic-aapl-chain",
             "underlying_symbol": "AAPL",
-            "expiration_dates": ["2026-11-20"],
+            "expiration_dates": ["2026-12-18"],
         }
         self.chains["NVDA"] = {
             "id": "synthetic-nvda-chain",
             "underlying_symbol": "NVDA",
-            "expiration_dates": ["2026-11-20"],
+            "expiration_dates": ["2026-12-18"],
         }
 
-        # Seed SPY 680C 2026-11-20
+        # Seed SPY 680C 2026-12-18
         self.add_instrument(
             instrument_id="opt-spy-680c",
             chain_id="synthetic-spy-chain",
             symbol="SPY",
             strike="680.0000",
-            expiration="2026-11-20",
+            expiration="2026-12-18",
             option_type="call",
             bid="1.20",
             ask="1.22",
         )
 
-        # Seed QQQ 500C 2026-11-20
+        # Seed QQQ 500C 2026-12-18
         self.add_instrument(
             instrument_id="opt-qqq-500c",
             chain_id="synthetic-qqq-chain",
             symbol="QQQ",
             strike="500.0000",
-            expiration="2026-11-20",
+            expiration="2026-12-18",
             option_type="call",
             bid="2.00",
             ask="2.02",
         )
 
-        # Seed AAPL 250C 2026-11-20
+        # Seed AAPL 250C 2026-12-18
         self.add_instrument(
             instrument_id="opt-aapl-250c",
             chain_id="synthetic-aapl-chain",
             symbol="AAPL",
             strike="250.0000",
-            expiration="2026-11-20",
+            expiration="2026-12-18",
             option_type="call",
             bid="1.50",
             ask="1.55",
         )
 
-        # Seed NVDA 140C 2026-11-20
+        # Seed NVDA 140C 2026-12-18
         self.add_instrument(
             instrument_id="opt-nvda-140c",
             chain_id="synthetic-nvda-chain",
             symbol="NVDA",
             strike="140.0000",
-            expiration="2026-11-20",
+            expiration="2026-12-18",
             option_type="call",
             bid="3.00",
             ask="3.05",

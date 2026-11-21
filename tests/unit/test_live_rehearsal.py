@@ -109,7 +109,6 @@ def test_rehearsal_logs_what_would_be_sent_and_never_writes(rig, tmp_path):
 @pytest.mark.parametrize('setup,reason', [
     (lambda fake, db: setattr(fake, 'ask', '2.21'), '10%'),
     (lambda fake, db: setattr(fake, 'buying_power', '100'), 'buying power'),
-    (lambda fake, db: setattr(fake, 'realized', '-800'), 'latched'),
     (lambda fake, db: setattr(fake, 'agentic_allowed', False), 'agentic_allowed'),
     (lambda fake, db: entry_control.pause_entries(db), 'kill switch'),
     (lambda fake, db: setattr(fake, 'approval_required', True), 'review'),
@@ -122,7 +121,7 @@ def test_rehearsal_reports_each_denial_without_side_effects(rig, setup, reason):
     assert result['status'] == 'DENIED' and reason in result['reason']
     assert 'would_send' not in result
     assert fake.place_count == 0 and not WRITE_TOOLS & set(fake.call_log)
-    assert journal_rows(journal) == (0, 0)  # even a P/L breach is not latched by a rehearsal
+    assert journal_rows(journal) == (0, 0)
 
 
 def test_rehearsal_denies_an_expired_contract_and_a_malformed_row(rig):

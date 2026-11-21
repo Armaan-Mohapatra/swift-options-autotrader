@@ -133,7 +133,7 @@ class LiveDispatcher:
             premium_per_signal_usd=settings.max_premium_per_signal_usd,
             total_exposure_usd=settings.max_total_exposure_usd,
             entry_max_age_seconds=settings.telegram_max_live_age_seconds,
-            daily_net_loss_usd=settings.max_daily_loss_usd,
+            daily_net_loss_usd=None,
         )
 
         # ONE canonical live broker. It shares the service's authenticated MCP client (single
@@ -147,7 +147,7 @@ class LiveDispatcher:
             account_number=self.account.account_number, writes_enabled=True,
             kill_switch=engine_kill_switch(self.db_path),
             signal_gate=entry_signal_gate(self.db_path),
-            clock=self.clock, loop=borrowed, loss_limit=settings.max_daily_loss_usd,
+            clock=self.clock, loop=borrowed, loss_limit=None,
         )
 
         # Preflight store
@@ -269,11 +269,9 @@ class LiveDispatcher:
             process_closes=False,
         )
 
-        # Broker-side housekeeping: 60-minute expiry backstop and broker-sourced
-        # realized-plus-unrealized P&L (latches the daily stop). Failure to read P&L is
-        # logged only; the write-boundary preflight independently denies entries without it.
-        housekeeping_failures = await asyncio.to_thread(self._broker_housekeeping)
-        self._record_daily_pnl_status(housekeeping_failures)
+        # Broker-side housekeeping: 60-minute expiry backstop and reconciliation.
+        # LIVE daily P&L is not an entry gate under the explicitly changed owner policy.
+        await asyncio.to_thread(self._broker_housekeeping)
         # Surface engine refusals, paper-engine alerts and Telegram connection state
         # in the live notification store every cycle (scan() is idempotent).
         self.notifications.scan(at=now)
@@ -288,6 +286,13 @@ class LiveDispatcher:
         # 2. Get pending Telegram updates and active positions
         matcher = SignalMatcher(self.db_path, self.channel_id)
         pending_entries, pending_followups, active = self._get_pending_and_active(now)
+        engine_paused = bool(self.engine.health().get("paused", False))
+        if pending_entries and (not entries_allowed or engine_paused):
+            for revision_id, _message_id, _alert in pending_entries:
+                self.notifications.record(
+                    "APPLICATION", "TELEGRAM_ENTRY_OBSERVED_PAUSED",
+                    source_key=f"revision:{revision_id}", severity="INFO", at=now,
+                )
         if not entries_allowed:
             pending_entries = []
 
@@ -404,7 +409,7 @@ class LiveDispatcher:
             allowed_signal_ids=allowed_signal_ids,
         )
 
-        # Dynamically calculate realized daily loss today
+        # Reporting telemetry remains separate from the LIVE entry decision.
         realized_loss = await asyncio.to_thread(
             self.engine.cumulative_realized_daily_loss, now
         )
@@ -415,12 +420,6 @@ class LiveDispatcher:
         if cycle.close_submissions:
             self.notifications.record("APPLICATION", "CLOSE_SUBMITTED", severity="INFO",
                                       source_key=f"live-dispatch:close:{now.isoformat()}")
-        if realized_loss >= self.settings.max_daily_loss_usd:
-            self.notifications.record("APPLICATION", "DAILY_LOSS_CEILING_REACHED",
-                                      source_key="live-dispatch", severity="CRITICAL")
-        else:
-            self.notifications.resolve("APPLICATION", "DAILY_LOSS_CEILING_REACHED",
-                                       source_key="live-dispatch")
 
         return LiveDispatchResult(
             status="LIVE_CYCLE_COMPLETED",
@@ -433,32 +432,19 @@ class LiveDispatcher:
             unresolved_exit_count=await asyncio.to_thread(self.engine.unresolved_exit_count),
         )
 
-    def _broker_housekeeping(self) -> dict[str, str]:
-        """Run housekeeping steps; return {step: fixed reason} for each failure."""
-        failures: dict[str, str] = {}
-        for step in (self.live_broker.review_expired_entries, self.live_broker.refresh_daily_risk):
+    def _broker_housekeeping(self) -> None:
+        """Run order-expiry housekeeping without daily P&L reads."""
+        for step in (self.live_broker.review_expired_entries,):
             try:
                 step()
             except Exception as exc:  # noqa: BLE001 - entries stay denied by the write preflight
                 # LiveSafetyError messages are fixed, non-secret reasons (e.g. "stale option quote").
                 reason = str(exc) if isinstance(exc, LiveSafetyError) else type(exc).__name__
-                failures[step.__name__] = reason
                 log.warning("Broker housekeeping step %s failed: %s", step.__name__, reason)
-        return failures
-
-    def _record_daily_pnl_status(self, failures: dict[str, str]) -> None:
-        """Surface why entries are denied for P/L, with an actionable code, until it recovers."""
-        reason = failures.get("refresh_daily_risk")
-        code = None
-        if reason is not None:
-            code = ("DAILY_PNL_OVERNIGHT_UNVERIFIED" if "overnight" in reason
-                    else "DAILY_PNL_UNVERIFIED")
-        for name in ("DAILY_PNL_UNVERIFIED", "DAILY_PNL_OVERNIGHT_UNVERIFIED"):
-            if name != code:
-                self.notifications.resolve("APPLICATION", name, source_key="live-dispatch")
-        if code is not None:
-            self.notifications.record("APPLICATION", code, source_key="live-dispatch",
-                                      severity="WARNING")
+        for obsolete in ("DAILY_PNL_UNVERIFIED", "DAILY_PNL_OVERNIGHT_UNVERIFIED"):
+            self.notifications.resolve(
+                "APPLICATION", obsolete, source_key="live-dispatch",
+            )
 
     def _entry_fresh(self, sent_at: str | None, now: datetime) -> bool:
         """Same 0..limit rule as the receipt and the engine; unparseable time fails closed."""

@@ -193,7 +193,10 @@ def test_real_worker_output_cannot_block_on_undrained_pipe(managed_root: Path) -
         sys.executable, "-c", command
     ], env={"PYTHONPATH": str(source_root)})
     assert child._proc.stdout is None
-    assert child.wait(timeout=8) == 0
+    # Windows CI hosts can be slower at synchronously redacting and rotating
+    # this deliberately large log stream; allow ample time while still bounding
+    # a blocked child process.
+    assert child.wait(timeout=30) == 0
     log_files = list((managed_root / "logs").glob("worker-noisy.jsonl*"))
     assert log_files and len(log_files) <= 4
     assert sum(path.stat().st_size for path in log_files) <= 8 * 1024 * 1024

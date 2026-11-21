@@ -86,13 +86,13 @@ def install(tmp_path: Path, monkeypatch):
 
 def _receipt_doc(account: str = ACCOUNT, **overrides) -> dict:
     doc = {
-        "version": 2,
+        "version": 3,
         "account_sha256": hashlib.sha256(account.encode()).hexdigest(),
         "issued_at": (NOW - timedelta(hours=1)).isoformat(),
         "expires_at": (NOW + timedelta(days=2)).isoformat(),
         "max_contracts_per_signal": 1,
         "max_premium_per_signal_usd": "999",
-        "max_daily_loss_usd": "750",
+        "daily_loss_policy": "NO_DAILY_LOSS_STOP",
     }
     doc.update(overrides)
     return doc
@@ -114,7 +114,6 @@ def test_good_candidate_passes_every_candidate_gate(install):
     {"unexpected_field": True},
     {"max_premium_per_signal_usd": 1000},
     {"max_premium_per_signal_usd": 0},
-    {"max_daily_loss_usd": 800},
     {"max_contracts_per_signal": 2},
     {"live_journal_path": "relative/journal.sqlite3"},
     {"live_journal_path": "C:/elsewhere/journal.sqlite3"},
@@ -272,7 +271,8 @@ def test_receipt_is_built_capped_to_the_reviewed_configuration(install):
     doc = activation.build_receipt(ACCOUNT, candidate, NOW, 7)
     assert doc["max_contracts_per_signal"] == 1
     assert doc["max_premium_per_signal_usd"] == "999"
-    assert doc["max_daily_loss_usd"] == "750"
+    assert doc["daily_loss_policy"] == "NO_DAILY_LOSS_STOP"
+    assert doc["version"] == 3
     assert doc["account_sha256"] == hashlib.sha256(ACCOUNT.encode()).hexdigest()
     assert datetime.fromisoformat(doc["expires_at"]) - datetime.fromisoformat(doc["issued_at"]) == timedelta(days=7)
 
@@ -417,7 +417,7 @@ def live_env(tmp_path: Path):
     settings = Settings(
         paper_only=False, live_enabled=True, allow_broker_writes=True,
         broker_backend="robinhood_mcp", robinhood_mcp_account="live-acc-123",
-        max_premium_per_signal_usd=Decimal("999"), max_daily_loss_usd=Decimal("750"),
+        max_premium_per_signal_usd=Decimal("999"), max_daily_loss_usd=None,
         db_path=db_path, live_journal_path=live_journal(root / "data" / "live_journal.sqlite3"),
         telegram_enabled=True, telegram_channel_id=-1001234000001, telegram_api_id=12345,
         telegram_api_hash="a" * 32, telegram_session_path=session,
@@ -434,7 +434,7 @@ def _approval(clock_now: datetime, *, active: bool) -> UnattendedApproval:
     return UnattendedApproval(
         account_sha256=hashlib.sha256(account.encode()).hexdigest(),
         issued_at=issued, expires_at=expires, max_contracts_per_signal=1,
-        max_premium_per_signal_usd=Decimal("999"), max_daily_loss_usd=Decimal("750"),
+        max_premium_per_signal_usd=Decimal("999"), daily_loss_policy="NO_DAILY_LOSS_STOP",
     )
 
 

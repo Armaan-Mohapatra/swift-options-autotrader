@@ -185,29 +185,29 @@ def test_identical_underlying_separate_strike_and_expiration_never_cross_close()
     data = fixture()
     data["catalog"].append({
         "symbol": "SPY", "right": "CALL", "strike": "681",
-        "expiration": "2026-11-20", "tick": "0.01",
+        "expiration": "2026-12-18", "tick": "0.01",
         "options_permission": True, "market_session_open": True,
         "buying_power_usd": "10000",
     })
     data["events"].insert(1, {
         "kind": "message", "at_utc": "2026-11-12T15:00:01Z", "message_id": 2,
-        "text": "SPY 681C 11/20 @ .90",
+        "text": "SPY 681C 12/18 @ .90",
     })
     data["events"][3]["message_id"] = 3
     data["events"][5]["message_id"] = 4
     data["events"].insert(3, {
         "kind": "quote", "at_utc": "2026-11-12T15:00:31Z", "quote_id": "different-expiry",
         "contract": {"symbol": "SPY", "right": "CALL", "strike": "681",
-                     "expiration": "2026-11-20"},
+                     "expiration": "2026-12-18"},
         "bid": "0.83", "ask": "0.85", "bid_size": 4, "ask_size": 4,
     })
     result = run(data)
     positions = {p["contract"]: p for p in result["report"]["positions"]}
     assert len(positions) == 2
     assert positions["SPY 2026-11-13 680C"]["open_contracts"] == 0
-    assert positions["SPY 2026-11-20 681C"]["filled_buy_contracts"] == 2
-    assert positions["SPY 2026-11-20 681C"]["filled_sell_contracts"] == 0
-    assert positions["SPY 2026-11-20 681C"]["open_contracts"] == 2
+    assert positions["SPY 2026-12-18 681C"]["filled_buy_contracts"] == 2
+    assert positions["SPY 2026-12-18 681C"]["filled_sell_contracts"] == 0
+    assert positions["SPY 2026-12-18 681C"]["open_contracts"] == 2
 
 
 def test_duplicate_exit_event_does_not_create_two_sell_orders():

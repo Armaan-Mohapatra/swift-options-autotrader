@@ -68,12 +68,12 @@ def test_reply_naming_a_different_ticker_is_review_not_close(db, catalog):  # no
 
 
 @pytest.mark.parametrize("text,symbol,category,premium", [
-    ("LOTTO: TSLA 450P 11/20 @ .45", "TSLA", "LOTTO", ".45"),
-    ("LOTTO - TSLA 450P 11/20 @ 0.45", "TSLA", "LOTTO", "0.45"),
-    ("BTO LOTTO SPY 680C 11/20 @ 1.20", "SPY", "LOTTO", "1.20"),
-    ("$NVDA 150c 11/20 @ $1.20", "NVDA", "STANDARD", "1.20"),
-    ("SPY 680C 11/20 @ $1.20 🚀🚀", "SPY", "STANDARD", "1.20"),
-    ("🔥 SPY 680C 11/20 @ 1.20", "SPY", "STANDARD", "1.20"),
+    ("LOTTO: TSLA 450P 12/18 @ .45", "TSLA", "LOTTO", ".45"),
+    ("LOTTO - TSLA 450P 12/18 @ 0.45", "TSLA", "LOTTO", "0.45"),
+    ("BTO LOTTO SPY 680C 12/18 @ 1.20", "SPY", "LOTTO", "1.20"),
+    ("$NVDA 150c 12/18 @ $1.20", "NVDA", "STANDARD", "1.20"),
+    ("SPY 680C 12/18 @ $1.20 🚀🚀", "SPY", "STANDARD", "1.20"),
+    ("🔥 SPY 680C 12/18 @ 1.20", "SPY", "STANDARD", "1.20"),
 ])
 def test_decorated_entries_parse_to_the_same_exact_terms(text, symbol, category, premium):
     from decimal import Decimal
@@ -84,9 +84,9 @@ def test_decorated_entries_parse_to_the_same_exact_terms(text, symbol, category,
 
 
 @pytest.mark.parametrize("text", [
-    "SPY 680C 11/20 @ 1🚀20", "SPY 680C 11/20 @ 1,20", "SPY 680C 11/20 @ 1.20-1.30",
-    "SPY 680C 11/20 @ 1.2O", "STO SPY 680P 11/20 @ 1.20",
-    "SPY 680C/685C 11/20 spread @ 1.20", "SPY 680C 11/20 @ -1.20", "SPY 680C 0DTE @ 1.20",
+    "SPY 680C 12/18 @ 1🚀20", "SPY 680C 12/18 @ 1,20", "SPY 680C 12/18 @ 1.20-1.30",
+    "SPY 680C 12/18 @ 1.2O", "STO SPY 680P 12/18 @ 1.20",
+    "SPY 680C/685C 12/18 spread @ 1.20", "SPY 680C 12/18 @ -1.20", "SPY 680C 0DTE @ 1.20",
 ])
 def test_malformed_or_unsupported_entries_never_become_orders(text):
     assert parse_message(text).intent is SignalIntent.REVIEW_REQUIRED
