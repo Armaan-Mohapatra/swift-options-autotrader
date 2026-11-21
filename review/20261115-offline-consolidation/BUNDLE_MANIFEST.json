@@ -1,0 +1,19 @@
+{
+  "README.md": "72e65ba12aceedb2af48e7247194189d4cbd0a1b791d0500761da944a7aa9e35",
+  "baseline/Swift-Integrated-188-Review.zip": "5041bdeae2279b084f2c3487eac037cc773e3c3bf33794af4f133449d7d5081e",
+  "baseline/Swift-Local-Completion.zip": "abeb523db8b2fd5e1c9259d00c10742b16d0872f8afc455fda9a9c8a4e246e6d",
+  "baseline/Swift-OneShot-Paper-Pilot.zip": "5c20075cb459b7f5c61863a3607e0483c0ecf47521e8091e1af590832a2d7b7d",
+  "docs/ACCEPTANCE_AND_ROLLBACK.md": "116ff8d6e32c1ca3ef4f3d592ea8a9c006a0e471f57b46a4349e3cb9aaeeca7c",
+  "docs/DEFECT_REGISTER.md": "3da5b6a2df7ee39c5dc243f03347fca8deb87570b301005fe4f5518f46a03d2d",
+  "docs/DEPENDENCIES.md": "65d58adde3a25030b1b432fe2070c10a5c7a9bfcd1c9527af533e20284fde44e",
+  "docs/Swift-SafeMode-Recovery-Audit.md": "6f09730b849e39b99b882473a56dde84dba4c2221661193d1324f389dd1046f9",
+  "evidence/paper_hardened.log": "5900ab83b6fcc3df1390932347a575df8a8d8063a0a0d1f9d3153fdf6e3a58ca",
+  "evidence/paper_original.log": "72ece2de2a36f3bfe04603e1baa731a4bf27e60143250ed9db85c48ba6da48ec",
+  "evidence/rehearsal.log": "04029ea5d67bde93e05112c3bd6b25be8e0c29fa14c01fdb314127390eaa7062",
+  "evidence/review_run.log": "3405fa643e93d9640e252b3605e0e74bcffcac2f9f6c64a0fe8e921411f05a04",
+  "operations/Swift-Operational-Rehearsal.py": "2e7d1cdd52c178cd2b1ac15bf336c39dc2a8c5a0e9384659c51db97674241586",
+  "operations/Swift-SafeMode-Recovery.ps1.review.txt": "99b0b86b7f29f68d124dfefbc574ba145613ea2be6f16866f221ffd6e697a6ff",
+  "paper-overlay/pilot.py": "409517d57a4783d786366e206bdcb58cd863f03f6ecdc2ae16af564ef321ddb3",
+  "paper-overlay/test_paper_hardening.py": "fb274b730f056f36b868f3cc95ec83d45144658896e2e658b962cc53581d82f8",
+  "verify_offline.py": "c58527994e8358438281b2339a0408f5ef4acfc4070caef5dbfbb57b63a745e5"
+}

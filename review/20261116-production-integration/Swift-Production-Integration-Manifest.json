@@ -1,0 +1,59 @@
+{
+  "base_commit": "aa2eb7a45b578f785759b7adfac738832fb69d87",
+  "branch": "feat/final-production-integration-20261116",
+  "scope": "production live integration and independent review",
+  "files": {
+    "src/swift_autotrader/app.py": {
+      "bytes": 15033,
+      "sha256": "9861859c52cbceb795a14cd75f6633c55c47aaf8c7e66bc40b596b35ab9ec0b8"
+    },
+    "src/swift_autotrader/broker/base.py": {
+      "bytes": 1569,
+      "sha256": "6ea32188c0b03a6cdcc47d8d4225c3a486a3832466ac6ae9b08eb26a86beade7"
+    },
+    "src/swift_autotrader/broker/robinhood_mcp.py": {
+      "bytes": 45040,
+      "sha256": "1a751a33055c1bf9b5cfc67a825d2cf6021199432ba03b54c9a79086b511ed2b"
+    },
+    "src/swift_autotrader/live_dispatch.py": {
+      "bytes": 9982,
+      "sha256": "159d8bda5d4296431e769075a495b2dad30d4c99dba05387363760db9efff4c4"
+    },
+    "src/swift_autotrader/live_service.py": {
+      "bytes": 8714,
+      "sha256": "d12d886dfe84f9325184d08d4c076b0261889a308161ebd035c6b89ff783ff47"
+    },
+    "src/swift_autotrader/orders/engine.py": {
+      "bytes": 42835,
+      "sha256": "f12de217d841f6c4522cdc430c7af8f1e7843d914921a0959ce70066ca044091"
+    },
+    "src/swift_autotrader/orders/state_machine.py": {
+      "bytes": 1916,
+      "sha256": "5de7aeb304c7ee9eaa87002dbc7208f7fbfd028a050fedb7a52ac83823f16b44"
+    },
+    "src/swift_autotrader/signals/lineage.py": {
+      "bytes": 21696,
+      "sha256": "1035f065eab6ece0bbedc5b0d7fe88721378057dfb9f449753a868fa5e8e7587"
+    },
+    "src/swift_autotrader/supervisor.py": {
+      "bytes": 11351,
+      "sha256": "8b33d007e1b66c16b5c524b9d5139d142e1978a134ff598d7d272dc45652ac5c"
+    },
+    "tests/unit/test_delayed_exits_and_risk.py": {
+      "bytes": 8893,
+      "sha256": "31ab19416e2ace5ce2fe984d1f6ea24d063a531314a360c7e1ca731fa6c92b27"
+    },
+    "tests/unit/test_live_service.py": {
+      "bytes": 3981,
+      "sha256": "272a08d5fc1fa1d50ba51911ae917d6b3f28864a28e584d66f3e258efa75d58c"
+    },
+    "tests/unit/test_mvp_review.py": {
+      "bytes": 2581,
+      "sha256": "f986eda0bbf2f254c21fdb1c66fcf02d44c7cb7f511cf1b673bc114840f7a304"
+    },
+    "tests/unit/test_robinhood_response_compatibility.py": {
+      "bytes": 10395,
+      "sha256": "5a9bb778decbb8beee5899790dd3e189111e227fb624d571f76be9b2909b7eeb"
+    }
+  }
+}

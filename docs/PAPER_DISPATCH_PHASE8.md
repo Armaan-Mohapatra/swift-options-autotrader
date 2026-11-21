@@ -1,0 +1,41 @@
+# Phase 8: supervised unattended PAPER execution — implementation contract
+
+**Status: source implementation / synthetic local tests only. No real accounts, CI certification, official release or Windows installation. Real brokerage writes always disabled.**
+
+The source retains Phase 0–7 interfaces and adds a **separate, opt-in** worker. Source event storage is the existing read-only Telegram listener. The PAPER dispatcher does not log in to Telegram or broker-trade; its broker adapter only calls official MCP **read-only** discovery, quote, account and order-review tools. Every submitted order goes to the existing SQLite `PaperBroker`, never Robinhood.
+
+## Actual execution graph
+
+1. Independently authorized read-only `TelethonSource` → bounded `TelegramListener` → durable `TelegramStore` in managed SQLite.
+2. `PaperDispatcher` selects **uninterpreted eligible new-option alerts** and contracts already involved in paper orders. Edits/duplicates/recovered history stay in the source lineage and are not treated as fresh entries. The parser still processes normal metadata and closing messages.
+3. `MCPReadOnlyOptionData` discovers official MCP read-only tools, checks an externally-eligible account and buying power, reads actual option-chain expiries, verifies an exact option instrument, receives dated quotes, and performs a **read-only** order review. It requires all the following to be explicitly present: positive minimum tick, standard 100 option multiplier, actual quoted bid/ask, displayed bid/ask sizes, exact contract ID, UTC observation time and market-hours status determined by the locally pinned exchange calendar. An absent or unrecognized field is a **block**, not a default.
+4. `SignalMatcher` uses `StaticInstrumentCatalog` built from that evidence. Missing data **does not call** `process_pending`, preserving source events for re-evaluation rather than irreversibly classifying good alerts against an empty catalog.
+5. `PaperOrderEngine` accepts **only** the concrete `PaperBroker`. It persists the initial Swift BUY limit, idempotent order ID, broker acceptance, 3,600-second cancellation deadline, fills, close requests and stop state. No market-driven price chasing, rebuys on ADD, or average-cost substitution. A partial Swift exit requests 100% of our actual matching fill quantity.
+6. On subsequent worker ticks, `PaperBroker.observe_quote` records quote-evidence-driven synthetic fills only when quote time is after order acceptance, crossed limit, and there is evidenced displayed size. The dispatcher records the quote and source-reference digest separately; Robinhood MCP observations are labeled **EXTERNAL_UNVERIFIED**, not a claim of exchange-certified prices.
+7. `PaperAnalytics`, `NotificationCenter` and the localhost read-only dashboard display confirmed paper ledger results and symbolic failures. The provider missing/down case continues the paper order **reconciliation/cancellation watchdog** with `allow_entries=False`; no source revision is consumed and no artificial quote/fill is produced.
+8. The existing Windows `PaperSupervisor`, when explicitly configured, starts the optional isolated `paper-dispatch-service` child with only the signed channel ID, risk settings and locally encrypted OAuth tokens. Telegram API hash/user-session credentials are stripped from this worker. The dashboard and listener are separate children. Existing single-host locks, daily online SQLite backups, restart limits and safety defaults remain.
+
+## Important operational distinctions
+
+- `PAPER_DISPATCH_ENABLED` defaults `false` and Windows `settings.json` sets `paper_dispatch_enabled=false` after install. `PAPER_MARKET_DATA_SOURCE` defaults `none`; only `robinhood_mcp_readonly` is accepted when enabled.
+- Runtime fails closed without current read-only OAuth tokens, an already-authorized Telegram session, positive **paper-only** explicit risk budgets and independent market data verification. An offline/disconnected source cannot start an unapproved BUY. Local interactive OAuth remains a separate **manual** action; unattended OAuth cannot launch a browser or enroll new credentials automatically. Tokens must use the same approved Windows user's DPAPI-protected managed `secrets/oauth.dpapi`, with callback bound to `127.0.0.1:8766`, distinct from the dashboard port 8765.
+- The exchange calendar is an independent dependency and produces a hard error if missing; it is not inferred from weekdays alone. Markets can close early and options can have special hours; live provider-specific verification is still required before forward paper performance can be claimed.
+- The 3,600-second condition is evaluated against `accepted_at_utc` exactly by the order engine. The supervisor normally polls every **five seconds**, so the first cancellation request may occur on the first poll **at or after** 3,600 seconds; it is not a guarantee of one-second exchange timing.
+- The official Robinhood help center lists option chains/instruments/quotes and review/order tools, but public help pages **do not publish all real response fields necessary for our depth/tick/multiplier gating**. In an authorized account, the current adapter may therefore remain blocked until the official server actually provides complete compatible data. Do not replace missing size with guessed liquidity, mark with quote mid, or submit a live Robinhood trade. If those fields are unsupported, this architecture requires a separately reviewed official **read-only** market-data source; none has been implemented or approved here.
+- Simulation remains synthetic and exchange queue-priority and real options fill probability are unverified. P&L is modeled from paper fills, not a user's realized brokerage gains. Missing fees must not be treated as zero.
+
+## Release ZIP and installation contract
+
+The exact-commit-bound build script `scripts/build_windows_package.py` selects only `.py`, `.sql`, PowerShell scripts, an allowlisted set of docs and checksum metadata. It does not include `.env`, `.session`, credentials, account IDs, raw paid messages, local SQLite files or repository history.
+
+`deployment/windows/setup.ps1` retains **no-change preview by default**. A separately approved deployment can use either a **clean exact Git checkout** (`-ExpectedCommit`) or an **approved PAPER release ZIP** (`-PackageZip`, `-PackageSha256`, and `-ExpectedCommit`). `extract_approved_package.py` verifies the independently supplied ZIP digest, commit, manifest and every file, rejecting path traversal, Windows device names, duplicates, oversized archives and unsafe file modes **before extraction**. This new PowerShell archive workflow has **not** been executed on Windows. A correctly formed ZIP is not a certified release until Windows CI and owner approval.
+
+The optional Python MCP/DPAPI/calendar dependency graph must be **transitively locked with artifact hashes for Windows CPython 3.11/3.13 and Linux as appropriate** before the `paper_dispatch_enabled` setting may be used on a real computer. It is **not** in the Phase 7 universal `uv.lock`. The base installer remains intentionally safe and will not silently download this unreviewed optional stack.
+
+## Source test evidence and unresolved validation
+
+Portable synthetic checks cover standard/LOTTO, original limit, non-options, ADD and NEW AVG, full exits, partial fills, no quote/no lookahead, 3,599/3,600-second boundary, outage preservation, non-actionable recovered events, exact-contract review isolation, ambiguous expiries, missing size/tick/multiplier, approval-requiring review, missing calendar dependency, inactive supervisor, DPAPI/manual-auth gates and tampered ZIP rejection.
+
+They **do not** establish Windows PowerShell 5.1 correctness, SDK v2.3.0 import/API behavior on an authenticated Windows host, real Robinhood response shape, verified market depth/liquidity, sustained 24/7 runtime, actual user risk settings, CPU/RAM/disk budgets or authentic Swift callout accuracy. **No official release, tag, installation, real account authentication or real trade is authorized.**
+
+Sources: [Robinhood Trading with your agent](https://robinhood.com/us/en/support/articles/trading-with-your-agent/) and [official MCP Python SDK OAuth and transport docs](https://github.com/modelcontextprotocol/python-sdk/blob/main/docs/client/oauth-clients.md).
