@@ -45,7 +45,7 @@ jobs:
           if (Test-Path -LiteralPath $root) { throw 'Dry run wrote to disk!' }
       - name: Install exact locked synthetic test dependencies
         run: |
-          python -m pip install uv==0.10.0
+          python -m pip install --no-deps --require-hashes --only-binary=:all: -r requirements/uv-bootstrap.txt
           uv sync --locked --extra dev --extra telegram
           uv run --locked --extra dev --extra telegram python -m pytest -q tests/unit/test_windows_runtime.py tests/unit/test_windows_status_notifications.py tests/unit/test_windows_package.py tests/integration/test_windows_deployment_contract.py tests/integration/test_paper_dispatch.py tests/integration/test_paper_service_guards.py tests/unit/test_mcp_paper_data.py tests/unit/test_release_archive_verification.py
       - name: Rehearse real installer in CI disposable folder, no scheduled task or credentials
