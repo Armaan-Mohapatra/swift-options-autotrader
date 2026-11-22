@@ -1,0 +1,40 @@
+name: "Vibe coding request"
+description: "Tell the AI what you want in everyday language"
+title: "[VIBE] "
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: "What kind of help?"
+      options:
+        - "Build a new feature"
+        - "Fix something broken"
+        - "Review a change"
+        - "Explain the project"
+        - "Improve tests or security"
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: "What do you want to happen?"
+      description: "Write it normally. You don't need technical terms."
+      placeholder: "When I click or run X, I want Y to happen..."
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: "How will you know it worked?"
+      placeholder: "For example: it no longer crashes when I restart it."
+  - type: textarea
+    id: limits
+    attributes:
+      label: "What must not change?"
+      value: "Do not change live trading, credentials, existing workers, risk controls, or private data. No deployment/merge without my approval."
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: "Safety"
+      options:
+        - label: "This could touch real-money trading, private data or production services; require separate review and approval"
