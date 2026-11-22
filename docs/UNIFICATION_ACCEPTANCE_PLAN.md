@@ -2,6 +2,12 @@
 
 Date: 2026-11-18. Engineering handoff only; not live authorization.
 
+> **Superseded in part (2026-11-20, Issue #42):** the owner retired the LIVE daily net-loss
+> stop. Every "$750 latch" statement below applies to PAPER only. LIVE runs with
+> `NO_DAILY_LOSS_STOP` under a v3 owner receipt. The $999 premium ceiling, one-contract
+> limit, exact alert limit, 10% ask guard, no trade-count or exposure cap, and kill switch
+> still apply. See `AGENTS.md` and `CLAUDE.md`.
+
 ## Verified GitHub lineage
 
 - Windows rollback/installed baseline: 86828420f2544f942b64d723910fa194af58f8d9.

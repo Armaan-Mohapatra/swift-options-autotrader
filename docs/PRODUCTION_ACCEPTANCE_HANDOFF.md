@@ -17,8 +17,8 @@ account numbers, Telegram source text, tokens, or DPAPI files to GitHub/ChatGPT.
 **Source-of-truth trading contract:** `AGENTS.md`, `risk_limits.py`, and
 the owner-supplied handoff. Options only, LOTTO eligible; one long contract per
 valid original ENTRY; no fixed open-trade/exposure cap other than buying power;
-premium <= $999; daily net-loss latch at $750 realized + unrealized (New York
-trading day); original alert limit exactly; 10% current-ask tolerance without
+premium <= $999; NO daily net-loss stop in LIVE (owner decision, Issue #42,
+`NO_DAILY_LOSS_STOP`; the $750 breaker is PAPER-only); original alert limit exactly; 10% current-ask tolerance without
 price chasing; no ADD/averaging; NEW AVG metadata only; matching partial/full
 exit callouts request full liquidation; 60-minute timeout from broker acceptance;
 dedicated agent-enabled MCP account only; fail-closed idempotency and killswitch.

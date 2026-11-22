@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # Swift AutoTrader: project guide for Claude Code
 
 Binding rules live in `AGENTS.md` and `docs/UNIFICATION_ACCEPTANCE_PLAN.md`. This file is the
@@ -12,8 +14,8 @@ short architecture and workflow summary. Nothing here authorizes a real order.
 - Entry limit is the EXACT alert price. A 10% ask deviation is a REJECTION guard inside
   `LiveBroker`, never an allowance to raise or chase the limit. `SLIPPAGE_TOLERANCE_PCT > 0` is
   refused at startup.
-- Premium ceiling $999 per entry including the multiplier. $750 New York-day realized-plus-
-  unrealized net-loss latch. It persists across restarts, and unknown P&L blocks new entries.
+- Premium ceiling $999 per entry including the multiplier. LIVE has no daily-loss latch and no P&L
+  entry gate (owner decision, Issue #42; `NO_DAILY_LOSS_STOP`). PAPER keeps its $750 breaker.
 - Unfilled entry remainder is cancelled 60 minutes after BROKER acceptance. Matching SOLD HALF /
   TRIM / SCALED OUT / RUNNERS OUT / ALL OUT callouts sell the full owned filled quantity of the same
   contract and signal ancestry, never manual inventory inferred from ticker.
@@ -26,8 +28,8 @@ short architecture and workflow summary. Nothing here authorizes a real order.
   (separate live journal), unknown-outcome reconciliation, loss latch, quote guard, kill switch and
   exact-contract exits. The read adapter `robinhood_mcp.py::RobinhoodMCPBroker` can never write.
 - ONE live service: `live_service.py` + `live_dispatch.py` (`app live-dispatch`). It adds the
-  PR #32 protections: unattended-approval receipt (v2), supervised acceptance scope, exit
-  interlocks, credential-path hardening, stop markers. `LiveBroker.submission_guard` re-checks the
+  PR #32 protections: unattended-approval receipt (v3 for LIVE; v2 is refused), supervised
+  acceptance scope, exit interlocks, credential-path hardening, stop markers. `LiveBroker.submission_guard` re-checks the
   scope at the write boundary. `paper-dispatch-service` refuses live mode.
 - One shared authenticated MCP client (single OAuth session); `LiveBroker` runs on that loop via
   `live_runtime.BorrowedMCPLoop`.

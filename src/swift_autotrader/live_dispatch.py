@@ -4,7 +4,8 @@ Coordinates the end-to-end pipeline:
 1. Ingests Telegram signals from the local SQLite store.
 2. Resolves option contracts, expirations, and live quotes from Robinhood.
 3. Keeps the exact original alert premium as the entry limit (no price chasing).
-4. Checks all risk and safety gates (buying power, $999 premium, $750 net-loss latch).
+4. Checks all risk and safety gates (buying power, $999 premium). LIVE has NO daily net-loss
+   stop (owner decision, Issue #42, NO_DAILY_LOSS_STOP); the $750 breaker is PAPER-only.
 5. Submits buy-to-open and sell-to-close orders through Robinhood Agentic MCP.
 6. Reconciles broker order states, fills, and cancellations.
 """

@@ -4,7 +4,7 @@
 
 - Universal `uv.lock` generated using `uv==0.10.0` in a GitHub Actions Ubuntu job, committed with exact versions, artifact HTTPS URLs, SHA-256 digests, and optional `dev` and `telegram` extras.
 - A locked install (`uv sync --locked --extra dev --extra telegram`) and audit script run on both Windows and Linux under Python 3.11 and 3.13. The audit rejects unknown dependencies, untrusted indices, non-PyPI host URLs, missing SHA-256 digests, and changed versions.
-- Build backend is `setuptools==84.2.1`, published 2026-10-20 under MIT; pinned directly in pyproject. `uv==0.10.0` is an exact CI resolver version, licensed MIT OR Apache-2.0.
+- Build backend is `setuptools==84.2.1`, published 2026-10-20 under MIT; pinned directly in pyproject. `uv==0.10.0` is an exact CI resolver version, licensed MIT OR Apache-2.0. As of 2026-11-21 (SEC-006) its bootstrap is hash-pinned: `requirements/uv-bootstrap.txt` lists the SHA-256 of all 18 PyPI artifacts and is installed with `--require-hashes --only-binary=:all:` in CI and `deployment/windows/setup.ps1`. See `docs/audits/20261121_DEPENDENCY_AUDIT.md` for the SBOM, the pip-audit result and the residual unverified items (PyPI attestations, second-source digest comparison).
 - `actions/checkout` and `actions/setup-python` GitHub Actions are SHA-pinned to Git tag commits verified through the upstream GitHub API. CI has read-only contents permission and does not persist checkout credentials.
 
 ## Locked Python package licenses

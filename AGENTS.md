@@ -101,7 +101,21 @@ The repository owner authorizes live trading of this system on the dedicated Rob
 - **Guards that stay mandatory and may not be removed or bypassed:**
   1. The **kill switch**: the engine's `paper_engine_control` pause / emergency stop blocks every new entry (`engine_kill_switch`); exits and cancels of owned orders stay allowed. Reset only with explicit manual approval.
   2. **Duplicate-order protection**: a durable journal written before any write, stable `ref_id` from the idempotency key, one entry per signal, reconciliation before any write, and **no automatic resubmit** after an uncertain outcome.
-  3. The **$750 daily net-loss breaker** (realized + unrealized, latched for the New York trading day) and the $999 premium ceiling and one-contract limit, all read from `risk_limits.py`. Buying power is the only other bound on trade count.
+  3. LIVE has **no daily net-loss breaker** (owner decision, Issue #42; a v3 receipt must acknowledge `NO_DAILY_LOSS_STOP`). LIVE losses may exceed $750 and existing positions are not closed by this policy. The $999 premium ceiling and one-contract limit, read from `risk_limits.py`, stay mandatory. Buying power is the only other bound on trade count. PAPER keeps its separate $750 daily circuit breaker.
   4. Entry expiry at 3,600 seconds from acceptance (cancel the unfilled remainder), dedicated-MCP-account pinning, tick/multiplier checks and the broker's own order review.
 - Live writes are controlled **only by the owner's local configuration** (`LIVE_ENABLED`, `ALLOW_BROKER_WRITES`, `PAPER_ONLY`); an agent must not flip them on its own, and the owner's explicit go-ahead is required for each change. CI and tests remain synthetic-only with fake brokers and never contact Robinhood.
 - Keep the existing safety rules that this section does not name: exact original limit (no price chasing), 100% matching exits, no adds, secrets out of Git and logs.
+
+## AI token-efficiency rules (additive, subordinate to the safety contract)
+
+These rules reduce wasted context, not required diligence. They never override the trading, security, testing, provenance, approval, or release gates elsewhere in this repository.
+
+- Follow only the current explicitly authorized scope. Do not start a new Goal, spawn agents, run autonomous continuations, or expand the task without specific approval.
+- Read mandatory authority documents when required, but avoid re-reading unchanged material within the same task. Use `docs/AI_HANDOFF.md` as a navigation aid, **not** as proof of current state or a replacement for the authoritative project files.
+- Locate relevant symbols/files first. Prefer scoped search and file ranges to dumping entire directories, histories, JSON payloads, logs, or test output.
+- Keep routine commentary and the final report concise. Preserve exact errors, exit codes, failure evidence, original logs, and relevant SHA/path references.
+- Run targeted validation first. Run the full regression/security/release matrix whenever the existing contract requires it, against the required exact SHA. Never skip a mandatory safety gate or relabel untested work as passed.
+- Do not rerun unchanged, already-verifiable checks merely to generate more output. Re-run after changes that invalidate that evidence.
+- Do not create paid GitHub Actions activity. Do not install hooks, local packages, proxies, model routers, cloud services, or token-saving tools unless separately authorized and verified in the actual execution environment.
+- Track efficiency by tokens per **correct, verified completed task**, including reruns. See `docs/AI_TOOLING_SETUP.md` for optional local installation and measurement; these repository files do not install software.
+- No optimizer may hide safety-critical diagnostics, change risk limits, change broker access, interfere with existing workers, or weaken operational controls.
